@@ -1,0 +1,17 @@
+# Backend requirements
+fastapi==0.115.12
+uvicorn[standard]==0.34.3
+sqlalchemy[asyncio]==2.0.41
+asyncpg==0.30.0
+alembic==1.16.1
+pydantic==2.11.3
+pydantic-settings==2.9.1
+python-jose[cryptography]==3.4.0
+argon2-cffi==23.1.0
+python-multipart==0.0.20
+slowapi==0.1.9
+httpx==0.28.1
+pytest==8.4.1
+pytest-asyncio==0.26.0
+pytest-cov==6.2.1
+psycopg2-binary>=2.9,<3
