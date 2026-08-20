@@ -1,10 +1,12 @@
-# fly.toml app configuration file generated for car-rental-system on 2026-08-20T18:44:40+01:00
+# fly.toml app configuration file generated for atelier-berlin-location-car on 2026-08-20T18:27:51Z
 #
 # See https://fly.io/docs/reference/configuration/ for information about how to use this file.
 #
 
-app = 'car-rental-system'
+app = 'atelier-berlin-location-car'
 primary_region = 'cdg'
+
+[build]
 
 [http_service]
   internal_port = 8080
@@ -16,5 +18,6 @@ primary_region = 'cdg'
 
 [[vm]]
   memory = '1gb'
+  cpu_kind = 'shared'
   cpus = 1
   memory_mb = 1024
