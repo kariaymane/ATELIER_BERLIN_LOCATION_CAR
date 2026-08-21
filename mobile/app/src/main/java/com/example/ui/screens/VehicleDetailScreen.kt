@@ -24,7 +24,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import coil.compose.AsyncImage
+import coil.compose.SubcomposeAsyncImage
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.foundation.layout.Box
 import com.example.data.model.Vehicle
 import com.example.data.model.VehicleStatus
 import com.example.ui.components.ExecutiveButton
@@ -173,26 +175,27 @@ fun VehicleDetailScreen(
                 shape = RoundedCornerShape(20.dp),
                 color = ExecutiveSurfaceVariant
             ) {
-                if (currentPhotoUrl.isNotBlank()) {
-                    AsyncImage(
-                        model = currentPhotoUrl,
-                        contentDescription = vehicle.fullName,
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier.fillMaxSize()
-                    )
-                } else {
-                    Box(
-                        modifier = Modifier.fillMaxSize(),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.DirectionsCar,
-                            contentDescription = null,
-                            tint = ExecutiveTextTertiary,
-                            modifier = Modifier.size(72.dp)
-                        )
+                SubcomposeAsyncImage(
+                    model = currentPhotoUrl.ifBlank { null },
+                    contentDescription = vehicle.fullName,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
+                    loading = {
+                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            CircularProgressIndicator(color = ExecutivePrimaryGreen)
+                        }
+                    },
+                    error = {
+                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = Icons.Default.DirectionsCar,
+                                contentDescription = null,
+                                tint = ExecutiveTextTertiary,
+                                modifier = Modifier.size(72.dp)
+                            )
+                        }
                     }
-                }
+                )
             }
 
             // Thumbnail Gallery if multiple photos exist
@@ -218,11 +221,26 @@ fun VehicleDetailScreen(
                             shape = RoundedCornerShape(10.dp),
                             color = ExecutiveSurfaceVariant
                         ) {
-                            AsyncImage(
-                                model = photoUrl,
+                            SubcomposeAsyncImage(
+                                model = photoUrl.ifBlank { null },
                                 contentDescription = "Photo ${index + 1}",
                                 contentScale = ContentScale.Crop,
-                                modifier = Modifier.fillMaxSize()
+                                modifier = Modifier.fillMaxSize(),
+                                loading = {
+                                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                        CircularProgressIndicator(modifier = Modifier.size(16.dp), color = ExecutivePrimaryGreen, strokeWidth = 2.dp)
+                                    }
+                                },
+                                error = {
+                                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                        Icon(
+                                            imageVector = Icons.Default.DirectionsCar,
+                                            contentDescription = null,
+                                            tint = ExecutiveTextTertiary,
+                                            modifier = Modifier.size(24.dp)
+                                        )
+                                    }
+                                }
                             )
                         }
                     }

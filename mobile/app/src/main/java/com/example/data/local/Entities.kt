@@ -25,9 +25,10 @@ data class VehicleEntity(
     val imagesList: String = "",
     val description: String,
     val vin: String,
-    val deposit: Int
+    val deposit: Int,
+    val version: Int = 1
 ) {
-    fun toDomain() = Vehicle(id, brand, modelName, plate, year, category, dailyRate, VehicleStatus.fromApi(status), mileage, fuelType, transmission, power, color, imageUrl, imagesList.split(",").filter { it.isNotBlank() }, description, vin, deposit)
+    fun toDomain() = Vehicle(id, brand, modelName, plate, year, category, dailyRate, VehicleStatus.fromApi(status), mileage, fuelType, transmission, power, color, imageUrl, imagesList.split(",").filter { it.isNotBlank() }, description, vin, deposit, version)
     companion object { fun fromDomain(v: Vehicle) = VehicleEntity(v.id, v.brand, v.modelName, v.plate, v.year, v.category, v.dailyRate, v.status.apiValue, v.mileage, v.fuelType, v.transmission, v.power, v.color, v.imageUrl, v.images.joinToString(","), v.description, v.vin, v.deposit) }
 }
 

@@ -23,7 +23,9 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import coil.compose.AsyncImage
+import coil.compose.SubcomposeAsyncImage
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.foundation.layout.Box
 import com.example.data.model.Reservation
 import com.example.data.model.ReservationStatus
 import com.example.ui.components.ExecutiveButton
@@ -191,21 +193,27 @@ fun ReservationDetailScreen(
                                 .background(ExecutiveSurfaceVariant),
                             contentAlignment = Alignment.Center
                         ) {
-                            if (reservation.vehicleImageUrl.isNotBlank()) {
-                                AsyncImage(
-                                    model = reservation.vehicleImageUrl,
-                                    contentDescription = reservation.vehicleName,
-                                    contentScale = ContentScale.Crop,
-                                    modifier = Modifier.fillMaxSize()
-                                )
-                            } else {
-                                Icon(
-                                    imageVector = Icons.Default.DirectionsCar,
-                                    contentDescription = null,
-                                    tint = ExecutiveTextTertiary,
-                                    modifier = Modifier.size(40.dp)
-                                )
-                            }
+                            SubcomposeAsyncImage(
+                                model = reservation.vehicleImageUrl.ifBlank { null },
+                                contentDescription = reservation.vehicleName,
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier.fillMaxSize(),
+                                loading = {
+                                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                        CircularProgressIndicator(modifier = Modifier.size(24.dp), color = ExecutivePrimaryGreen)
+                                    }
+                                },
+                                error = {
+                                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                        Icon(
+                                            imageVector = Icons.Default.DirectionsCar,
+                                            contentDescription = null,
+                                            tint = ExecutiveTextTertiary,
+                                            modifier = Modifier.size(40.dp)
+                                        )
+                                    }
+                                }
+                            )
                         }
 
                         Spacer(modifier = Modifier.width(16.dp))

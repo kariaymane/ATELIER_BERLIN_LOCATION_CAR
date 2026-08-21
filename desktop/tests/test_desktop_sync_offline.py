@@ -21,6 +21,8 @@ def test_offline_queue_enqueuing_and_idempotency(setup_db):
     device_id = "test-device-desk-01"
     user_id = str(uuid.uuid4())
     queue = SyncQueue(session, device_id, user_id)
+    session.query(SyncQueueItem).delete()
+    session.commit()
 
     v_id = str(uuid.uuid4())
     payload = {

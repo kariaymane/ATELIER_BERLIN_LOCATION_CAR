@@ -357,7 +357,9 @@ class VehicleFormDialog(QDialog):
             else:
                 # Try disk
                 clean_rel = url.replace("/static/uploads/vehicles/", "").replace("/static/uploads/", "").lstrip("/")
+                from app.config import DATA_DIR
                 for candidate in [
+                    DATA_DIR / clean_rel,
                     Path("/home/ayman/car-rental-system/backend/uploads/vehicles") / clean_rel,
                     Path("/home/ayman/car-rental-system/backend/uploads") / clean_rel,
                     Path(url),
@@ -444,19 +446,20 @@ class VehicleFormDialog(QDialog):
             if uploaded_url:
                 final_urls.append(uploaded_url)
             else:
-                # Offline fallback: copy to local backend uploads
+                # Offline fallback: queue for sync engine
                 try:
+                    from app.config import DATA_DIR
                     ext = Path(local_path).suffix
                     filename = f"{uuid.uuid4().hex}{ext}"
-                    dest = Path("/home/ayman/car-rental-system/backend/uploads/vehicles") / filename
+                    dest = DATA_DIR / "pending_uploads" / filename
                     dest.parent.mkdir(parents=True, exist_ok=True)
                     shutil.copy2(local_path, dest)
-                    final_urls.append(f"/static/uploads/vehicles/{filename}")
+                    final_urls.append(f"pending_uploads/{filename}")
                 except Exception:
                     pass
 
         # Store as comma-separated string
-        image_url = ", ".join(final_urls) if final_urls else ""
+        image_url = final_urls[0] if final_urls else ""
 
         data = {
             "registration": reg,

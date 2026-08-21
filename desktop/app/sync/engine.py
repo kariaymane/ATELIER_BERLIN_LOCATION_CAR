@@ -1,3 +1,4 @@
+import uuid
 """
 Sync engine — periodically syncs local changes to server.
 Handles offline-first queuing, retries, idempotency, and connection failures gracefully.
@@ -12,7 +13,6 @@ from app.sync.queue import SyncQueue
 from app.database import get_local_session
 from app.models.vehicle import LocalVehicle
 from app.models.vehicle_image import LocalVehicleImage
-import uuid
 from app.models.reservation import LocalReservation
 from app.models.maintenance import LocalMaintenance
 from app.config import API_BASE_URL, API_VERSION
@@ -365,7 +365,6 @@ class SyncEngine:
                         session.query(LocalMaintenancePart).filter_by(maintenance_id=eid).delete()
                         raw_parts = payload.get("parts", [])
                         for pt in raw_parts:
-                            import uuid
                             local_part = LocalMaintenancePart(
                                 id=str(pt.get("id", uuid.uuid4())),
                                 maintenance_id=eid,

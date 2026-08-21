@@ -67,7 +67,8 @@ data class VehicleDto(
     @Json(name = "status") val status: String = "AVAILABLE",
     @Json(name = "notes") val notes: String? = null,
     @Json(name = "image_url") val imageUrl: String? = null,
-    @Json(name = "images") val images: List<VehicleImageDto>? = null
+    @Json(name = "images") val images: List<VehicleImageDto>? = null,
+    @Json(name = "version") val version: Int = 1
 )
 
 @JsonClass(generateAdapter = true)

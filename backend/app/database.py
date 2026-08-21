@@ -32,7 +32,7 @@ def init_engine(database_url: str, echo: bool = False):
         max_overflow=10,
         pool_pre_ping=True,
         pool_recycle=3600,
-        connect_args={"ssl": False},
+        connect_args={"ssl": False} if "postgresql" in database_url else {},
     )
     _async_session_factory = async_sessionmaker(
         _engine, class_=AsyncSession, expire_on_commit=False

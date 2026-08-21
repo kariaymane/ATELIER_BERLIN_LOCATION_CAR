@@ -41,7 +41,7 @@ def upgrade() -> None:
             SELECT
                 gen_random_uuid(),
                 id,
-                trim(unnest(string_to_array(image_url, ','))),
+                trim(unnest(string_to_array(vehicles.image_url, ','))),
                 0,
                 now()
             FROM vehicles
