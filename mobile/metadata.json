@@ -1,0 +1,6 @@
+{
+  "name": "ATELIER BERLIN LOCATION CAR",
+  "description": "Application mobile de gestion et supervision de flotte automobile haut de gamme ATELIER BERLIN LOCATION CAR",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
