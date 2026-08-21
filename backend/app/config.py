@@ -40,7 +40,24 @@ class Settings(BaseSettings):
 
     @property
     def cors_origins_list(self) -> list[str]:
-        return [origin.strip() for origin in self.CORS_ORIGINS.split(",")]
+        if not self.CORS_ORIGINS:
+            return []
+        return [origin.strip() for origin in self.CORS_ORIGINS.split(",") if origin.strip()]
+
+    from pydantic import model_validator
+    @model_validator(mode="after")
+    def adjust_database_urls(self):
+        # SQLAlchemy 1.4+ deprecated postgres:// in favor of postgresql://
+        # For async, we need postgresql+asyncpg://
+        if self.DATABASE_URL:
+            if "postgres://" in self.DATABASE_URL or "postgresql://" in self.DATABASE_URL:
+                self.DATABASE_URL = self.DATABASE_URL.replace("postgres://", "postgresql+asyncpg://", 1)
+                self.DATABASE_URL = self.DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://", 1)
+                self.DATABASE_URL = self.DATABASE_URL.replace("?sslmode=disable", "")
+            
+            if not self.DATABASE_URL_SYNC:
+                self.DATABASE_URL_SYNC = self.DATABASE_URL.replace("+asyncpg", "")
+        return self
 
     model_config = {
         "env_file": ".env",

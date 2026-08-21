@@ -26,6 +26,8 @@ if not database_url:
     # Fallback: convert async URL to sync
     async_url = os.environ.get("DATABASE_URL", "")
     database_url = async_url.replace("postgresql+asyncpg://", "postgresql://")
+    if database_url.startswith("postgres://"):
+        database_url = database_url.replace("postgres://", "postgresql://", 1)
 
 if database_url:
     config.set_main_option("sqlalchemy.url", database_url)

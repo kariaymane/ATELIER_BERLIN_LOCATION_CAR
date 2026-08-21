@@ -28,7 +28,7 @@ android {
       val keystorePath = System.getenv("KEYSTORE_PATH") ?: "${rootDir}/my-upload-key.jks"
       storeFile = file(keystorePath)
       storePassword = System.getenv("STORE_PASSWORD")
-      keyAlias = "upload"
+      keyAlias = "androiddebugkey"
       keyPassword = System.getenv("KEY_PASSWORD")
     }
     create("debugConfig") {
@@ -47,7 +47,7 @@ android {
       isMinifyEnabled = false
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
       signingConfig = signingConfigs.getByName("release")
-      buildConfigField("String", "API_BASE_URL", "\"https://api.atelierberlin.com/api/v1/\"")
+      buildConfigField("String", "API_BASE_URL", "\"https://car-rental-system.fly.dev/api/v1/\"")
     }
     debug {
       signingConfig = signingConfigs.getByName("debugConfig")

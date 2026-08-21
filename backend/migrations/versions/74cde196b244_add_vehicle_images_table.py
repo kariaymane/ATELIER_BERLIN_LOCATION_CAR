@@ -33,17 +33,20 @@ def upgrade() -> None:
 
     # Data migration: copy existing vehicles.image_url to vehicle_images table
     connection = op.get_bind()
-    connection.execute(sa.text("""
-        INSERT INTO vehicle_images (id, vehicle_id, image_url, sort_order, created_at)
-        SELECT
-            gen_random_uuid(),
-            id,
-            trim(unnest(string_to_array(image_url, ','))),
-            0,
-            now()
-        FROM vehicles
-        WHERE image_url IS NOT NULL AND image_url != ''
-    """))
+    from sqlalchemy.engine.reflection import Inspector
+    inspector = Inspector.from_engine(connection)
+    if 'image_url' in [c['name'] for c in inspector.get_columns('vehicles')]:
+        connection.execute(sa.text("""
+            INSERT INTO vehicle_images (id, vehicle_id, image_url, sort_order, created_at)
+            SELECT
+                gen_random_uuid(),
+                id,
+                trim(unnest(string_to_array(image_url, ','))),
+                0,
+                now()
+            FROM vehicles
+            WHERE image_url IS NOT NULL AND image_url != ''
+        """))
     # ### end Alembic commands ###
 
 

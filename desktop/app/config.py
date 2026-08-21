@@ -34,7 +34,8 @@ DB_PATH = DATA_DIR / "car_rental_local.db"
 SQLITE_URL = f"sqlite:///{DB_PATH}"
 
 # API
-API_BASE_URL = os.environ.get("API_BASE_URL", "https://api.atelierberlin.com/api/v1")
+API_BASE_URL = os.environ.get("API_BASE_URL", "https://car-rental-system.fly.dev/api/v1")
+WS_URL = os.environ.get("WS_URL", "wss://car-rental-system.fly.dev/api/v1/ws")
 API_VERSION = "v1"
 
 # Sync

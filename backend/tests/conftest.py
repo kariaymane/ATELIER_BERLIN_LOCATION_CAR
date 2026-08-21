@@ -18,8 +18,10 @@ from sqlalchemy.ext.asyncio import (
 )
 
 # Set test environment before importing app
-os.environ["DATABASE_URL"] = "postgresql+asyncpg://rental_app:changeme_dev_only@localhost:5432/car_rental_test"
-os.environ["DATABASE_URL_SYNC"] = "postgresql://rental_app:changeme_dev_only@localhost:5432/car_rental_test"
+if "DATABASE_URL" not in os.environ:
+    os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///:memory:"
+if "DATABASE_URL_SYNC" not in os.environ:
+    os.environ["DATABASE_URL_SYNC"] = "sqlite:///:memory:"
 os.environ["JWT_SECRET"] = "test-jwt-secret-not-for-production"
 os.environ["JWT_REFRESH_SECRET"] = "test-jwt-refresh-secret-not-for-production"
 os.environ["ADMIN_PASSWORD"] = "TestAdmin123!"
