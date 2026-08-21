@@ -34,6 +34,9 @@ services:
       - HOST=0.0.0.0
       - PORT=8000
       - DEBUG=false
+      - ADMIN_EMAIL=${ADMIN_EMAIL}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD}
+      - ADMIN_FULLNAME=${ADMIN_FULLNAME}
     ports:
       - "8000:8000"
     volumes:

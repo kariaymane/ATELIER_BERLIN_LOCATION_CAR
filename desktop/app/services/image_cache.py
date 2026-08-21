@@ -35,7 +35,9 @@ class ImageCache(QObject):
 
         # 1. Check local disk storage first (fast offline resolution)
         clean_rel = img_path.replace("/static/uploads/vehicles/", "").replace("/static/uploads/", "").lstrip("/")
+        from app.config import DATA_DIR
         candidate_paths = [
+            DATA_DIR / clean_rel,
             Path("/home/ayman/car-rental-system/backend/uploads/vehicles") / clean_rel,
             Path("/home/ayman/car-rental-system/backend/uploads") / clean_rel,
             Path(img_path),

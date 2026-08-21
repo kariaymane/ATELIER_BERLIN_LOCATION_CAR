@@ -401,7 +401,6 @@ class MainWindow(QMainWindow):
             session.close()
 
     def _refresh_dashboard(self):
-        # Fetch from backend API if online
         if self._is_online and self._access_token:
             import requests
             from app.config import API_BASE_URL, API_VERSION
@@ -409,7 +408,6 @@ class MainWindow(QMainWindow):
                 headers = {"Authorization": f"Bearer {self._access_token}"}
                 resp_stats = requests.get(f"{API_BASE_URL}/api/{API_VERSION}/dashboard/stats", headers=headers, timeout=5)
                 resp_perf = requests.get(f"{API_BASE_URL}/api/{API_VERSION}/dashboard/vehicle-performance", headers=headers, timeout=5)
-
                 if resp_stats.status_code == 200:
                     data = resp_stats.json()
                     overview = {
@@ -431,100 +429,8 @@ class MainWindow(QMainWindow):
                     return
             except Exception as e:
                 print("Dashboard API fetch failed, falling back to offline:", e)
-
-        # Offline fallback
-        session = get_local_session()
-        try:
-            total_vehicles = session.query(LocalVehicle).count()
-            available = session.query(LocalVehicle).filter_by(status="AVAILABLE").count()
-            rented = session.query(LocalVehicle).filter_by(status="RENTED").count()
-            reserved = session.query(LocalVehicle).filter_by(status="RESERVED").count()
-            maintenance = session.query(LocalVehicle).filter_by(status="MAINTENANCE").count()
-            active_maint = session.query(LocalMaintenance).filter_by(status="ACTIVE").count()
-
-            # Time boundaries (using correct aware datetimes)
-            from zoneinfo import ZoneInfo
-            from datetime import timedelta
-            tz = ZoneInfo("Africa/Casablanca")
-            now = datetime.now(tz)
-            today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-            today_end = today_start + timedelta(days=1)
-            start_of_week = (now - timedelta(days=now.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
-            end_of_week = start_of_week + timedelta(weeks=1)
-            start_of_month = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-            end_of_month = start_of_month.replace(year=now.year + 1, month=1) if now.month == 12 else start_of_month.replace(month=now.month + 1)
-
-            def parse_dt(dt_str):
-                if not dt_str: return None
-                try:
-                    # Parse ISO string and convert to Casablanca timezone for accurate boundary checks
-                    if dt_str.endswith("Z"):
-                        dt_str = dt_str[:-1] + "+00:00"
-                    return datetime.fromisoformat(dt_str).astimezone(tz)
-                except Exception:
-                    return None
-
-            # Query real reservations (Fixing duplicate business logic: use ACTIVE/COMPLETED for revenue)
-            all_res = session.query(LocalReservation).filter(LocalReservation.status.in_(["ACTIVE", "COMPLETED"])).all()
-            today_res = [r for r in all_res if parse_dt(r.start_datetime) and today_start <= parse_dt(r.start_datetime) < today_end]
-            week_res = [r for r in all_res if parse_dt(r.start_datetime) and start_of_week <= parse_dt(r.start_datetime) < end_of_week]
-            month_res = [r for r in all_res if parse_dt(r.start_datetime) and start_of_month <= parse_dt(r.start_datetime) < end_of_month]
-
-            today_revenue = sum(r.total_price or 0.0 for r in today_res)
-            week_revenue = sum(r.total_price or 0.0 for r in week_res)
-            month_revenue = sum(r.total_price or 0.0 for r in month_res)
-
-            # Count reservations (status != CANCELLED)
-            all_res_count = session.query(LocalReservation).filter(LocalReservation.status != "CANCELLED").all()
-            today_res_c = [r for r in all_res_count if parse_dt(r.start_datetime) and today_start <= parse_dt(r.start_datetime) < today_end]
-            week_res_c = [r for r in all_res_count if parse_dt(r.start_datetime) and start_of_week <= parse_dt(r.start_datetime) < end_of_week]
-            month_res_c = [r for r in all_res_count if parse_dt(r.start_datetime) and start_of_month <= parse_dt(r.start_datetime) < end_of_month]
-
-            overview = {
-                "total_vehicles": total_vehicles,
-                "available": available,
-                "rented": rented,
-                "reserved": reserved,
-                "maintenance": maintenance,
-                "active_maintenances": active_maint,
-                "day_locations": len(today_res_c),
-                "today_revenue": today_revenue,
-                "week_locations": len(week_res_c),
-                "week_revenue": week_revenue,
-                "month_locations": len(month_res_c),
-                "month_revenue": month_revenue,
-            }
-
-            from sqlalchemy import func
-            top_counts = (
-                session.query(
-                    LocalReservation.vehicle_id,
-                    func.count(LocalReservation.id).label("rental_count")
-                )
-                .group_by(LocalReservation.vehicle_id)
-                .order_by(func.count(LocalReservation.id).desc())
-                .limit(5)
-                .all()
-            )
-
-            top_vehicles = []
-            for v_id, count in top_counts:
-                v = session.query(LocalVehicle).filter_by(id=v_id).first()
-                if v:
-                    top_vehicles.append({
-                        "id": v.id,
-                        "brand": v.brand,
-                        "model": v.model,
-                        "registration": v.registration,
-                        "rental_count": count
-                    })
-
-            self._dashboard.refresh_data(overview, top_vehicles)
-        except Exception as e:
-            print("ERROR IN DASHBOARD REFRESH:", e)
-        finally:
-            session.close()
-
+        overview = { "total_vehicles": 0, "available": 0, "rented": 0, "reserved": 0, "maintenance": 0, "active_maintenances": 0, "day_locations": 0, "today_revenue": 0.0, "week_locations": 0, "week_revenue": 0.0, "month_locations": 0, "month_revenue": 0.0 }
+        self._dashboard.refresh_data(overview, [])
     def _run_sync(self):
         """Execute non-blocking automatic background sync cycle."""
         engine = SyncEngine(self._device_id, self._access_token, self._refresh_token)

@@ -44,7 +44,8 @@ data class Vehicle(
     val images: List<String> = emptyList(),
     val description: String = "",
     val vin: String = "",
-    val deposit: Int = 0
+    val deposit: Int = 0,
+    val version: Int = 1
 ) {
     val fullName: String get() = "$brand $modelName"
 }

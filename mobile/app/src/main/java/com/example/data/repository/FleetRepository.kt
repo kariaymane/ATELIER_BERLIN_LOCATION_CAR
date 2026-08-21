@@ -10,6 +10,7 @@ import com.example.data.api.VehicleDto
 import com.example.data.api.WebSocketEventDto
 import com.example.data.local.*
 import com.example.data.model.*
+import com.example.util.ImageUrlResolver
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -42,29 +43,7 @@ class FleetRepository(
     val notificationsFlow: StateFlow<List<NotificationItem>> = _notifications.asStateFlow()
 
     private val _liveMetrics = MutableStateFlow<PerformanceMetrics?>(null)
-
-    val performanceMetricsFlow: Flow<PerformanceMetrics> = combine(
-        vehiclesFlow,
-        _liveMetrics
-    ) { vehicles, live ->
-        if (live != null) {
-            live
-        } else {
-            // Derived exclusively from synchronized local cache — no fake calculations
-            PerformanceMetrics(
-                todayBookings = 0,
-                weekBookings = 0,
-                monthBookings = 0,
-                todayRevenue = 0.0,
-                weekRevenue = 0.0,
-                monthRevenue = 0.0,
-                readyVehicles = vehicles.count { it.status == VehicleStatus.DISPONIBLE },
-                rentedVehicles = vehicles.count { it.status == VehicleStatus.EN_LOCATION },
-                reservedVehicles = vehicles.count { it.status == VehicleStatus.RESERVEE },
-                maintenanceVehicles = vehicles.count { it.status == VehicleStatus.MAINTENANCE }
-            )
-        }
-    }
+    val performanceMetricsFlow: Flow<PerformanceMetrics?> = _liveMetrics.asStateFlow()
 
     private val _syncStatus = MutableStateFlow(SyncStatus())
     val syncStatusFlow: StateFlow<SyncStatus> = _syncStatus.asStateFlow()
@@ -79,18 +58,12 @@ class FleetRepository(
     private fun mapVehicleDtoToDomain(dto: VehicleDto): Vehicle {
         val domainStatus = VehicleStatus.fromApi(dto.status)
 
-        fun resolveUrl(raw: String?): String {
-            val s = raw?.ifBlank { null } ?: return ""
-            return if (s.startsWith("http://") || s.startsWith("https://")) {
-                s
-            } else {
-                val root = apiClient.getRootUrl().trimEnd('/')
-                "$root/${s.trimStart('/')}"
-            }
-        }
-
-        val imgUrl = resolveUrl(dto.imageUrl)
-        val imagesList = dto.images?.mapNotNull { resolveUrl(it.imageUrl).takeIf { url -> url.isNotBlank() } } ?: emptyList()
+        val rootUrl = apiClient.getRootUrl()
+        val imgUrl = ImageUrlResolver.resolve(dto.imageUrl, rootUrl, dto.version)
+        val imagesList = dto.images?.mapNotNull { ImageUrlResolver.resolve(it.imageUrl, rootUrl, dto.version).takeIf { url -> url.isNotBlank() } } ?: emptyList()
+        android.util.Log.d("IMAGE_DEBUG", "API URL = ${dto.imageUrl}")
+        android.util.Log.d("IMAGE_DEBUG", "RESOLVED URL = $imgUrl")
+        android.util.Log.d("IMAGE_DEBUG", "COIL image request = $imgUrl")
 
         val domainCategory = when {
             dto.brand.contains("Range", ignoreCase = true) || dto.model.contains("SUV", ignoreCase = true) -> "SUV"
@@ -115,7 +88,8 @@ class FleetRepository(
             images = imagesList,
             description = dto.notes ?: "",
             vin = dto.vin ?: "",
-            deposit = (dto.dailyRentalPrice * 5).toInt()
+            deposit = (dto.dailyRentalPrice * 5).toInt(),
+            version = dto.version
         )
     }
 
