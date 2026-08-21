@@ -1,0 +1,161 @@
+# flyctl launch added from .gitignore
+# Python
+**/__pycache__
+**/*.py[cod]
+**/*$py.class
+**/*.so
+**/*.egg-info
+**/dist
+**/build
+**/eggs
+**/*.egg
+**/.Python
+**/env
+**/venv
+**/.venv
+
+# Environment
+**/.env
+**/*.env.local
+
+# IDE
+**/.vscode
+**/.idea
+**/*.swp
+**/*.swo
+**/*~
+
+# Database
+**/*.db
+**/*.sqlite
+**/*.sqlite3
+
+# OS
+**/.DS_Store
+**/Thumbs.db
+
+# Logs
+**/*.log
+**/logs
+
+# Coverage
+**/htmlcov
+**/.coverage
+**/.coverage.*
+**/coverage.xml
+
+# pytest
+**/.pytest_cache
+
+# Alembic
+**/migrations/versions/*.pyc
+
+# Uploads
+**/uploads
+
+# Android / Kotlin Mobile
+**/mobile/.gradle
+**/mobile/build
+**/mobile/app/build
+**/mobile/local.properties
+**/mobile/.idea
+**/mobile/*.iml
+**/mobile/app/*.iml
+
+# Docker
+**/docker/.env
+
+# Backups
+**/backups
+
+# Environment / secrets
+**/.env
+**/.env.*
+!**/.env.example
+**/backend/.env
+**/backend/.env.*
+
+# Python
+**/__pycache__
+**/*.pyc
+**/.venv
+**/venv
+
+# Build artifacts
+**/build
+**/dist
+**/*.egg-info
+
+# Android
+**/.gradle
+**/**/build
+**/*.jks
+**/*.keystore
+
+# Runtime data
+**/uploads
+**/*.db
+**/*.sqlite
+**/*.sqlite3
+
+# IDE
+**/.idea
+**/.vscode
+
+# OS
+**/.DS_Store
+
+# Local desktop identity
+**/desktop/app/data/device_id.txt
+
+# flyctl launch added from .pytest_cache/.gitignore
+# Created by pytest automatically.
+.pytest_cache/**/*
+
+# flyctl launch added from backend/.pytest_cache/.gitignore
+# Created by pytest automatically.
+backend/.pytest_cache/**/*
+
+# flyctl launch added from backend/venv/.gitignore
+# Created by venv; see https://docs.python.org/3/library/venv.html
+backend/venv/**/*
+
+# flyctl launch added from desktop/.pytest_cache/.gitignore
+# Created by pytest automatically.
+desktop/.pytest_cache/**/*
+
+# flyctl launch added from desktop/venv/.gitignore
+# Created by venv; see https://docs.python.org/3/library/venv.html
+desktop/venv/**/*
+
+# flyctl launch added from mobile/.gitignore
+mobile/**/*.iml
+mobile/**/.gradle
+mobile/**/.kotlin
+mobile/local.properties
+mobile/.idea/caches
+mobile/.idea/libraries
+mobile/.idea/modules.xml
+mobile/.idea/workspace.xml
+mobile/.idea/navEditor.xml
+mobile/.idea/assetWizardSettings.xml
+mobile/**/.DS_Store
+mobile/build
+mobile/captures
+mobile/**/.externalNativeBuild
+mobile/**/.cxx
+mobile/**/local.properties
+mobile/**/.env
+mobile/**/debug.keystore
+
+# flyctl launch added from mobile/.idea/.gitignore
+# Default ignored files
+mobile/.idea/shelf
+mobile/.idea/workspace.xml
+
+# flyctl launch added from mobile/app/.gitignore
+mobile/app/build
+
+# flyctl launch added from mobile/assets/.aistudio/.gitignore
+mobile/assets/.aistudio/**/*
+fly.toml

@@ -1,0 +1,48 @@
+version: "3.8"
+
+services:
+  # PostgreSQL — private network, not exposed to internet
+  postgres:
+    image: postgres:16-alpine
+    container_name: car_rental_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: car_rental
+      POSTGRES_USER: rental_app
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme_dev_only}
+    ports:
+      - "5432:5432"  # Remove in production — use private network only
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rental_app -d car_rental"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - backend_net
+
+  # FastAPI backend
+  backend:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.backend
+    container_name: car_rental_api
+    restart: unless-stopped
+    env_file:
+      - ../.env
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - backend_net
+
+volumes:
+  pgdata:
+
+networks:
+  backend_net:
+    driver: bridge

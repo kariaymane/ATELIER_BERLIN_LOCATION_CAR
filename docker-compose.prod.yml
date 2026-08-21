@@ -1,0 +1,53 @@
+version: "3.8"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: car_rental_db_prod
+    restart: always
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-car_rental}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - pgdata_prod:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB:-car_rental}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - backend_net_prod
+
+  backend:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.backend
+    container_name: car_rental_api_prod
+    restart: always
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-car_rental}
+      - DATABASE_URL_SYNC=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-car_rental}
+      - JWT_SECRET=${JWT_SECRET}
+      - JWT_REFRESH_SECRET=${JWT_REFRESH_SECRET}
+      - CORS_ORIGINS=${CORS_ORIGINS}
+      - HOST=0.0.0.0
+      - PORT=8000
+      - DEBUG=false
+    ports:
+      - "8000:8000"
+    volumes:
+      - vehicle_uploads_prod:/app/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - backend_net_prod
+
+volumes:
+  pgdata_prod:
+  vehicle_uploads_prod:
+
+networks:
+  backend_net_prod:
+    driver: bridge

@@ -1,0 +1,24 @@
+name: Windows Desktop Release
+
+on:
+  push:
+    tags: [ "v*" ]
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Build Windows Executable
+        run: |
+          cd packaging/windows
+          .\build_windows.ps1
+      - name: Upload EXE
+        uses: actions/upload-artifact@v4
+        with:
+          name: Windows-Executable
+          path: packaging/windows/dist/ATELIER_BERLIN_LOCATION_CAR/
