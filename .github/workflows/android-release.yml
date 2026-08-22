@@ -19,7 +19,6 @@ jobs:
         run: chmod +x mobile/gradlew
       - name: Build Release APK and AAB
         env:
-          KEYSTORE_PATH: ${{ runner.temp }}/keystore.jks
           STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
@@ -30,7 +29,7 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: app-release-apk
+          name: atelier-berlin-location-car-android-release
           path: mobile/app/build/outputs/apk/release/*.apk
       - name: Upload AAB
         uses: actions/upload-artifact@v4

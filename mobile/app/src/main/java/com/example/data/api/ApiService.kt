@@ -5,7 +5,7 @@ import retrofit2.http.*
 
 interface ApiService {
 
-    @GET("sync/health")
+    @GET("/health")
     suspend fun getHealth(): Response<SyncHealthResponseDto>
 
     @GET("sync/bootstrap")

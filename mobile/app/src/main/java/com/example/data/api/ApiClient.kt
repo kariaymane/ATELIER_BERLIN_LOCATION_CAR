@@ -106,6 +106,7 @@ class ApiClient(private val tokenManager: TokenManager) {
     private var currentService: ApiService = createService(currentBaseUrl)
 
     private fun createService(baseUrl: String): ApiService {
+        Log.i("API", "[API] Base URL = $baseUrl")
         return Retrofit.Builder()
             .baseUrl(baseUrl)
             .client(okHttpClient)

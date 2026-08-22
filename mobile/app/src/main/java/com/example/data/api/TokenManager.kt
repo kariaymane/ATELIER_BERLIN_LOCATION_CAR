@@ -16,6 +16,22 @@ class TokenManager(context: Context) {
     private val _baseUrlFlow = MutableStateFlow(prefs.getString(KEY_BASE_URL, DEFAULT_BASE_URL) ?: DEFAULT_BASE_URL)
     val baseUrlFlow: StateFlow<String> = _baseUrlFlow.asStateFlow()
 
+    init {
+        val current = prefs.getString(KEY_BASE_URL, null)
+        if (current != null) {
+            val isEmulatorUrl = current.contains("10.0.2.2") || current.contains("127.0.0.1") || current.contains("localhost")
+            val isLanUrl = current.contains("192.168") || current.contains("10.0.0") || current.startsWith("http://")
+            
+            val shouldReset = isEmulatorUrl || (!BuildConfig.DEBUG && isLanUrl)
+            
+            if (shouldReset) {
+                prefs.edit().putString(KEY_BASE_URL, DEFAULT_BASE_URL).apply()
+                _baseUrlFlow.value = DEFAULT_BASE_URL
+            }
+        }
+    }
+
+
     fun getToken(): String? = prefs.getString(KEY_TOKEN, null)
     fun getRefreshToken(): String? = prefs.getString(KEY_REFRESH_TOKEN, null)
 
