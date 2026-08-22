@@ -400,7 +400,7 @@ class FleetRepository(
 
     suspend fun refreshVehicles(): Result<List<Vehicle>> = withContext(Dispatchers.IO) {
         try {
-            val response = apiClient.getService().getVehicles(page = 1, pageSize = 500)
+            val response = apiClient.getService().getVehicles(page = 1, pageSize = 100)
             if (response.isSuccessful && response.body() != null) {
                 val list = response.body()!!.vehicles.map { mapVehicleDtoToDomain(it) }
                 val entities = list.map { VehicleEntity.fromDomain(it) }
@@ -443,7 +443,7 @@ class FleetRepository(
 
     suspend fun refreshRentals(): Result<List<Reservation>> = withContext(Dispatchers.IO) {
         try {
-            val response = apiClient.getService().getRentals(page = 1, pageSize = 500)
+            val response = apiClient.getService().getRentals(page = 1, pageSize = 100)
             if (response.isSuccessful && response.body() != null) {
                 val list = response.body()!!.rentals.map { mapRentalDtoToDomain(it) }
                 val entities = list.map { ReservationEntity.fromDomain(it) }
@@ -462,7 +462,7 @@ class FleetRepository(
 
     suspend fun refreshMaintenances(): Result<List<MaintenanceTicket>> = withContext(Dispatchers.IO) {
         try {
-            val response = apiClient.getService().getMaintenances(page = 1, size = 500)
+            val response = apiClient.getService().getMaintenances(page = 1, size = 100)
             if (response.isSuccessful && response.body() != null) {
                 val list = response.body()!!.items.map { mapMaintenanceDtoToDomain(it) }
                 val entities = list.map { MaintenanceEntity.fromDomain(it) }
