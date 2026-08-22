@@ -28,7 +28,7 @@ android {
       val keystorePath = System.getenv("KEYSTORE_PATH") ?: "${rootDir}/my-upload-key.jks"
       storeFile = file(keystorePath)
       storePassword = System.getenv("STORE_PASSWORD")
-      keyAlias = "androiddebugkey"
+      keyAlias = System.getenv("KEY_ALIAS") ?: "androiddebugkey"
       keyPassword = System.getenv("KEY_PASSWORD")
     }
     create("debugConfig") {
@@ -36,7 +36,7 @@ android {
       val standardKeystore = file("$userHome/.android/debug.keystore")
       storeFile = if (standardKeystore.exists()) standardKeystore else file("${rootDir}/debug.keystore")
       storePassword = "android"
-      keyAlias = "androiddebugkey"
+      keyAlias = System.getenv("KEY_ALIAS") ?: "androiddebugkey"
       keyPassword = "android"
     }
   }
