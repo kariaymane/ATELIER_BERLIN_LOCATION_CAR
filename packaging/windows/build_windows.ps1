@@ -13,8 +13,8 @@ pip install pyinstaller
 Write-Host "Building ATELIER BERLIN LOCATION CAR executable..."
 # Include PySide6 and standard dependencies
 pyinstaller --noconsole --name "ATELIER_BERLIN_LOCATION_CAR" `
-    --icon="..\..\desktop\assets\logo.png" `
-    --add-data="..\..\desktop\assets;assets" `
+    --icon="..\..\desktop\app\assets\images\logo_transparent_officiel.png" `
+    --add-data="..\..\desktop\app\assets;app\assets" `
     --add-data="..\..\shared;shared" `
     --hidden-import="PySide6.QtWebSockets" `
     --hidden-import="PySide6.QtNetwork" `
