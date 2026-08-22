@@ -47,7 +47,7 @@ android {
       isMinifyEnabled = false
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
       signingConfig = signingConfigs.getByName("release")
-      buildConfigField("String", "API_BASE_URL", "\"http://10.0.2.2:8000/api/v1/\"")
+      buildConfigField("String", "API_BASE_URL", "\"https://car-rental-system.fly.dev/api/v1/\"")
     }
     debug {
       signingConfig = signingConfigs.getByName("debugConfig")
