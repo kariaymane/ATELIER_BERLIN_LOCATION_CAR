@@ -70,7 +70,7 @@ DB_PATH = DATA_DIR / "car_rental_local.db"
 SQLITE_URL = f"sqlite:///{DB_PATH}"
 
 # API
-_raw_api_url = os.environ.get("API_BASE_URL", "http://127.0.0.1:8000").rstrip("/")
+_raw_api_url = os.environ.get("API_BASE_URL", "https://car-rental-system.fly.dev").rstrip("/")
 if _raw_api_url.endswith("/api/v1"):
     _raw_api_url = _raw_api_url[:-7]
 API_BASE_URL = _raw_api_url
