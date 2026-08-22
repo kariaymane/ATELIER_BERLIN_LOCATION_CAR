@@ -8,7 +8,7 @@ python -m venv venv
 Write-Host "Installing dependencies..."
 pip install --upgrade pip
 pip install -r ..\..\desktop\requirements.txt
-pip install pyinstaller
+pip install pyinstaller Pillow
 
 Write-Host "Building ATELIER BERLIN LOCATION CAR executable..."
 # Include PySide6 and standard dependencies
