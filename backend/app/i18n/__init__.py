@@ -46,6 +46,12 @@ FR: dict[str, str] = {
     "reservation.cancelled": "Réservation annulée avec succès.",
     "reservation.invalid_dates": "Les dates de réservation sont invalides.",
 
+    # Clients
+    "client.not_found": "Client non trouvé.",
+    "client.created": "Client créé avec succès.",
+    "client.updated": "Client mis à jour avec succès.",
+    "client.deleted": "Client supprimé avec succès.",
+
     # Sync
     "sync.conflict": "Conflit de synchronisation détecté.",
     "sync.push_success": "Synchronisation envoyée avec succès.",
@@ -97,6 +103,12 @@ AR: dict[str, str] = {
     "reservation.created": "تم إنشاء الحجز بنجاح.",
     "reservation.cancelled": "تم إلغاء الحجز بنجاح.",
     "reservation.invalid_dates": "تواريخ الحجز غير صالحة.",
+
+    # Clients
+    "client.not_found": "العميل غير موجود.",
+    "client.created": "تم إنشاء العميل بنجاح.",
+    "client.updated": "تم تحديث العميل بنجاح.",
+    "client.deleted": "تم حذف العميل بنجاح.",
 
     # Sync
     "sync.conflict": "تم اكتشاف تعارض في المزامنة.",

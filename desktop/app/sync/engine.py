@@ -15,6 +15,8 @@ from app.models.vehicle import LocalVehicle
 from app.models.vehicle_image import LocalVehicleImage
 from app.models.reservation import LocalReservation
 from app.models.maintenance import LocalMaintenance
+from app.models.client import LocalClient
+from app.sync.uploads import PendingUploadProcessor
 from app.config import API_BASE_URL, API_VERSION
 
 logger = logging.getLogger(__name__)
@@ -30,6 +32,7 @@ class SyncEngine:
         self._base_url = (base_url or API_BASE_URL).rstrip("/")
         self._is_online = False
         self._last_sync: Optional[datetime] = None
+        self._upload_processor = PendingUploadProcessor(self)
 
     def set_token(self, token: str, refresh_token: str = None):
         """Update the access token and optional refresh token."""
@@ -103,6 +106,10 @@ class SyncEngine:
                         m = session.query(LocalMaintenance).filter_by(id=item.entity_id).first()
                         if m:
                             version = m.version
+                    elif item.entity_type == "client":
+                        c = session.query(LocalClient).filter_by(id=item.entity_id).first()
+                        if c:
+                            version = c.version
                 except Exception as e:
                     logger.debug("Version lookup note: %s", e)
 
@@ -294,6 +301,9 @@ class SyncEngine:
                         r.vehicle_id = payload.get("vehicle_id", getattr(r, 'vehicle_id', ""))
                         r.customer_name = payload.get("customer_name", getattr(r, 'customer_name', ""))
                         r.customer_phone = payload.get("customer_phone", getattr(r, 'customer_phone', None))
+                        r.customer_email = payload.get("customer_email", getattr(r, 'customer_email', None))
+                        r.identity_card_image = payload.get("identity_card_image", getattr(r, 'identity_card_image', None))
+                        r.driving_license_image = payload.get("driving_license_image", getattr(r, 'driving_license_image', None))
                         r.start_datetime = payload.get("start_datetime", getattr(r, 'start_datetime', now_iso))
                         r.end_datetime = payload.get("end_datetime", getattr(r, 'end_datetime', now_iso))
                         r.daily_price = payload.get("daily_price", getattr(r, 'daily_price', 0.0))
@@ -306,6 +316,31 @@ class SyncEngine:
                         r.updated_at = now_iso
                         if not hasattr(r, 'created_at') or not r.created_at:
                             r.created_at = now_iso
+                elif etype == "client":
+                    c = session.query(LocalClient).filter_by(id=eid).first()
+                    if op == "DELETE":
+                        if c:
+                            session.delete(c)
+                    elif op in ("CREATE", "UPDATE"):
+                        now_iso = datetime.now(timezone.utc).isoformat()
+                        if not c:
+                            c = LocalClient(id=eid)
+                            session.add(c)
+                        c.first_name = payload.get("first_name", getattr(c, 'first_name', ""))
+                        c.last_name = payload.get("last_name", getattr(c, 'last_name', ""))
+                        c.phone = payload.get("phone", getattr(c, 'phone', None))
+                        c.email = payload.get("email", getattr(c, 'email', None))
+                        c.cin_number = payload.get("cin_number", getattr(c, 'cin_number', None))
+                        c.license_number = payload.get("license_number", getattr(c, 'license_number', None))
+                        c.photo_url = payload.get("photo_url", getattr(c, 'photo_url', None))
+                        c.identity_card_image = payload.get("identity_card_image", getattr(c, 'identity_card_image', None))
+                        c.driving_license_image = payload.get("driving_license_image", getattr(c, 'driving_license_image', None))
+                        c.notes = payload.get("notes", getattr(c, 'notes', None))
+                        c.status = payload.get("status", getattr(c, 'status', "ACTIVE"))
+                        c.version = ver
+                        c.updated_at = now_iso
+                        if not hasattr(c, 'created_at') or not c.created_at:
+                            c.created_at = now_iso
 
                 elif etype == "maintenance":
                     from app.models.maintenance import LocalMaintenancePart
@@ -393,11 +428,29 @@ class SyncEngine:
         """Alias for pull_changes."""
         return await self.pull_changes()
 
+    async def process_pending_uploads(self) -> dict:
+        """Upload offline-created images/documents once connectivity returns.
+
+        Called at the start of each successful sync cycle. Uses the same
+        authenticated API client flow (with token refresh) as push/pull.
+        """
+        if not self._access_token:
+            return {"status": "offline", "message": "Not authenticated"}
+        try:
+            result = await self._upload_processor.process_due()
+            self._is_online = True
+            return {"status": "ok", **result}
+        except Exception as e:
+            logger.error("Pending upload processing failed: %s", e)
+            return {"status": "error", "message": str(e)}
+
     async def sync(self) -> dict:
-        """Full sync cycle: push then pull."""
+        """Full sync cycle: uploads, then push, then pull."""
+        upload_result = await self.process_pending_uploads()
         push_result = await self.push_changes()
         pull_result = await self.pull_changes()
         return {
+            "uploads": upload_result,
             "push": push_result,
             "pull": pull_result,
             "is_online": self._is_online,

@@ -66,6 +66,14 @@ docker/.env
 
 # Backups
 backups/
+fly.toml.backup-*
+
+# Generated desktop build artifacts
+ATELIER_BERLIN_LOCATION_CAR_WINDOWS*/
+ATELIER_BERLIN_LOCATION_CAR_WINDOWS.zip
+
+# UI inspection dumps
+window_dump.xml
 
 # Environment / secrets
 .env

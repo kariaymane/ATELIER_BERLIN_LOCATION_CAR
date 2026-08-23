@@ -22,7 +22,7 @@ class TokenManager(context: Context) {
             val isEmulatorUrl = current.contains("10.0.2.2") || current.contains("127.0.0.1") || current.contains("localhost")
             val isLanUrl = current.contains("192.168") || current.contains("10.0.0") || current.startsWith("http://")
             
-            val shouldReset = isEmulatorUrl || (!BuildConfig.DEBUG && isLanUrl)
+            val shouldReset = isEmulatorUrl || isLanUrl || current.contains("ngrok")
             
             if (shouldReset) {
                 prefs.edit().putString(KEY_BASE_URL, DEFAULT_BASE_URL).apply()
@@ -78,8 +78,8 @@ class TokenManager(context: Context) {
     }
 
     fun getUserId(): String? = prefs.getString(KEY_USER_ID, null)
-    fun getUserEmail(): String = prefs.getString(KEY_USER_EMAIL, "admin@carrental.com") ?: "admin@carrental.com"
-    fun getUserName(): String = prefs.getString(KEY_USER_NAME, "Administrateur") ?: "Administrateur"
+    fun getUserEmail(): String = prefs.getString(KEY_USER_EMAIL, "BERLINECAR@GMAIL.COM") ?: "BERLINECAR@GMAIL.COM"
+    fun getUserName(): String = prefs.getString(KEY_USER_NAME, "Berlin Car Admin") ?: "Berlin Car Admin"
     fun getUserRole(): String = prefs.getString(KEY_USER_ROLE, "ADMIN") ?: "ADMIN"
 
     fun clearAll() {

@@ -255,22 +255,22 @@ class DashboardWidget(QWidget):
         if period_data == "today":
             self._current_period = "today"
             rev = self._overview_data.get("today_revenue", 0.0)
-            locs = self._overview_data.get("today_rentals", 0)
+            locs = self._overview_data.get("today_rentals", self._overview_data.get("day_locations", 0))
             self._card_day.set_title(t("dashboard.today_reservations"))
         elif period_data == "week":
             self._current_period = "week"
             rev = self._overview_data.get("week_revenue", 0.0)
-            locs = self._overview_data.get("week_rentals", 0)
+            locs = self._overview_data.get("week_rentals", self._overview_data.get("week_locations", 0))
             self._card_day.set_title(t("dashboard.week_reservations"))
         elif period_data == "month":
             self._current_period = "month"
             rev = self._overview_data.get("month_revenue", 0.0)
-            locs = self._overview_data.get("month_rentals", 0)
+            locs = self._overview_data.get("month_rentals", self._overview_data.get("month_locations", 0))
             self._card_day.set_title(t("dashboard.month_reservations"))
         else:
             self._current_period = "week"
             rev = self._overview_data.get("today_revenue", 0.0)
-            locs = 0
+            locs = self._overview_data.get("today_rentals", self._overview_data.get("day_locations", 0))
             self._card_day.set_title(t("dashboard.reservations_default"))
 
         try:

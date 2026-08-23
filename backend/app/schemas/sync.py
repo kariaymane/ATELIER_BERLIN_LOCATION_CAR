@@ -8,6 +8,7 @@ from app.schemas.vehicle import VehicleResponse
 from app.schemas.rental import RentalResponse
 from app.schemas.maintenance import MaintenanceResponse
 from app.schemas.notification import NotificationResponse
+from app.schemas.client import ClientResponse
 
 
 class SyncPushItem(BaseModel):
@@ -70,5 +71,6 @@ class SyncBootstrapResponse(BaseModel):
     api_version: str = "1.0.0"
     vehicles: list[VehicleResponse] = Field(default_factory=list)
     rentals: list[RentalResponse] = Field(default_factory=list)
+    clients: list[ClientResponse] = Field(default_factory=list)
     maintenance: list[MaintenanceResponse] = Field(default_factory=list)
     notifications: list[NotificationResponse] = Field(default_factory=list)

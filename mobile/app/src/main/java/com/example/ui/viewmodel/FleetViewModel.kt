@@ -29,7 +29,8 @@ class FleetViewModel(
     private val authRepository: AuthRepository,
     private val fleetRepository: FleetRepository,
     private val realtimeSyncManager: RealtimeSyncManager? = null,
-    private val themePreferences: com.example.data.local.ThemePreferences? = null
+    private val themePreferences: com.example.data.local.ThemePreferences? = null,
+    private val languagePreferences: com.example.data.local.LanguagePreferences? = null
 ) : ViewModel() {
 
     val userSession: StateFlow<UserSession?> = authRepository.currentUserSession
@@ -68,6 +69,14 @@ class FleetViewModel(
     fun setTheme(theme: com.example.data.local.AppTheme) {
         themePreferences?.theme = theme
         _currentTheme.value = theme
+    }
+
+    private val _currentLanguage = MutableStateFlow(languagePreferences?.language ?: com.example.data.local.AppLanguage.FR)
+    val currentLanguage: StateFlow<com.example.data.local.AppLanguage> = _currentLanguage.asStateFlow()
+
+    fun setLanguage(language: com.example.data.local.AppLanguage) {
+        languagePreferences?.language = language
+        _currentLanguage.value = language
     }
 
     val currentScreen: StateFlow<Screen> = _navigationStack.map { it.lastOrNull() ?: Screen.Splash }
@@ -272,12 +281,13 @@ class FleetViewModelFactory(
     private val authRepository: AuthRepository,
     private val fleetRepository: FleetRepository,
     private val realtimeSyncManager: RealtimeSyncManager,
-    private val themePreferences: com.example.data.local.ThemePreferences
+    private val themePreferences: com.example.data.local.ThemePreferences,
+    private val languagePreferences: com.example.data.local.LanguagePreferences
 ) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         if (modelClass.isAssignableFrom(FleetViewModel::class.java)) {
             @Suppress("UNCHECKED_CAST")
-            return FleetViewModel(authRepository, fleetRepository, realtimeSyncManager, themePreferences) as T
+            return FleetViewModel(authRepository, fleetRepository, realtimeSyncManager, themePreferences, languagePreferences) as T
         }
         throw IllegalArgumentException("Unknown ViewModel class")
     }

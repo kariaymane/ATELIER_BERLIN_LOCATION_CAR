@@ -32,6 +32,9 @@ class Reservation(Base, TimestampMixin, VersionMixin):
     )
     customer_name = Column(String(255), nullable=True)
     customer_phone = Column(String(20), nullable=True)
+    customer_email = Column(String(255), nullable=True)
+    identity_card_image = Column(Text, nullable=True)
+    driving_license_image = Column(Text, nullable=True)
     start_datetime = Column(TIMESTAMP(timezone=True), nullable=False)
     end_datetime = Column(TIMESTAMP(timezone=True), nullable=False)
     daily_price = Column(Numeric(10, 2), nullable=False)
@@ -93,7 +96,7 @@ _create_exclusion_constraint = DDL("""
                     vehicle_id WITH =,
                     tstzrange(start_datetime, end_datetime, '[)') WITH &&
                 )
-                WHERE (status NOT IN ('CANCELLED'));
+                WHERE (status NOT IN ('CANCELLED', 'COMPLETED'));
         END IF;
     END $$;
 """)

@@ -39,7 +39,8 @@ class AuthService:
         Authenticate user and return tokens.
         Logs failed attempts but NEVER logs the password.
         """
-        user = await self._user_repo.get_by_email(email)
+        clean_email = email.strip().lower() if email else ""
+        user = await self._user_repo.get_by_email(clean_email)
 
         now = datetime.now(timezone.utc)
         if user and user.locked_until and user.locked_until > now:

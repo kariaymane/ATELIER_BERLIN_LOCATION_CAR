@@ -130,6 +130,7 @@ def create_app() -> FastAPI:
     upload_dir = Path("uploads")
     upload_dir.mkdir(parents=True, exist_ok=True)
     (upload_dir / "vehicles").mkdir(parents=True, exist_ok=True)
+    (upload_dir / "clients").mkdir(parents=True, exist_ok=True)
     app.mount("/static/uploads", StaticFiles(directory=str(upload_dir)), name="uploads")
 
     # Include API routes

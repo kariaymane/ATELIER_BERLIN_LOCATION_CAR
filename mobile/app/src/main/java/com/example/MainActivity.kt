@@ -46,7 +46,8 @@ class MainActivity : ComponentActivity() {
         val fleetRepository = FleetRepository(apiClient, database, applicationContext)
         val realtimeSyncManager = RealtimeSyncManager(apiClient, tokenManager, fleetRepository)
         val themePreferences = com.example.data.local.ThemePreferences(applicationContext)
-        FleetViewModelFactory(authRepository, fleetRepository, realtimeSyncManager, themePreferences)
+        val languagePreferences = com.example.data.local.LanguagePreferences(applicationContext)
+        FleetViewModelFactory(authRepository, fleetRepository, realtimeSyncManager, themePreferences, languagePreferences)
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -55,13 +56,27 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             val appTheme by viewModel.currentTheme.collectAsState()
+            val appLanguage by viewModel.currentLanguage.collectAsState()
+
             val darkTheme = when (appTheme) {
                 com.example.data.local.AppTheme.LIGHT -> false
                 com.example.data.local.AppTheme.DARK -> true
                 com.example.data.local.AppTheme.SYSTEM -> androidx.compose.foundation.isSystemInDarkTheme()
             }
-            MyApplicationTheme(darkTheme = darkTheme) {
-                AtelierBerlinApp(viewModel = viewModel)
+
+            val layoutDirection = if (appLanguage == com.example.data.local.AppLanguage.AR) {
+                androidx.compose.ui.unit.LayoutDirection.Rtl
+            } else {
+                androidx.compose.ui.unit.LayoutDirection.Ltr
+            }
+
+            androidx.compose.runtime.CompositionLocalProvider(
+                androidx.compose.ui.platform.LocalLayoutDirection provides layoutDirection,
+                com.example.ui.i18n.LocalAppLanguage provides appLanguage
+            ) {
+                MyApplicationTheme(darkTheme = darkTheme) {
+                    AtelierBerlinApp(viewModel = viewModel)
+                }
             }
         }
     }

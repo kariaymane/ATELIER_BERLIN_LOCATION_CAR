@@ -3,6 +3,7 @@ Reservation list and creation view.
 Fully localized for French and Arabic with RTL layout support.
 """
 from datetime import datetime, timezone
+import logging
 import uuid
 import json
 from PySide6.QtWidgets import (
@@ -20,14 +21,19 @@ from app.models.vehicle import LocalVehicle
 from app.models.reservation import LocalReservation
 from app.sync.queue import SyncQueue
 
+logger = logging.getLogger(__name__)
+
 
 class ReservationFormDialog(QDialog):
     """Dialog to create a reservation for a selected vehicle."""
     saved = Signal(dict)
 
-    def __init__(self, vehicle: dict, parent=None):
+    def __init__(self, vehicle: dict, parent=None, api_client=None):
         super().__init__(parent)
         self.vehicle = vehicle
+        from app.services.api_client import ApiClient
+        from app.config import API_BASE_URL
+        self._api = api_client or ApiClient(API_BASE_URL)
         brand_model = f"{vehicle.get('brand', '')} {vehicle.get('model', '')}".strip()
         self.setWindowTitle(t("reservations.dialog_title", name=brand_model))
         self.setMinimumWidth(500)
@@ -48,8 +54,20 @@ class ReservationFormDialog(QDialog):
         # Customer Info
         self._customer_name = QLineEdit()
         self._customer_phone = QLineEdit()
+        self._customer_email = QLineEdit()
+        self._id_card_path = ""
+        self._license_path = ""
+        
+        self._id_card_btn = QPushButton("Choisir une image...")
+        self._id_card_btn.clicked.connect(self._choose_id_card)
+        self._license_btn = QPushButton("Choisir une image...")
+        self._license_btn.clicked.connect(self._choose_license)
+        
         form.addRow(t("reservations.client_name"), self._customer_name)
         form.addRow(t("reservations.client_phone"), self._customer_phone)
+        form.addRow("Email du Client", self._customer_email)
+        form.addRow("Carte d'identification", self._id_card_btn)
+        form.addRow("Permis de conduire", self._license_btn)
 
         # Dates
         now = QDateTime.currentDateTime()
@@ -100,6 +118,53 @@ class ReservationFormDialog(QDialog):
         self._calculated_days = days
         self._calculated_total = total
 
+
+    def _choose_id_card(self):
+        from PySide6.QtWidgets import QFileDialog
+        path, _ = QFileDialog.getOpenFileName(self, "Choisir Carte d'identification", "", "Images (*.png *.jpg *.jpeg *.webp *.bmp)")
+        if path:
+            self._id_card_path = path
+            self._id_card_btn.setText(path.split("/")[-1])
+
+    def _choose_license(self):
+        from PySide6.QtWidgets import QFileDialog
+        path, _ = QFileDialog.getOpenFileName(self, "Choisir Permis de conduire", "", "Images (*.png *.jpg *.jpeg *.webp *.bmp)")
+        if path:
+            self._license_path = path
+            self._license_btn.setText(path.split("/")[-1])
+            
+    def _upload_file(self, local_path):
+        """Upload a client document (ID card / license).
+
+        Returns the server URL on success. When offline, stores the file in
+        DATA_DIR/pending_uploads and returns a relative `pending_uploads/`
+        marker using the same convention as the vehicle photo form.
+        """
+        if not local_path:
+            return ""
+        if (local_path.startswith("http")
+                or local_path.startswith("/static")
+                or local_path.startswith("pending_uploads/")):
+            return local_path
+
+        try:
+            res = self._api.upload_client_image(local_path)
+            if res and isinstance(res, dict) and "image_url" in res:
+                return res["image_url"]
+        except Exception as e:
+            logger.warning("Client document upload failed: %s", e)
+
+        # Offline: durably queue the file for the SyncEngine pending-upload
+        # processor; a marker placeholder is stored on the entity until the
+        # upload is confirmed by the server.
+        try:
+            from app.sync.uploads import store_pending_file
+            stored = store_pending_file(local_path)
+            return f"pending_uploads/{stored.name}"
+        except Exception:
+            pass
+        return ""
+
     def _on_save(self):
         if not self._customer_name.text().strip():
             QMessageBox.warning(self, t("common.error"), t("reservations.err_name_req"))
@@ -112,10 +177,16 @@ class ReservationFormDialog(QDialog):
             QMessageBox.warning(self, t("common.error"), t("reservations.err_date_order"))
             return
 
+        id_url = self._upload_file(self._id_card_path)
+        lic_url = self._upload_file(self._license_path)
+        
         self.saved.emit({
             "vehicle_id": self.vehicle.get("id"),
             "customer_name": self.customer_name.text().strip(),
             "customer_phone": self._customer_phone.text().strip(),
+            "customer_email": self._customer_email.text().strip(),
+            "identity_card_image": id_url,
+            "driving_license_image": lic_url,
             "start_datetime": start.toPython().astimezone(timezone.utc).isoformat(),
             "end_datetime": end.toPython().astimezone(timezone.utc).isoformat(),
             "daily_price": self.vehicle.get('daily_rental_price', 0),
@@ -137,11 +208,12 @@ class ReservationWidget(QWidget):
 
     reservation_created = Signal()
 
-    def __init__(self, device_id: str, user_id: str, user_role: str = "EMPLOYEE", parent=None):
+    def __init__(self, device_id: str, user_id: str, user_role: str = "EMPLOYEE", parent=None, api_client=None):
         super().__init__(parent)
         self._device_id = device_id
         self._user_id = user_id
         self._user_role = user_role
+        self._api = api_client
         self._setup_ui()
 
     def _setup_ui(self):
@@ -447,7 +519,7 @@ class ReservationWidget(QWidget):
         return card
 
     def _open_new_reservation_dialog(self, vehicle_dict: dict):
-        dialog = ReservationFormDialog(vehicle_dict, self)
+        dialog = ReservationFormDialog(vehicle_dict, self, api_client=self._api)
         dialog.saved.connect(self._create_reservation_record)
         dialog.exec()
 
@@ -479,6 +551,9 @@ class ReservationWidget(QWidget):
                 vehicle_id=data["vehicle_id"],
                 customer_name=data["customer_name"],
                 customer_phone=data.get("customer_phone"),
+                customer_email=data.get("customer_email"),
+                identity_card_image=data.get("identity_card_image"),
+                driving_license_image=data.get("driving_license_image"),
                 start_datetime=data["start_datetime"],
                 end_datetime=data["end_datetime"],
                 daily_price=data.get("daily_price", 0.0),
@@ -503,6 +578,19 @@ class ReservationWidget(QWidget):
             queue.enqueue("reservation", res_id, "CREATE", data)
             if vehicle:
                 queue.enqueue("vehicle", vehicle.id, "UPDATE", {"id": vehicle.id, "status": "RESERVED"})
+
+            # Register durable pending-upload records for offline documents.
+            from app.sync.uploads import register_pending_upload
+            for field in ("identity_card_image", "driving_license_image"):
+                register_pending_upload(
+                    session,
+                    marker=data.get(field) or "",
+                    entity_type="reservation",
+                    entity_id=res_id,
+                    upload_type="CLIENT_DOCUMENT",
+                    remote_endpoint="/api/v1/clients/upload-image",
+                    field_name=field,
+                )
 
             session.commit()
 

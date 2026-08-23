@@ -35,7 +35,7 @@ class RentalRepository(BaseRepository[Reservation]):
             select(func.count(Reservation.id))
             .where(
                 Reservation.vehicle_id == vehicle_id,
-                Reservation.status.notin_(["CANCELLED"]),
+                Reservation.status.notin_(["CANCELLED", "COMPLETED"]),
                 Reservation.start_datetime < end_dt,
                 Reservation.end_datetime > start_dt,
             )

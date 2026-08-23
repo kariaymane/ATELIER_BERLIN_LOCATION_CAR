@@ -196,6 +196,64 @@ class ApiClient:
             logger.error("Failed to upload image: %s", e)
         return None
 
+    # ── Clients ──
+
+    def get_clients(self, page: int = 1, page_size: int = 100, search: Optional[str] = None, status: Optional[str] = None) -> Optional[dict]:
+        url = f"/api/v1/clients/?page={page}&page_size={page_size}"
+        if search:
+            url += f"&search={search}"
+        if status:
+            url += f"&status={status}"
+        r = self._request("get", url)
+        return r.json() if r and r.status_code == 200 else None
+
+    def get_client(self, cid: str) -> Optional[dict]:
+        r = self._request("get", f"/api/v1/clients/{cid}")
+        return r.json() if r and r.status_code == 200 else None
+
+    def create_client(self, data: dict) -> Optional[dict]:
+        r = self._request("post", "/api/v1/clients/", json=data)
+        if r and r.status_code == 201:
+            return r.json()
+        if r:
+            return {"error": r.json().get("detail", "Error")}
+        return None
+
+    def update_client(self, cid: str, data: dict) -> Optional[dict]:
+        r = self._request("put", f"/api/v1/clients/{cid}", json=data)
+        if r and r.status_code == 200:
+            return r.json()
+        if r:
+            return {"error": r.json().get("detail", "Error")}
+        return None
+
+    def delete_client(self, cid: str) -> bool:
+        r = self._request("delete", f"/api/v1/clients/{cid}")
+        return r is not None and r.status_code in (200, 204)
+
+    def get_client_history(self, cid: str) -> Optional[dict]:
+        r = self._request("get", f"/api/v1/clients/{cid}/history")
+        return r.json() if r and r.status_code == 200 else None
+
+    def upload_client_image(self, file_path: str) -> Optional[dict]:
+        from pathlib import Path
+        import mimetypes
+        url = f"{self._base_url}/api/v1/clients/upload-image"
+        headers = {}
+        if self._access_token:
+            headers["Authorization"] = f"Bearer {self._access_token}"
+        try:
+            with open(file_path, "rb") as f:
+                mime_type = mimetypes.guess_type(file_path)[0] or "image/jpeg"
+                files = {"file": (Path(file_path).name, f, mime_type)}
+                with httpx.Client(timeout=30.0) as client:
+                    r = client.post(url, headers=headers, files=files)
+                    if r.status_code in (200, 201):
+                        return r.json()
+        except Exception as e:
+            logger.error("Failed to upload client image: %s", e)
+        return None
+
     # ── Notifications ──
 
     def get_notifications(self, unread_only: bool = False, page: int = 1) -> Optional[dict]:

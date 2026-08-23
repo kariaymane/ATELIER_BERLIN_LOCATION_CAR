@@ -84,6 +84,9 @@ class RentalService:
                 vehicle_id=data.vehicle_id,
                 customer_name=data.customer_name,
                 customer_phone=data.customer_phone,
+                customer_email=data.customer_email,
+                identity_card_image=data.identity_card_image,
+                driving_license_image=data.driving_license_image,
                 start_datetime=start_dt,
                 end_datetime=end_dt,
                 daily_price=daily_price,
@@ -289,6 +292,18 @@ class RentalService:
         if data.customer_name:
             rental.customer_name = data.customer_name
             changes["customer_name"] = data.customer_name
+
+        if data.customer_email:
+            rental.customer_email = data.customer_email
+            changes["customer_email"] = data.customer_email
+
+        if data.identity_card_image:
+            rental.identity_card_image = data.identity_card_image
+            changes["identity_card_image"] = data.identity_card_image
+
+        if data.driving_license_image:
+            rental.driving_license_image = data.driving_license_image
+            changes["driving_license_image"] = data.driving_license_image
 
         if data.customer_phone:
             rental.customer_phone = data.customer_phone

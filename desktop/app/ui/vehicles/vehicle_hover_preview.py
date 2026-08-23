@@ -286,13 +286,21 @@ class VehicleHoverPreview(QWidget):
             self.show()
             self.raise_()
 
+    def retranslate_ui(self):
+        """Re-render the currently shown vehicle with updated translations.
+
+        Static labels are rebuilt from vehicle data; when nothing is being
+        previewed this is a safe no-op.
+        """
+        if getattr(self, "_current_vehicle", None):
+            self.set_vehicle(self._current_vehicle)
+
     def set_vehicle(self, vehicle: dict):
         if not vehicle:
             return
 
         self._current_vehicle = vehicle
         self._current_vehicle_id = vehicle.get("id")
-
         self._title.setText(f"{vehicle.get('brand', '')} {vehicle.get('model', '')}".strip())
         self._year.setText(str(vehicle.get('year', '')))
         
