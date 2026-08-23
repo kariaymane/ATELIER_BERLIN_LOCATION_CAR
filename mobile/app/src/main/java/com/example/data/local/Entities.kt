@@ -38,6 +38,8 @@ data class ReservationEntity(
     val clientName: String,
     val clientPhone: String,
     val clientEmail: String,
+    val identityCardImage: String,
+    val drivingLicenseImage: String,
     val vehicleId: String,
     val vehicleName: String,
     val vehiclePlate: String,
@@ -55,8 +57,8 @@ data class ReservationEntity(
     val returnLocation: String,
     val notes: String
 ) {
-    fun toDomain() = Reservation(id, clientName, clientPhone, clientEmail, vehicleId, vehicleName, vehiclePlate, vehicleImageUrl, startDate, endDate, ReservationStatus.fromApi(status), totalAmount, dailyPrice, numDays, deposit, paymentStatus, lastUpdated, pickupLocation, returnLocation, notes)
-    companion object { fun fromDomain(r: Reservation) = ReservationEntity(r.id, r.clientName, r.clientPhone, r.clientEmail, r.vehicleId, r.vehicleName, r.vehiclePlate, r.vehicleImageUrl, r.startDate, r.endDate, r.status.apiValue, r.totalAmount, r.dailyPrice, r.numDays, r.deposit, r.paymentStatus, r.lastUpdated, r.pickupLocation, r.returnLocation, r.notes) }
+    fun toDomain() = Reservation(id, clientName, clientPhone, clientEmail, identityCardImage, drivingLicenseImage, vehicleId, vehicleName, vehiclePlate, vehicleImageUrl, startDate, endDate, ReservationStatus.fromApi(status), totalAmount, dailyPrice, numDays, deposit, paymentStatus, lastUpdated, pickupLocation, returnLocation, notes)
+    companion object { fun fromDomain(r: Reservation) = ReservationEntity(r.id, r.clientName, r.clientPhone, r.clientEmail, r.identityCardImage, r.drivingLicenseImage, r.vehicleId, r.vehicleName, r.vehiclePlate, r.vehicleImageUrl, r.startDate, r.endDate, r.status.apiValue, r.totalAmount, r.dailyPrice, r.numDays, r.deposit, r.paymentStatus, r.lastUpdated, r.pickupLocation, r.returnLocation, r.notes) }
 }
 
 @Entity(tableName = "maintenance")

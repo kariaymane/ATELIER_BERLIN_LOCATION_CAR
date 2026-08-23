@@ -19,9 +19,11 @@ class UserRepository(BaseRepository[User]):
         super().__init__(session, User)
 
     async def get_by_email(self, email: str) -> Optional[User]:
-        """Get user by email address."""
+        """Get user by email address (case-insensitive & trimmed)."""
+        from sqlalchemy import func
+        clean_email = email.strip().lower() if email else ""
         result = await self._session.execute(
-            select(User).where(User.email == email)
+            select(User).where(func.lower(User.email) == clean_email)
         )
         return result.scalar_one_or_none()
 

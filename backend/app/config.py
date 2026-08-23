@@ -68,4 +68,10 @@ class Settings(BaseSettings):
 
 def get_settings() -> Settings:
     """Get cached settings instance."""
-    return Settings()
+    global _settings
+    if _settings is None:
+        _settings = Settings()
+    return _settings
+
+
+_settings: Settings | None = None

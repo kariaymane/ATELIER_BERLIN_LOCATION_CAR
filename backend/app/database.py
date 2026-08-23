@@ -23,17 +23,28 @@ _async_session_factory = None
 
 
 def init_engine(database_url: str, echo: bool = False):
-    """Initialize the async database engine."""
+    """Initialize the async database engine.
+
+    PostgreSQL keeps its production pool configuration; SQLite (used for
+    local/test runs) gets a compatible engine setup since it does not accept
+    pool_size/max_overflow with StaticPool.
+    """
     global _engine, _async_session_factory
-    _engine = create_async_engine(
-        database_url,
-        echo=echo,
-        pool_size=20,
-        max_overflow=10,
-        pool_pre_ping=True,
-        pool_recycle=3600,
-        connect_args={"ssl": False} if "postgresql" in database_url else {},
-    )
+    if database_url.startswith("sqlite"):
+        engine_kwargs = {"echo": echo, "connect_args": {"check_same_thread": False}}
+        if ":memory:" in database_url:
+            from sqlalchemy.pool import StaticPool
+            engine_kwargs["poolclass"] = StaticPool
+    else:
+        engine_kwargs = {
+            "echo": echo,
+            "pool_size": 20,
+            "max_overflow": 10,
+            "pool_pre_ping": True,
+            "pool_recycle": 3600,
+            "connect_args": {"ssl": False} if "postgresql" in database_url else {},
+        }
+    _engine = create_async_engine(database_url, **engine_kwargs)
     _async_session_factory = async_sessionmaker(
         _engine, class_=AsyncSession, expire_on_commit=False
     )

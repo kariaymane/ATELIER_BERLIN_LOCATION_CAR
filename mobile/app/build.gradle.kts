@@ -51,7 +51,7 @@ android {
     }
     debug {
       signingConfig = signingConfigs.getByName("debugConfig")
-      buildConfigField("String", "API_BASE_URL", "\"http://192.168.1.18:8000/api/v1/\"")
+      buildConfigField("String", "API_BASE_URL", "\"https://car-rental-system.fly.dev/api/v1/\"")
     }
   }
   compileOptions {

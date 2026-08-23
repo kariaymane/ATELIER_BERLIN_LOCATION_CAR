@@ -24,16 +24,18 @@ class RealtimeEventsClient(QObject):
     event_received = Signal(dict)
     connection_changed = Signal(bool)
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, access_token: Optional[str] = None):
         super().__init__(parent)
         self._ws = QWebSocket()
         self._is_connected = False
         self._last_event_time: Optional[str] = None
+        self._access_token = access_token
 
         # Determine ws:// url from API_BASE_URL
         ws_base = API_BASE_URL.replace("http://", "ws://").replace("https://", "wss://")
-        self._ws_url = f"{ws_base}/api/{API_VERSION}/events/ws"
+        self._ws_base = f"{ws_base}/api/{API_VERSION}/events/ws"
         self._http_recent_url = f"{API_BASE_URL}/api/{API_VERSION}/events/recent"
+        self._ws_url = self._build_ws_url()
 
         # Wire Qt WebSocket signals
         self._ws.connected.connect(self._on_ws_connected)
@@ -50,6 +52,27 @@ class RealtimeEventsClient(QObject):
         self._poll_timer = QTimer(self)
         self._poll_timer.setInterval(5000)
         self._poll_timer.timeout.connect(self._poll_recent_events)
+
+    def _build_ws_url(self) -> str:
+        """Build the authenticated WebSocket URL with the current access token."""
+        if not self._access_token:
+            return self._ws_base
+        from urllib.parse import quote
+        return f"{self._ws_base}?token={quote(self._access_token)}"
+
+    def update_token(self, access_token: str):
+        """
+        Update the access token used for WebSocket reconnects and HTTP polling.
+        Called whenever the SyncEngine/API client refreshes tokens so that
+        reconnections always present fresh credentials.
+        """
+        if access_token and access_token != self._access_token:
+            self._access_token = access_token
+            self._ws_url = self._build_ws_url()
+            # Force a reconnect with the new token if currently connected.
+            if self._is_connected:
+                self._ws.close()
+                self._try_connect()
 
     def start(self):
         """Start listening for real-time events."""
@@ -115,7 +138,10 @@ class RealtimeEventsClient(QObject):
                 params["since"] = self._last_event_time
             params["limit"] = 10
 
-            resp = requests.get(self._http_recent_url, params=params, timeout=3.0)
+            headers = {}
+            if self._access_token:
+                headers["Authorization"] = f"Bearer {self._access_token}"
+            resp = requests.get(self._http_recent_url, params=params, headers=headers, timeout=3.0)
             if resp.status_code == 200:
                 data = resp.json()
                 for ev in data.get("events", []):

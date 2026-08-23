@@ -5,11 +5,31 @@ Initializes the local database, shows login, then main window.
 import sys
 import os
 import logging
+
+# Platform plugin initialization for PyInstaller
 from pathlib import Path
 
-# Safe platform fallback: try Wayland first, then fallback to XCB (X11)
-if "QT_QPA_PLATFORM" not in os.environ:
+if sys.platform == "linux" and "QT_QPA_PLATFORM" not in os.environ:
     os.environ["QT_QPA_PLATFORM"] = "wayland;xcb"
+
+if getattr(sys, "frozen", False):
+    BASE_DIR = Path(sys.executable).resolve().parent
+    INTERNAL_DIR = BASE_DIR / "_internal"
+else:
+    BASE_DIR = Path(__file__).resolve().parent
+    INTERNAL_DIR = BASE_DIR
+
+PYSIDE_DIR = INTERNAL_DIR / "PySide6"
+
+if PYSIDE_DIR.exists():
+    os.environ["PATH"] = str(PYSIDE_DIR) + os.pathsep + os.environ.get("PATH", "")
+    
+    # Also set plugin path
+    plugin_path = PYSIDE_DIR / "plugins"
+    if plugin_path.exists():
+        os.environ["QT_PLUGIN_PATH"] = str(plugin_path)
+
+
 
 from PySide6.QtWidgets import QApplication
 from PySide6.QtCore import Qt
@@ -29,7 +49,9 @@ logger = logging.getLogger(__name__)
 
 def main():
     """Application entry point."""
-    # Initialize local database
+    # Initialize local database.
+    # Data is preserved across runs; the file is only deleted when
+    # CAR_RENTAL_DB_RESET=1 (used by the test suite) — see app.database.init_local_db.
     init_local_db()
 
     # Set default language
@@ -38,6 +60,14 @@ def main():
     # Create Qt application
     app = QApplication(sys.argv)
     app.setApplicationName("ATELIER BERLIN LOCATION CAR")
+
+    # Application branding — approved Lily logo as window/taskbar icon
+    from PySide6.QtGui import QIcon
+    _icon_path = Path(__file__).resolve().parent / "assets" / "images" / "logo_transparent_officiel.png"
+    if not _icon_path.exists() and getattr(sys, "frozen", False):
+        _icon_path = INTERNAL_DIR / "app" / "assets" / "images" / "logo_transparent_officiel.png"
+    if _icon_path.exists():
+        app.setWindowIcon(QIcon(str(_icon_path)))
 
     from app.ui.theme import get_app_stylesheet
     from app.config import get_saved_theme
@@ -51,9 +81,22 @@ def main():
     def on_login_success(user_data: dict):
         nonlocal main_window
         logger.info("Login successful for user: %s", user_data.get("full_name", user_data.get("email", "")))
-        login.close()
-        main_window = MainWindow(user_data)
+        try:
+            # Construct BEFORE closing login so that a construction failure
+            # never leaves the user with zero visible windows.
+            main_window = MainWindow(user_data)
+        except Exception:
+            logger.exception("Failed to build main window after login")
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.critical(
+                None,
+                "ATELIER BERLIN LOCATION CAR",
+                "Une erreur technique est survenue au démarrage de l'application.\n"
+                "Consultez les journaux pour plus de détails.",
+            )
+            return
         main_window.show()
+        login.close()
 
     login.login_success.connect(on_login_success)
     login.show()

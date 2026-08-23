@@ -19,22 +19,40 @@ _session_factory = None
 
 
 def init_local_db():
-    """Initialize the local SQLite database."""
+    """Initialize the local SQLite database.
+    In **test mode** (environment variable ``CAR_RENTAL_DB_RESET=1``) the existing SQLite file is deleted to provide a clean database.
+    In normal production runs the database file is preserved; tables are created if they do not yet exist.
+    """
     global _engine, _session_factory
+    import os
+    reset_mode = os.getenv("CAR_RENTAL_DB_RESET", "0") == "1"
+    db_path = SQLITE_URL.replace('sqlite:///', '')
+    if reset_mode:
+        try:
+            if os.path.exists(db_path):
+                os.remove(db_path)
+                logger.info("[RESET] SQLite database reset because CAR_RENTAL_DB_RESET=1.")
+        except Exception as e:
+            logger.warning("Failed to remove existing SQLite file %s: %s", db_path, e)
+    else:
+        logger.info("[PRESERVE] Existing SQLite database preserved.")
+    # Create engine (will create file if missing)
     _engine = create_engine(SQLITE_URL, echo=False)
     _session_factory = sessionmaker(bind=_engine)
-    # Import all models here to ensure they are registered with LocalBase
+    # Import all models to ensure they are registered with LocalBase
     import app.models.user
     import app.models.vehicle
     import app.models.vehicle_image
     import app.models.sync_queue
     import app.models.reservation
     import app.models.maintenance
+    import app.models.client
+    import app.models.pending_upload
 
-    # Create all tables
+    # Ensure tables exist (does not drop existing data)
     LocalBase.metadata.create_all(_engine)
 
-    # Auto-migration for newly added columns if SQLite database existed
+    # Auto-migration for newly added columns if SQLite database existed (now redundant but kept)
     with _engine.connect() as conn:
         try:
             from sqlalchemy import text
@@ -47,36 +65,21 @@ def init_local_db():
         except Exception as e:
             logger.warning("Auto-migration check notice: %s", e)
 
+        try:
+            result = conn.execute(text("PRAGMA table_info(reservations)")).fetchall()
+            col_names = [row[1] for row in result]
+            if "customer_email" not in col_names:
+                conn.execute(text("ALTER TABLE reservations ADD COLUMN customer_email VARCHAR(255)"))
+            if "identity_card_image" not in col_names:
+                conn.execute(text("ALTER TABLE reservations ADD COLUMN identity_card_image TEXT"))
+            if "driving_license_image" not in col_names:
+                conn.execute(text("ALTER TABLE reservations ADD COLUMN driving_license_image TEXT"))
+            conn.commit()
+        except Exception as e:
+            logger.warning("Auto-migration check notice (reservations): %s", e)
+
+
     logger.info("Local SQLite database initialized at %s", SQLITE_URL)
-
-    try:
-        import os, stat
-        from pathlib import Path
-        
-        diag_path = '/tmp/desktop_db_diag.txt'
-        with open(diag_path, 'w') as f:
-            f.write(f"EXACT DATABASE PATH: {SQLITE_URL}\n")
-            
-            db_str = SQLITE_URL.replace('sqlite:///', '')
-            f.write(f"EXACT DB FILE: {db_str}\n")
-            
-            p = Path(db_str)
-            f.write(f"EXACT PARENT: {p.parent}\n")
-            
-            if p.exists():
-                f.write(f"FILE EXISTS: YES\n")
-                f.write(f"FILE PERMS: {oct(p.stat().st_mode)}\n")
-            else:
-                f.write(f"FILE EXISTS: NO\n")
-                
-            if p.parent.exists():
-                f.write(f"PARENT EXISTS: YES\n")
-                f.write(f"PARENT PERMS: {oct(p.parent.stat().st_mode)}\n")
-            else:
-                f.write(f"PARENT EXISTS: NO\n")
-    except Exception as e:
-        pass
-
 
 
 def get_local_session() -> Session:

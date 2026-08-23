@@ -19,11 +19,13 @@ from app.models.vehicle_image import VehicleImage
 from app.models.user import User
 from app.models.reservation import Reservation
 from app.models.maintenance import Maintenance
+from app.models.client import Client
 from app.models.notification import Notification
 from app.schemas.vehicle import VehicleResponse
 from app.schemas.rental import RentalResponse
 from app.schemas.maintenance import MaintenanceResponse
 from app.schemas.notification import NotificationResponse
+from app.schemas.client import ClientResponse
 from app.repositories.audit_repository import AuditRepository
 from app.i18n import get_message
 import logging
@@ -287,6 +289,9 @@ class SyncService:
                 vehicle_id=UUID(payload["vehicle_id"]),
                 customer_name=payload.get("customer_name"),
                 customer_phone=payload.get("customer_phone"),
+                customer_email=payload.get("customer_email"),
+                identity_card_image=payload.get("identity_card_image"),
+                driving_license_image=payload.get("driving_license_image"),
                 start_datetime=datetime.fromisoformat(payload["start_datetime"]),
                 end_datetime=datetime.fromisoformat(payload["end_datetime"]),
                 daily_price=payload.get("daily_price", 0),
@@ -382,6 +387,61 @@ class SyncService:
         except Exception as e:
             raise
 
+    async def _process_client_create(self, payload: dict, user_id: UUID) -> dict:
+        try:
+            cid = UUID(payload["id"]) if "id" in payload and payload["id"] else None
+            client = Client(
+                id=cid,
+                first_name=payload.get("first_name", "").strip(),
+                last_name=payload.get("last_name", "").strip(),
+                email=payload.get("email", "").strip().lower() if payload.get("email") else None,
+                phone=payload.get("phone", "").strip() if payload.get("phone") else None,
+                cin_number=payload.get("cin_number", "").strip() if payload.get("cin_number") else None,
+                identity_card_image=payload.get("identity_card_image"),
+                license_number=payload.get("license_number", "").strip() if payload.get("license_number") else None,
+                driving_license_image=payload.get("driving_license_image"),
+                photo_url=payload.get("photo_url"),
+                notes=payload.get("notes"),
+                status=payload.get("status", "ACTIVE"),
+            )
+            self._session.add(client)
+            await self._session.flush()
+            return {"status": "ok", "server_version": client.version}
+        except IntegrityError:
+            return {"status": "conflict", "message": "Client already exists or constraint violation"}
+        except Exception as e:
+            raise
+
+    async def _process_client_update(self, entity_id: str, payload: dict, user_id: UUID, client_version: int) -> dict:
+        try:
+            client = (await self._session.execute(select(Client).where(Client.id == UUID(entity_id)))).scalar_one_or_none()
+            if not client:
+                return {"status": "error", "message": "Client not found"}
+            if client.version > client_version:
+                return {"status": "conflict", "server_version": client.version}
+
+            for field in ["first_name", "last_name", "email", "phone", "cin_number", "identity_card_image", "license_number", "driving_license_image", "photo_url", "notes", "status"]:
+                if field in payload and payload[field] is not None:
+                    setattr(client, field, payload[field])
+
+            client.version += 1
+            await self._session.flush()
+            return {"status": "ok", "server_version": client.version}
+        except Exception as e:
+            raise
+
+    async def _process_client_delete(self, entity_id: str, user_id: UUID) -> dict:
+        try:
+            client = (await self._session.execute(select(Client).where(Client.id == UUID(entity_id)))).scalar_one_or_none()
+            if not client:
+                return {"status": "ok", "message": "Already deleted"}
+            client.status = "INACTIVE"
+            client.version += 1
+            await self._session.flush()
+            return {"status": "ok", "server_version": client.version}
+        except Exception as e:
+            raise
+
     async def process_push(
         self,
         items: list,
@@ -429,6 +489,15 @@ class SyncService:
                             result = await self._process_reservation_create(item.payload, user_id)
                         elif operation == "UPDATE":
                             result = await self._process_reservation_update(item.entity_id, item.payload, user_id, item.version)
+                        else:
+                            result = {"status": "error", "message": "Not supported"}
+                    elif entity_type == "client":
+                        if operation == "CREATE":
+                            result = await self._process_client_create(item.payload, user_id)
+                        elif operation == "UPDATE":
+                            result = await self._process_client_update(item.entity_id, item.payload, user_id, item.version)
+                        elif operation == "DELETE":
+                            result = await self._process_client_delete(item.entity_id, user_id)
                         else:
                             result = {"status": "error", "message": "Not supported"}
                     elif entity_type == "maintenance":
@@ -540,7 +609,7 @@ class SyncService:
                     "entity_type": "reservation", "entity_id": str(r.id), "operation": "UPDATE",
                     "payload": {
                         "id": str(r.id), "vehicle_id": str(r.vehicle_id), "customer_name": r.customer_name,
-                        "customer_phone": r.customer_phone, "start_datetime": r.start_datetime.isoformat(),
+                        "customer_phone": r.customer_phone, "customer_email": r.customer_email, "identity_card_image": r.identity_card_image, "driving_license_image": r.driving_license_image, "start_datetime": r.start_datetime.isoformat(),
                         "end_datetime": r.end_datetime.isoformat(), "daily_price": float(r.daily_price),
                         "num_days": r.num_days, "total_price": float(r.total_price), "deposit": float(r.deposit),
                         "payment_status": r.payment_status, "status": r.status,
@@ -562,6 +631,22 @@ class SyncService:
                         "step": m.step, "status": m.status,
                     },
                     "version": m.version, "updated_at": m.updated_at.isoformat()
+                })
+
+        if not entity_types or "client" in entity_types:
+            result = await self._session.execute(select(Client).where(Client.updated_at >= since))
+            for c in result.scalars().all():
+                items.append({
+                    "entity_type": "client", "entity_id": str(c.id), "operation": "UPDATE",
+                    "payload": {
+                        "id": str(c.id), "first_name": c.first_name, "last_name": c.last_name,
+                        "email": c.email, "phone": c.phone, "cin_number": c.cin_number,
+                        "identity_card_image": c.identity_card_image,
+                        "license_number": c.license_number,
+                        "driving_license_image": c.driving_license_image,
+                        "photo_url": c.photo_url, "notes": c.notes, "status": c.status,
+                    },
+                    "version": c.version, "updated_at": c.updated_at.isoformat()
                 })
 
         if user_id:
@@ -637,6 +722,9 @@ class SyncService:
                 vehicle_id=str(r.vehicle_id),
                 customer_name=r.customer_name,
                 customer_phone=r.customer_phone,
+                customer_email=r.customer_email,
+                identity_card_image=r.identity_card_image,
+                driving_license_image=r.driving_license_image,
                 start_datetime=r.start_datetime,
                 end_datetime=r.end_datetime,
                 daily_price=float(r.daily_price),
@@ -708,6 +796,30 @@ class SyncService:
             )
             notification_responses.append(n_resp)
 
+        # 5. Fetch Clients
+        c_res = await self._session.execute(select(Client).where(Client.status != "DELETED").order_by(Client.last_name.asc(), Client.first_name.asc()))
+        clients = c_res.scalars().all()
+        client_responses = []
+        for c in clients:
+            c_resp = ClientResponse(
+                id=str(c.id),
+                first_name=c.first_name,
+                last_name=c.last_name,
+                email=c.email,
+                phone=c.phone,
+                cin_number=c.cin_number,
+                identity_card_image=c.identity_card_image,
+                license_number=c.license_number,
+                driving_license_image=c.driving_license_image,
+                photo_url=c.photo_url,
+                notes=c.notes,
+                status=c.status,
+                created_at=c.created_at,
+                updated_at=c.updated_at,
+                version=c.version,
+            )
+            client_responses.append(c_resp)
+
         if user_id:
             await self._audit.create(
                 entity_type="sync",
@@ -718,6 +830,7 @@ class SyncService:
                     "rentals_count": len(rental_responses),
                     "maintenance_count": len(maintenance_responses),
                     "notifications_count": len(notification_responses),
+                    "clients_count": len(client_responses),
                 },
             )
 
@@ -728,6 +841,7 @@ class SyncService:
             "api_version": "1.0.0",
             "vehicles": vehicle_responses,
             "rentals": rental_responses,
+            "clients": client_responses,
             "maintenance": maintenance_responses,
             "notifications": notification_responses,
         }

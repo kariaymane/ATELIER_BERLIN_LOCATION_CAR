@@ -74,6 +74,8 @@ data class Reservation(
     val clientName: String,
     val clientPhone: String = "",
     val clientEmail: String = "",
+    val identityCardImage: String = "",
+    val drivingLicenseImage: String = "",
     val vehicleId: String,
     val vehicleName: String,
     val vehiclePlate: String,

@@ -6,7 +6,7 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QLineEdit, QPushButton, QFrame, QMessageBox, QComboBox, QApplication
 )
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, Signal, QThread
 from PySide6.QtGui import QFont
 
 from app.i18n import t, is_rtl, set_language, load_translations
@@ -14,6 +14,150 @@ from app.config import get_saved_language, save_language, API_BASE_URL
 import logging
 
 logger = logging.getLogger(__name__)
+
+
+class LoginWorker(QThread):
+    """Performs authentication off the UI thread.
+
+    Tries online authentication first; falls back automatically to the
+    local SQLite cache when the server is unreachable.
+    """
+    succeeded = Signal(dict)
+    rejected = Signal()
+
+    def __init__(self, email: str, password: str, parent=None):
+        super().__init__(parent)
+        self._email = email
+        self._password = password
+
+    def run(self):
+        user_data = self._authenticate_online()
+        if user_data is not None:
+            # Cache credentials locally so future logins work offline.
+            try:
+                self._cache_credentials_locally(
+                    self._email, self._password, user_data
+                )
+            except Exception as e:
+                logger.error("Failed to cache credentials locally: %s", e)
+            self.succeeded.emit(user_data)
+            return
+        user_data = self._authenticate_offline()
+        if user_data is not None:
+            self.succeeded.emit(user_data)
+        else:
+            self.rejected.emit()
+
+    def _cache_credentials_locally(self, email, password, user_data):
+        """Securely store Argon2 hashed password and metadata in SQLite."""
+        from app.database import get_local_session
+        from app.models.user import LocalUser
+        from datetime import datetime, timezone
+        import argon2
+
+        ph = argon2.PasswordHasher()
+        pwd_hash = ph.hash(password)
+
+        session = get_local_session()
+        try:
+            now = datetime.now(timezone.utc).isoformat()
+            user_id = str(user_data.get("user_id", "") or "")
+            username = user_data.get("username", email.split("@")[0])
+
+            existing = session.query(LocalUser).filter(
+                (LocalUser.email == email) |
+                (LocalUser.username == username) |
+                (LocalUser.id == user_id)
+            ).first()
+
+            if existing:
+                if user_id:
+                    existing.id = user_id
+                existing.password_hash = pwd_hash
+                existing.role = user_data.get("role", existing.role)
+                existing.full_name = user_data.get("full_name", existing.full_name)
+                existing.updated_at = now
+            else:
+                local_user = LocalUser(
+                    id=user_id or f"local-{email}",
+                    email=email,
+                    username=username,
+                    password_hash=pwd_hash,
+                    full_name=user_data.get("full_name", "Utilisateur"),
+                    role=user_data.get("role", "EMPLOYEE"),
+                    is_active=True,
+                    created_at=now,
+                    updated_at=now,
+                )
+                session.add(local_user)
+            session.commit()
+        finally:
+            session.close()
+
+    def _authenticate_online(self):
+        """Returns user_data on success, None when offline fallback is needed."""
+        import httpx
+        try:
+            with httpx.Client(timeout=4.0) as client:
+                response = client.post(
+                    f"{API_BASE_URL}/api/v1/auth/login",
+                    json={"email": self._email, "password": self._password},
+                )
+                if response.status_code == 200:
+                    data = response.json()
+                    return {
+                        "user_id": data.get("user_id", data.get("id", "")),
+                        "email": self._email,
+                        "username": data.get("username", self._email.split("@")[0]),
+                        "full_name": data.get("full_name", data.get("name", "Utilisateur")),
+                        "role": data.get("role", "EMPLOYEE"),
+                        "access_token": data.get("access_token", ""),
+                        "refresh_token": data.get("refresh_token", ""),
+                        "offline": False,
+                    }
+                if response.status_code in (400, 401, 422):
+                    # Server explicitly rejected these credentials.
+                    self._server_rejected = True
+                else:
+                    self._server_rejected = False
+        except Exception as e:
+            logger.info("Server unreachable (%s), falling back to offline authentication", e)
+            self._server_rejected = False
+        return None
+
+    def _authenticate_offline(self):
+        from app.database import get_local_session
+        from app.models.user import LocalUser
+        import argon2
+
+        session = get_local_session()
+        try:
+            user = session.query(LocalUser).filter(
+                (LocalUser.email == self._email) | (LocalUser.username == self._email)
+            ).first()
+
+            if user and user.password_hash:
+                ph = argon2.PasswordHasher()
+                try:
+                    ph.verify(user.password_hash, self._password)
+                    return {
+                        "user_id": user.id,
+                        "email": user.email,
+                        "username": user.username,
+                        "full_name": user.full_name,
+                        "role": user.role,
+                        "access_token": "",
+                        "refresh_token": "",
+                        "offline": True,
+                    }
+                except argon2.exceptions.VerifyMismatchError:
+                    return None
+            return None
+        except Exception as e:
+            logger.error("Offline auth error: %s", e)
+            return None
+        finally:
+            session.close()
 
 
 class LoginWindow(QWidget):
@@ -221,84 +365,29 @@ class LoginWindow(QWidget):
             self._show_error(t("login.error"))
             return
 
+        if getattr(self, "_login_worker", None) and self._login_worker.isRunning():
+            return  # login already in progress
+
         self._error_label.hide()
         self._login_btn.setEnabled(False)
         self._login_btn.setText("...")
 
-        import httpx
+        worker = LoginWorker(email, password, parent=self)
+        worker.succeeded.connect(self._on_login_succeeded)
+        worker.rejected.connect(self._on_login_rejected)
+        worker.finished.connect(worker.deleteLater)
+        self._login_worker = worker
+        worker.start()
 
-        # 1. Try Online Login First
-        try:
-            with httpx.Client(timeout=4.0) as client:
-                response = client.post(
-                    f"{API_BASE_URL}/api/v1/auth/login",
-                    json={"email": email, "password": password},
-                )
-                if response.status_code == 200:
-                    data = response.json()
-                    user_data = {
-                        "user_id": data.get("user_id", data.get("id", "")),
-                        "email": email,
-                        "username": data.get("username", email.split("@")[0]),
-                        "full_name": data.get("full_name", data.get("name", "Utilisateur")),
-                        "role": data.get("role", "EMPLOYEE"),
-                        "access_token": data.get("access_token", ""),
-                        "refresh_token": data.get("refresh_token", ""),
-                        "offline": False,
-                    }
-                    self._cache_credentials_locally(email, password, user_data)
-                    self.login_success.emit(user_data)
-                    return
-                elif response.status_code in (400, 401, 422):
-                    # Server was reached and explicitly rejected the credentials
-                    self._show_error(t("login.error"))
-                    self._login_btn.setEnabled(True)
-                    self._login_btn.setText(t("login.login_button"))
-                    return
-        except Exception as e:
-            logger.info("Server unreachable (%s), automatically falling back to offline authentication", e)
+    def _on_login_succeeded(self, user_data: dict):
+        self._login_btn.setEnabled(True)
+        self._login_btn.setText(t("login.login_button"))
+        self.login_success.emit(user_data)
 
-        # 2. Automatic Offline Fallback
-        self._authenticate_offline(email, password)
-
-    def _authenticate_offline(self, email: str, password: str):
-        from app.database import get_local_session
-        from app.models.user import LocalUser
-        import argon2
-
-        session = get_local_session()
-        try:
-            user = session.query(LocalUser).filter(
-                (LocalUser.email == email) | (LocalUser.username == email)
-            ).first()
-
-            if user and user.password_hash:
-                ph = argon2.PasswordHasher()
-                try:
-                    ph.verify(user.password_hash, password)
-                    user_data = {
-                        "user_id": user.id,
-                        "email": user.email,
-                        "username": user.username,
-                        "full_name": user.full_name,
-                        "role": user.role,
-                        "access_token": "",
-                        "refresh_token": "",
-                        "offline": True,
-                    }
-                    self.login_success.emit(user_data)
-                    return
-                except argon2.exceptions.VerifyMismatchError:
-                    pass
-
-            self._show_error(t("login.error"))
-        except Exception as e:
-            logger.error("Offline auth error: %s", e)
-            self._show_error(t("login.error"))
-        finally:
-            session.close()
-            self._login_btn.setEnabled(True)
-            self._login_btn.setText(t("login.login_button"))
+    def _on_login_rejected(self):
+        self._show_error(t("login.error"))
+        self._login_btn.setEnabled(True)
+        self._login_btn.setText(t("login.login_button"))
 
     def _try_local_login(self, email: str, password: str) -> bool:
         """Helper for headless testing."""

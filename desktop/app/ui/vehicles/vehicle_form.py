@@ -4,8 +4,6 @@ Fully localized for French and Arabic with RTL layout support.
 Supports uploading, previewing, and removing multiple vehicle photos.
 """
 import os
-import shutil
-import uuid
 from pathlib import Path
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QFormLayout, QHBoxLayout, QGridLayout,
@@ -355,15 +353,18 @@ class VehicleFormDialog(QDialog):
             if full_url in cache._cache:
                 pix = cache._cache[full_url]
             else:
-                # Try disk
+                # Try disk (local cache dir, then backend uploads relative to
+                # the repo when running in development on the server machine)
                 clean_rel = url.replace("/static/uploads/vehicles/", "").replace("/static/uploads/", "").lstrip("/")
                 from app.config import DATA_DIR
-                for candidate in [
-                    DATA_DIR / clean_rel,
-                    Path("/home/ayman/car-rental-system/backend/uploads/vehicles") / clean_rel,
-                    Path("/home/ayman/car-rental-system/backend/uploads") / clean_rel,
-                    Path(url),
-                ]:
+                import os
+                backend_uploads = Path(os.environ.get("BACKEND_UPLOADS_DIR", "")) if os.environ.get("BACKEND_UPLOADS_DIR") else None
+                candidates = [DATA_DIR / clean_rel]
+                if backend_uploads:
+                    candidates.append(backend_uploads / "vehicles" / clean_rel)
+                    candidates.append(backend_uploads / clean_rel)
+                candidates.append(Path(url))
+                for candidate in candidates:
                     if candidate.is_file():
                         pix = QPixmap(str(candidate))
                         break
@@ -446,15 +447,12 @@ class VehicleFormDialog(QDialog):
             if uploaded_url:
                 final_urls.append(uploaded_url)
             else:
-                # Offline fallback: queue for sync engine
+                # Offline: durably queue the file for the SyncEngine
+                # pending-upload processor (marker stored on the entity).
                 try:
-                    from app.config import DATA_DIR
-                    ext = Path(local_path).suffix
-                    filename = f"{uuid.uuid4().hex}{ext}"
-                    dest = DATA_DIR / "pending_uploads" / filename
-                    dest.parent.mkdir(parents=True, exist_ok=True)
-                    shutil.copy2(local_path, dest)
-                    final_urls.append(f"pending_uploads/{filename}")
+                    from app.sync.uploads import store_pending_file
+                    stored = store_pending_file(local_path)
+                    final_urls.append(f"pending_uploads/{stored.name}")
                 except Exception:
                     pass
 

@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (
     QStackedWidget, QLabel, QLineEdit, QPushButton,
     QStatusBar, QMessageBox, QComboBox, QMenu, QApplication
 )
-from PySide6.QtCore import Qt, QTimer, QEvent
+from PySide6.QtCore import Qt, QTimer, QEvent, QThread, Signal
 from PySide6.QtGui import QFont, QAction
 
 from app.i18n import t, is_rtl, set_language, load_translations, get_language
@@ -28,7 +28,6 @@ from app.models.vehicle_image import LocalVehicleImage
 from app.models.reservation import LocalReservation
 from app.models.maintenance import LocalMaintenance
 from app.services.api_client import ApiClient
-from app.sync.engine import SyncEngine
 from app.ui.widgets.sidebar import Sidebar
 from app.ui.dashboard import DashboardWidget
 from app.ui.vehicles.vehicle_list import VehicleListWidget
@@ -39,6 +38,84 @@ from app.ui.maintenance.maintenance_list import MaintenanceWidget
 from app.ui.settings.settings_widget import SettingsWidget
 
 logger = logging.getLogger(__name__)
+
+
+class DashboardFetcher(QThread):
+    """Fetches dashboard statistics from the API off the UI thread."""
+    stats_ready = Signal(dict, list)
+
+    def __init__(self, access_token: str, parent=None):
+        super().__init__(parent)
+        self._access_token = access_token
+
+    def run(self):
+        import requests
+        from app.config import API_BASE_URL, API_VERSION
+        overview = None
+        top_vehicles = []
+        try:
+            headers = {"Authorization": f"Bearer {self._access_token}"}
+            resp_stats = requests.get(
+                f"{API_BASE_URL}/api/{API_VERSION}/dashboard/stats",
+                headers=headers, timeout=5,
+            )
+            resp_perf = requests.get(
+                f"{API_BASE_URL}/api/{API_VERSION}/dashboard/vehicle-performance",
+                headers=headers, timeout=5,
+            )
+            if resp_stats.status_code == 200:
+                data = resp_stats.json()
+                overview = {
+                    "total_vehicles": data.get("total_vehicles", 0),
+                    "available": data.get("available", 0),
+                    "rented": data.get("rented", 0),
+                    "reserved": data.get("reserved", 0),
+                    "maintenance": data.get("maintenance", 0),
+                    "active_maintenances": data.get("active_maintenance_tickets", 0),
+                    "day_locations": data.get("today_rentals", 0),
+                    "today_revenue": data.get("today_revenue", 0.0),
+                    "week_locations": data.get("week_rentals", 0),
+                    "week_revenue": data.get("week_revenue", 0.0),
+                    "month_locations": data.get("month_rentals", 0),
+                    "month_revenue": data.get("month_revenue", 0.0),
+                }
+                top_vehicles = resp_perf.json() if resp_perf.status_code == 200 else []
+        except Exception as e:
+            logger.info("Dashboard fetch failed (offline?): %s", e)
+        if overview is not None:
+            self.stats_ready.emit(overview, top_vehicles)
+
+
+class SyncThread(QThread):
+    """Runs a full SyncEngine cycle in a background thread.
+
+    The engine is asyncio-based; it runs on its own event loop inside this
+    thread so the Qt UI thread is never blocked by network I/O.
+    """
+    sync_finished = Signal(dict)
+
+    def __init__(self, device_id: str, access_token: str, refresh_token: str, parent=None):
+        super().__init__(parent)
+        self._device_id = device_id
+        self._access_token = access_token
+        self._refresh_token = refresh_token
+
+    def run(self):
+        from app.sync.engine import SyncEngine
+        report: dict = {}
+        try:
+            engine = SyncEngine(self._device_id, self._access_token, self._refresh_token)
+            connected = asyncio.run(engine.check_connection())
+            report["is_online"] = connected
+            if connected and self._access_token:
+                result = asyncio.run(engine.sync())
+                report.update(result)
+                report["access_token"] = engine._access_token
+                report["refresh_token"] = engine._refresh_token
+        except Exception as e:
+            logger.debug("Sync thread note: %s", e)
+            report["is_online"] = False
+        self.sync_finished.emit(report)
 
 
 def _safely_cancel_hover():
@@ -72,17 +149,18 @@ class MainWindow(QMainWindow):
         # Cache user locally for offline login
         self._cache_user_locally(user_data)
 
-        self._setup_ui()
-        self._apply_theme(self._current_theme)
-
-        # Setup API Client
+        # Setup API Client BEFORE UI construction: page widgets (reservations)
+        # receive it during _setup_ui().
         self._api = ApiClient(API_BASE_URL)
         self._api.set_tokens(self._access_token, self._refresh_token)
+
+        self._setup_ui()
+        self._apply_theme(self._current_theme)
 
         # Setup Real-time WebSocket Client
         try:
             from app.services.realtime_client import RealtimeEventsClient
-            self._realtime_client = RealtimeEventsClient(self)
+            self._realtime_client = RealtimeEventsClient(self, access_token=self._access_token)
             self._realtime_client.event_received.connect(self._on_realtime_event)
             self._realtime_client.start()
         except Exception as e:
@@ -241,7 +319,7 @@ class MainWindow(QMainWindow):
         self._add_page("vehicles", self._vehicle_list)
 
         # 3. Reservations
-        self._reservations = ReservationWidget(self._device_id, self._user_data.get("user_id"), user_role=role)
+        self._reservations = ReservationWidget(self._device_id, self._user_data.get("user_id"), user_role=role, api_client=self._api)
         self._reservations.reservation_created.connect(self._on_reservation_updated)
         self._add_page("reservations", self._reservations)
 
@@ -401,73 +479,108 @@ class MainWindow(QMainWindow):
             session.close()
 
     def _refresh_dashboard(self):
-        if self._is_online and self._access_token:
-            import requests
-            from app.config import API_BASE_URL, API_VERSION
-            try:
-                headers = {"Authorization": f"Bearer {self._access_token}"}
-                resp_stats = requests.get(f"{API_BASE_URL}/api/{API_VERSION}/dashboard/stats", headers=headers, timeout=5)
-                resp_perf = requests.get(f"{API_BASE_URL}/api/{API_VERSION}/dashboard/vehicle-performance", headers=headers, timeout=5)
-                if resp_stats.status_code == 200:
-                    data = resp_stats.json()
-                    overview = {
-                        "total_vehicles": data.get("total_vehicles", 0),
-                        "available": data.get("available", 0),
-                        "rented": data.get("rented", 0),
-                        "reserved": data.get("reserved", 0),
-                        "maintenance": data.get("maintenance", 0),
-                        "active_maintenances": data.get("active_maintenance_tickets", 0),
-                        "day_locations": data.get("today_rentals", 0),
-                        "today_revenue": data.get("today_revenue", 0.0),
-                        "week_locations": data.get("week_rentals", 0),
-                        "week_revenue": data.get("week_revenue", 0.0),
-                        "month_locations": data.get("month_rentals", 0),
-                        "month_revenue": data.get("month_revenue", 0.0),
-                    }
-                    top_vehicles = resp_perf.json() if resp_perf.status_code == 200 else []
-                    self._dashboard.refresh_data(overview, top_vehicles)
-                    return
-            except Exception as e:
-                print("Dashboard API fetch failed, falling back to offline:", e)
-        overview = { "total_vehicles": 0, "available": 0, "rented": 0, "reserved": 0, "maintenance": 0, "active_maintenances": 0, "day_locations": 0, "today_revenue": 0.0, "week_locations": 0, "week_revenue": 0.0, "month_locations": 0, "month_revenue": 0.0 }
-        self._dashboard.refresh_data(overview, [])
-    def _run_sync(self):
-        """Execute non-blocking automatic background sync cycle."""
-        engine = SyncEngine(self._device_id, self._access_token, self._refresh_token)
-        try:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            is_connected = loop.run_until_complete(engine.check_connection())
+        """Render instantly from local data, then refresh via API in background.
 
+        Never performs network I/O on the UI thread. On transient API errors
+        the last known values are kept instead of showing zeros.
+        """
+        # Instant local snapshot (fast SQLite queries) so cards are populated
+        # before any network round-trip completes.
+        try:
+            session = get_local_session()
+            try:
+                total = session.query(LocalVehicle).count()
+                available = session.query(LocalVehicle).filter_by(status="AVAILABLE").count()
+                rented = session.query(LocalVehicle).filter_by(status="RENTED").count()
+                reserved = session.query(LocalVehicle).filter_by(status="RESERVED").count()
+                maint = session.query(LocalVehicle).filter_by(status="MAINTENANCE").count()
+                overview = {
+                    "total_vehicles": total,
+                    "available": available,
+                    "rented": rented,
+                    "reserved": reserved,
+                    "maintenance": maint,
+                    "active_maintenances": 0,
+                    "day_locations": 0,
+                    "today_revenue": None,
+                    "week_locations": 0,
+                    "week_revenue": None,
+                    "month_locations": 0,
+                    "month_revenue": None,
+                }
+            finally:
+                session.close()
+
+            # Keep previously fetched revenue values when offline/unknown.
+            prev = getattr(self, "_last_dashboard_overview", None) or {}
+            for key in ("today_revenue", "week_revenue", "month_revenue"):
+                if overview[key] is None:
+                    overview[key] = prev.get(key, 0.0)
+            self._last_dashboard_overview = dict(overview)
+            self._dashboard.refresh_data(overview, [])
+        except Exception as e:
+            logger.error("Local dashboard snapshot failed: %s", e)
+
+        if self._is_online and self._access_token:
+            fetcher = DashboardFetcher(self._access_token, parent=self)
+            fetcher.stats_ready.connect(self._on_dashboard_stats)
+            fetcher.finished.connect(fetcher.deleteLater)
+            self._dashboard_fetcher = fetcher  # keep reference
+            fetcher.start()
+
+    def _on_dashboard_stats(self, overview: dict, top_vehicles: list):
+        """Apply API dashboard results (delivered on the UI thread)."""
+        self._last_dashboard_overview = dict(overview)
+        self._dashboard.refresh_data(overview, top_vehicles or [])
+    def _run_sync(self):
+        """Execute the sync cycle in a background thread (never blocks UI)."""
+        if getattr(self, "_sync_thread", None) and self._sync_thread.isRunning():
+            return  # previous cycle still running — skip, avoid pile-up
+        thread = SyncThread(
+            self._device_id, self._access_token, self._refresh_token, parent=self
+        )
+        thread.sync_finished.connect(self._on_sync_finished)
+        thread.finished.connect(thread.deleteLater)
+        self._sync_thread = thread
+        thread.start()
+
+    def _on_sync_finished(self, report: dict):
+        """Handle background sync results on the UI thread."""
+        try:
+            is_connected = bool(report.get("is_online"))
             if is_connected:
                 was_offline = not self._is_online
                 self._is_online = True
-                if self._access_token:
-                    report = loop.run_until_complete(engine.sync())
-                    if engine._access_token != self._access_token:
-                        self._access_token = engine._access_token
-                        self._refresh_token = engine._refresh_token
-                        if self._api:
-                            self._api.set_tokens(self._access_token, self._refresh_token)
-                    push_res = report.get("push", {})
-                    pull_res = report.get("pull", {})
-                    if push_res.get("pushed", 0) > 0 or len(pull_res.get("items", [])) > 0:
-                        self._load_vehicles_from_local()
-                        self._refresh_dashboard()
-                        self._reservations.refresh_data()
-                        self._maintenance.refresh_data()
+
+                new_access = report.get("access_token")
+                if new_access and new_access != self._access_token:
+                    self._access_token = new_access
+                    self._refresh_token = report.get("refresh_token", self._refresh_token)
+                    if self._api:
+                        self._api.set_tokens(self._access_token, self._refresh_token)
+                    if hasattr(self, "_realtime_client") and self._realtime_client:
+                        self._realtime_client.update_token(self._access_token)
+
+                push_res = report.get("push", {})
+                pull_res = report.get("pull", {})
+                upload_res = report.get("uploads", {})
+                if (
+                    push_res.get("pushed", 0) > 0
+                    or len(pull_res.get("items", [])) > 0
+                    or upload_res.get("uploaded", 0) > 0
+                ):
+                    self._load_vehicles_from_local()
+                    self._refresh_dashboard()
+                    self._reservations.refresh_data()
+                    self._maintenance.refresh_data()
 
                 status_text = t("sync.reconnected") if was_offline else t("sync.online")
                 self.statusBar().showMessage(status_text, 4000)
             else:
                 self._is_online = False
                 self.statusBar().showMessage(t("sync.offline"))
-
-            loop.close()
         except Exception as e:
-            self._is_online = False
-            self.statusBar().showMessage(t("sync.offline"))
-            logger.debug("Sync cycle note: %s", e)
+            logger.debug("Sync result handling note: %s", e)
 
     def _on_refresh_clicked(self):
         self._refresh_btn.setText(t("topbar.refreshing"))
@@ -553,6 +666,25 @@ class MainWindow(QMainWindow):
             from app.sync.queue import SyncQueue
             queue = SyncQueue(session, self._device_id, self._user_data.get("user_id"))
             queue.enqueue("vehicle", vehicle_id, "CREATE", data)
+
+            # Register durable pending-upload records for offline images.
+            from app.sync.uploads import register_pending_upload
+            markers = set()
+            if (data.get("image_url") or "").startswith("pending_uploads/"):
+                markers.add(data["image_url"])
+            for u in data.get("images") or []:
+                if str(u).startswith("pending_uploads/"):
+                    markers.add(str(u))
+            for marker in markers:
+                register_pending_upload(
+                    session,
+                    marker=marker,
+                    entity_type="vehicle",
+                    entity_id=vehicle_id,
+                    upload_type="VEHICLE_IMAGE",
+                    remote_endpoint="/api/v1/vehicles/upload-image",
+                    field_name="image_url",
+                )
 
             session.commit()
             self._load_vehicles_from_local()
@@ -650,6 +782,25 @@ class MainWindow(QMainWindow):
             from app.sync.queue import SyncQueue
             queue = SyncQueue(session, self._device_id, self._user_data.get("user_id"))
             queue.enqueue("vehicle", vehicle_id, "UPDATE", data)
+
+            # Register durable pending-upload records for offline images.
+            from app.sync.uploads import register_pending_upload
+            markers = set()
+            if (data.get("image_url") or "").startswith("pending_uploads/"):
+                markers.add(data["image_url"])
+            for u in data.get("images") or []:
+                if str(u).startswith("pending_uploads/"):
+                    markers.add(str(u))
+            for marker in markers:
+                register_pending_upload(
+                    session,
+                    marker=marker,
+                    entity_type="vehicle",
+                    entity_id=vehicle_id,
+                    upload_type="VEHICLE_IMAGE",
+                    remote_endpoint="/api/v1/vehicles/upload-image",
+                    field_name="image_url",
+                )
 
             session.commit()
             self._load_vehicles_from_local()

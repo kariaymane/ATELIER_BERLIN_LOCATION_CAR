@@ -37,7 +37,7 @@ class AuthRepositoryTest {
         assertEquals("Admin Test", tokenManager.getUserName())
         assertEquals("ADMIN", tokenManager.getUserRole())
 
-        tokenManager.clearToken()
+        tokenManager.clearTokens()
         assertNull(tokenManager.getToken())
     }
 

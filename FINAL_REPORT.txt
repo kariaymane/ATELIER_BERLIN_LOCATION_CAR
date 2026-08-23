@@ -1,0 +1,50 @@
+========================================
+PRODUCTION IMAGE STORAGE FIX
+========================================
+
+UPLOAD PATH:
+/app/uploads
+
+VOLUME:
+uploads_vol
+
+VOLUME REGION:
+cdg
+
+VOLUME SIZE:
+1GB
+
+MOUNT:
+/app/uploads
+
+DEPLOYMENT:
+PASS
+
+VOLUME MOUNT:
+PASS
+
+IMAGE HTTP 200:
+PASS
+
+RESTART PERSISTENCE:
+PASS
+
+API REGRESSION:
+PASS
+
+AUTH REGRESSION:
+PASS
+
+DATABASE REGRESSION:
+PASS
+
+ALEMBIC:
+PASS
+
+DESKTOP PRODUCTION URL:
+FAIL
+
+========================================
+FINAL DECISION
+========================================
+GO

@@ -37,7 +37,9 @@ fun ProfileScreen(
     val userSession by viewModel.userSession.collectAsState()
     val syncStatus by viewModel.syncStatus.collectAsState()
     val currentTheme by viewModel.currentTheme.collectAsState()
+    val currentLanguage by viewModel.currentLanguage.collectAsState()
     var showThemeDialog by remember { mutableStateOf(false) }
+    var showLanguageDialog by remember { mutableStateOf(false) }
     var showResetDialog by remember { mutableStateOf(false) }
 
     val scrollState = rememberScrollState()
@@ -180,7 +182,31 @@ fun ProfileScreen(
                     border = androidx.compose.foundation.BorderStroke(1.dp, androidx.compose.material3.MaterialTheme.colorScheme.outline)
                 ) {
                     Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
-                        ProfileInfoRow(label = "Langue", value = "Français")
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { showLanguageDialog = true }
+                                .padding(vertical = 12.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Langue",
+                                fontSize = 15.sp,
+                                color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface,
+                                fontWeight = FontWeight.Medium
+                            )
+                            val langText = when (currentLanguage) {
+                                com.example.data.local.AppLanguage.FR -> "Français"
+                                com.example.data.local.AppLanguage.AR -> "العربية"
+                            }
+                            Text(
+                                text = "$langText 🌐",
+                                fontSize = 14.sp,
+                                color = ExecutivePrimaryGreen,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
                         HorizontalDivider(thickness = 0.5.dp, color = androidx.compose.material3.MaterialTheme.colorScheme.outlineVariant)
                         Row(
                             modifier = Modifier
@@ -391,6 +417,63 @@ fun ProfileScreen(
             confirmButton = {},
             dismissButton = {
                 TextButton(onClick = { showThemeDialog = false }) {
+                    Text("Fermer")
+                }
+            }
+        )
+    }
+
+    if (showLanguageDialog) {
+        AlertDialog(
+            onDismissRequest = { showLanguageDialog = false },
+            title = {
+                Text(
+                    text = "Choisir la langue / اختيار اللغة",
+                    fontWeight = FontWeight.Bold,
+                    color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface
+                )
+            },
+            text = {
+                Column {
+                    com.example.data.local.AppLanguage.entries.forEach { lang ->
+                        val label = when (lang) {
+                            com.example.data.local.AppLanguage.FR -> "🇫🇷 Français"
+                            com.example.data.local.AppLanguage.AR -> "🇲🇦 العربية"
+                        }
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    viewModel.setLanguage(lang)
+                                    showLanguageDialog = false
+                                }
+                                .padding(vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            RadioButton(
+                                selected = currentLanguage == lang,
+                                onClick = {
+                                    viewModel.setLanguage(lang)
+                                    showLanguageDialog = false
+                                },
+                                colors = RadioButtonDefaults.colors(
+                                    selectedColor = ExecutivePrimaryGreen
+                                )
+                            )
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Text(
+                                text = label,
+                                fontSize = 15.sp,
+                                fontWeight = if (currentLanguage == lang) FontWeight.Bold else FontWeight.Normal,
+                                color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = { showLanguageDialog = false }) {
                     Text("Fermer")
                 }
             }
