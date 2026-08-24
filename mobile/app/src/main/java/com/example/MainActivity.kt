@@ -21,6 +21,18 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.size
+import androidx.compose.material3.Text
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.Image
+import androidx.compose.ui.res.painterResource
+import com.example.R
 import com.example.ui.theme.ExecutiveGold
 import com.example.data.api.ApiClient
 import com.example.data.api.TokenManager
@@ -130,8 +142,33 @@ fun AtelierBerlinApp(viewModel: FleetViewModel) {
                     label = "ScreenTransition"
                 ) { screen ->
                     when (screen) {
-                        is Screen.Splash -> Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                            CircularProgressIndicator(color = ExecutiveGold)
+                        is Screen.Splash -> Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(androidx.compose.material3.MaterialTheme.colorScheme.background),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Image(
+                                    painter = painterResource(id = R.drawable.logo_transparent_officiel),
+                                    contentDescription = "ATELIER BERLIN LOCATION CAR Logo",
+                                    contentScale = androidx.compose.ui.layout.ContentScale.Fit,
+                                    modifier = Modifier.width(320.dp)
+                                )
+                                Spacer(modifier = Modifier.height(18.dp))
+                                Text(
+                                    text = "ATELIER BERLIN LOCATION CAR",
+                                    fontSize = 18.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = androidx.compose.ui.graphics.Color(0xFF1E4D38)
+                                )
+                                Spacer(modifier = Modifier.height(28.dp))
+                                CircularProgressIndicator(
+                                    color = ExecutiveGold,
+                                    modifier = Modifier.size(30.dp),
+                                    strokeWidth = 3.dp
+                                )
+                            }
                         }
                         is Screen.Dashboard -> DashboardScreen(viewModel = viewModel)
                         is Screen.Vehicles -> VehiclesScreen(viewModel = viewModel)
