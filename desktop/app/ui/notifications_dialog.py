@@ -45,7 +45,7 @@ class NotificationItemWidget(QFrame):
         footer = QHBoxLayout()
         due = self._notif.get("due_date") or ""
         if due:
-            date_lbl = QLabel(f"Date d'échéance : {due}")
+            date_lbl = QLabel(f"{t('notifications.due_date')}{due}")
             date_lbl.setFont(QFont("Hanken Grotesk", 9))
             footer.addWidget(date_lbl)
 
@@ -85,7 +85,7 @@ class NotificationsDialog(QDialog):
     def __init__(self, api_client: ApiClient, parent=None):
         super().__init__(parent)
         self._api = api_client
-        self.setWindowTitle("Centre de Notifications")
+        self.setWindowTitle(t("notifications.title"))
         self.setMinimumSize(600, 500)
         self._setup_ui()
         self.load_notifications()
@@ -146,7 +146,7 @@ class NotificationsDialog(QDialog):
 
         res = self._api.get_notifications(page=1)
         if not res or not res.get("items"):
-            empty_lbl = QLabel("✅ Aucune notification en attente. Tous les documents et véhicules sont à jour.")
+            empty_lbl = QLabel(t("notifications.empty"))
             empty_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
             self._items_layout.addWidget(empty_lbl)
             self._status_lbl.setText("0 notification")

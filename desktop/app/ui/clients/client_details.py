@@ -102,8 +102,8 @@ class ClientDetailsDialog(QDialog):
         for key in ("id", "phone", "email", "cin_number"):
             box = QVBoxLayout()
             cap = QLabel({
-                "id": "ID", "phone": "Téléphone",
-                "email": "Email", "cin_number": "CIN",
+                "id": "ID", "phone": t("clients.col_phone"),
+                "email": t("clients.col_email"), "cin_number": t("clients.col_cin"),
             }[key])
             cap.setStyleSheet("color: #6B7264; font-size: 11px;")
             val = QLabel(self._display(self._client.get(key)))
@@ -173,8 +173,10 @@ class ClientDetailsDialog(QDialog):
         self._table = QTableWidget()
         self._table.setColumnCount(9)
         self._hist_headers = [
-            "Véhicule", "Immatriculation", "Début", "Fin",
-            t("clients.total_days"), "Prix/jour", "Total", t("vehicles.status"), "ID",
+            t("clients.col_vehicle"), t("clients.col_registration"),
+            t("clients.col_start"), t("clients.col_end"),
+            t("clients.total_days"), t("clients.col_daily_price"),
+            t("clients.col_total"), t("vehicles.status"), "ID",
         ]
         self._table.setHorizontalHeaderLabels(self._hist_headers)
         hv = self._table.horizontalHeader()

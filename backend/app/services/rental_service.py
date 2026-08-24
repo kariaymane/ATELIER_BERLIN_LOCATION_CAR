@@ -7,11 +7,13 @@ from typing import Optional
 from uuid import UUID
 from datetime import datetime, timezone
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import IntegrityError
 
 from app.models.reservation import Reservation
 from app.models.vehicle import Vehicle
+from app.models.client import Client
 from app.repositories.rental_repository import RentalRepository
 from app.repositories.vehicle_repository import VehicleRepository
 from app.repositories.audit_repository import AuditRepository
@@ -67,6 +69,19 @@ class RentalService:
         if end_dt <= start_dt:
             return {"error": get_message("reservation.invalid_dates", lang)}
 
+        # A vehicle under maintenance cannot be reserved for any period
+        # (canonical rule: vehicle.status == MAINTENANCE blocks new bookings).
+        if vehicle.status == "MAINTENANCE":
+            return {"error": get_message("vehicle.in_maintenance", lang)}
+
+        # Validate the client link when provided (authoritative Clients table).
+        if data.customer_id is not None:
+            client = (await self._session.execute(
+                select(Client).where(Client.id == data.customer_id)
+            )).scalar_one_or_none()
+            if client is None:
+                return {"error": get_message("client.not_found", lang)}
+
         # Check availability (application-level, before the DB constraint)
         available = await self._repo.check_availability(
             data.vehicle_id, start_dt, end_dt
@@ -82,6 +97,7 @@ class RentalService:
         try:
             rental = Reservation(
                 vehicle_id=data.vehicle_id,
+                customer_id=data.customer_id,
                 customer_name=data.customer_name,
                 customer_phone=data.customer_phone,
                 customer_email=data.customer_email,

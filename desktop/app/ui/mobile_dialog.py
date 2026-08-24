@@ -21,7 +21,7 @@ class _ApiWorker(QThread):
 class MobileAppDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Contrôle de l'application Mobile")
+        self.setWindowTitle(t("mobile.title"))
         self.setFixedSize(500, 440)
 
         from app.config import API_BASE_URL
@@ -35,12 +35,12 @@ class MobileAppDialog(QDialog):
         layout.setSpacing(14)
 
         # Header
-        header = QLabel("📱 Intégration Mobile App")
+        header = QLabel(t("mobile.header"))
         header.setFont(QFont("Libre Caslon Text", 16, QFont.Weight.Bold))
         header.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(header)
 
-        info = QLabel("L'application mobile est une interface connectée directement à cette même base de données centrale PostgreSQL.")
+        info = QLabel(t("mobile.info"))
         info.setFont(QFont("Hanken Grotesk", 10))
         info.setWordWrap(True)
         info.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -53,8 +53,8 @@ class MobileAppDialog(QDialog):
         status_layout.setContentsMargins(16, 16, 16, 16)
         status_layout.setVerticalSpacing(12)
 
-        self.lbl_api_status = QLabel("Vérification...")
-        self.lbl_api_url = QLabel("Vérification...")
+        self.lbl_api_status = QLabel(t("mobile.checking"))
+        self.lbl_api_url = QLabel(t("mobile.checking"))
         self.lbl_vehicles = QLabel("-")
         self.lbl_reservations = QLabel("-")
         self.lbl_maintenance = QLabel("-")

@@ -5,6 +5,9 @@ from uuid import UUID
 
 class RentalCreate(BaseModel):
     vehicle_id: UUID
+    # Canonical client link: set when the reservation is created for an
+    # existing Client entity (desktop client selector / API clients).
+    customer_id: Optional[UUID] = None
     customer_name: str = Field(..., min_length=2, max_length=255)
     # Optional everywhere else in the system (DB column is nullable; desktop UI
     # and Android model treat it as optional) — keep length rules when provided.

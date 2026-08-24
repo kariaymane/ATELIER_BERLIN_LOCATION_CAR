@@ -74,6 +74,12 @@ def main() -> int:
                 mw._switch_page(key)
                 QApplication.processEvents()
                 results[f"nav_{key}"] = True
+            # Let deferred startup work (initial_load timer, sync thread
+            # start) actually run before verifying thread lifecycle.
+            spin = QEventLoop()
+            QTimer.singleShot(2500, spin.quit)
+            spin.exec()
+
             # Verify background sync thread does not crash and finishes.
             from PySide6.QtCore import QEventLoop as _Loop
             try:

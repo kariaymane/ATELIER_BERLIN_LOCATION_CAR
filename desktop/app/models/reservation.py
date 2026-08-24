@@ -10,6 +10,7 @@ class LocalReservation(LocalBase):
 
     id = Column(String(36), primary_key=True)
     vehicle_id = Column(String(36), nullable=False)
+    customer_id = Column(String(36), nullable=True)  # canonical Client link
     customer_name = Column(String(255), nullable=True)
     customer_phone = Column(String(20), nullable=True)
     customer_email = Column(String(255), nullable=True)

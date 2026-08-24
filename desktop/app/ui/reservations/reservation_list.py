@@ -19,6 +19,7 @@ from app.i18n import t, is_rtl
 from app.database import get_local_session
 from app.models.vehicle import LocalVehicle
 from app.models.reservation import LocalReservation
+from app.models.client import LocalClient
 from app.sync.queue import SyncQueue
 
 logger = logging.getLogger(__name__)
@@ -51,23 +52,37 @@ class ReservationFormDialog(QDialog):
 
         form = QFormLayout()
 
+        # Client selection: existing Client OR new client (typed below)
+        from PySide6.QtWidgets import QComboBox
+        self._client_combo = QComboBox()
+        self._client_combo.addItem(t("reservations.new_client"), None)
+        self._clients_cache = self._load_clients_for_selection()
+        for c in self._clients_cache:
+            label = f"{c.get('first_name', '')} {c.get('last_name', '')}".strip()
+            if c.get("phone"):
+                label += f" — {c['phone']}"
+            self._client_combo.addItem(label, c.get("id"))
+        self._client_combo.currentIndexChanged.connect(self._on_client_selected)
+        form.addRow(t("sidebar.clients"), self._client_combo)
+
         # Customer Info
         self._customer_name = QLineEdit()
         self._customer_phone = QLineEdit()
         self._customer_email = QLineEdit()
+        self._selected_client_id = None
         self._id_card_path = ""
         self._license_path = ""
         
-        self._id_card_btn = QPushButton("Choisir une image...")
+        self._id_card_btn = QPushButton(t("reservations.choose_image"))
         self._id_card_btn.clicked.connect(self._choose_id_card)
-        self._license_btn = QPushButton("Choisir une image...")
+        self._license_btn = QPushButton(t("reservations.choose_image"))
         self._license_btn.clicked.connect(self._choose_license)
         
         form.addRow(t("reservations.client_name"), self._customer_name)
         form.addRow(t("reservations.client_phone"), self._customer_phone)
-        form.addRow("Email du Client", self._customer_email)
-        form.addRow("Carte d'identification", self._id_card_btn)
-        form.addRow("Permis de conduire", self._license_btn)
+        form.addRow(t("reservations.email_client"), self._customer_email)
+        form.addRow(t("reservations.id_card"), self._id_card_btn)
+        form.addRow(t("reservations.license"), self._license_btn)
 
         # Dates
         now = QDateTime.currentDateTime()
@@ -103,6 +118,38 @@ class ReservationFormDialog(QDialog):
         btns.addWidget(cancel)
         btns.addWidget(self.save_btn)
         layout.addLayout(btns)
+
+    def _load_clients_for_selection(self):
+        """Existing clients from the local cache (offline-safe)."""
+        try:
+            session = get_local_session()
+            try:
+                rows = session.query(LocalClient).order_by(
+                    LocalClient.last_name, LocalClient.first_name).all()
+                return [{
+                    "id": c.id,
+                    "first_name": c.first_name or "",
+                    "last_name": c.last_name or "",
+                    "phone": c.phone or "",
+                    "email": c.email or "",
+                } for c in rows]
+            finally:
+                session.close()
+        except Exception as e:
+            logger.warning("Client list load failed: %s", e)
+            return []
+
+    def _on_client_selected(self, index: int):
+        client_id = self._client_combo.currentData()
+        self._selected_client_id = client_id
+        if client_id:
+            for c in self._clients_cache:
+                if c.get("id") == client_id:
+                    self._customer_name.setText(
+                        f"{c.get('first_name', '')} {c.get('last_name', '')}".strip())
+                    self._customer_phone.setText(c.get("phone", ""))
+                    self._customer_email.setText(c.get("email", ""))
+                    break
 
     def _recalculate(self):
         start = self._start_dt.dateTime()
@@ -182,6 +229,7 @@ class ReservationFormDialog(QDialog):
         
         self.saved.emit({
             "vehicle_id": self.vehicle.get("id"),
+            "customer_id": self._selected_client_id,
             "customer_name": self.customer_name.text().strip(),
             "customer_phone": self._customer_phone.text().strip(),
             "customer_email": self._customer_email.text().strip(),
@@ -344,7 +392,11 @@ class ReservationWidget(QWidget):
         """Fetch all real reservations and vehicles from SQLite local DB."""
         session = get_local_session()
         try:
-            available = session.query(LocalVehicle).filter_by(status="AVAILABLE").all()
+            # Operational vehicles for new reservations: availability for the
+            # chosen dates is governed by the overlap check, not by status.
+            available = session.query(LocalVehicle).filter(
+                ~LocalVehicle.status.in_(["MAINTENANCE", "SOLD", "INACTIVE"])
+            ).all()
 
             while self._grid.count():
                 item = self._grid.takeAt(0)
@@ -524,31 +576,87 @@ class ReservationWidget(QWidget):
         dialog.exec()
 
     _save_reservation = lambda self, data: self._create_reservation_record(data)
+    @staticmethod
+    def _parse_dt(value):
+        """Parse an ISO datetime string tolerating Z / offsets / naive forms."""
+        if not value:
+            return None
+        try:
+            dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+            return dt
+        except Exception:
+            return None
+
     def _create_reservation_record(self, data: dict):
         session = get_local_session()
         try:
             v_id = data["vehicle_id"]
-            new_start = data["start_datetime"]
-            new_end = data["end_datetime"]
+            new_start = self._parse_dt(data["start_datetime"])
+            new_end = self._parse_dt(data["end_datetime"])
 
-            # Double-booking prevention check locally in SQLite
-            overlapping = session.query(LocalReservation).filter(
+            if not new_start or not new_end or new_end <= new_start:
+                QMessageBox.warning(self, t("common.error"), t("reservations.err_date_order"))
+                return
+
+            # Double-booking prevention — canonical overlap rule, real
+            # datetime comparison (never string comparison):
+            #   start_A < end_B AND end_A > start_B   (adjacent allowed)
+            # CANCELLED and COMPLETED reservations never block.
+            overlapping = False
+            for r in session.query(LocalReservation).filter(
                 LocalReservation.vehicle_id == v_id,
                 LocalReservation.status.in_(["ACTIVE", "RESERVED"]),
-                LocalReservation.start_datetime < new_end,
-                LocalReservation.end_datetime > new_start,
-            ).first()
+            ).all():
+                r_start = self._parse_dt(r.start_datetime)
+                r_end = self._parse_dt(r.end_datetime)
+                if r_start and r_end and r_start < new_end and r_end > new_start:
+                    overlapping = True
+                    break
             if overlapping:
-                QMessageBox.warning(self, t("common.error"), "Ce véhicule possède déjà une réservation active sur cette période.")
+                QMessageBox.warning(self, t("common.error"), t("reservations.double_booking"))
                 return
 
             res_id = str(uuid.uuid4())
             data["id"] = res_id
             now_iso = datetime.now(timezone.utc).isoformat()
 
+            # Client relationship: existing client selected in the dialog, or
+            # a new Client created from the entered information.
+            customer_id = data.get("customer_id")
+            if not customer_id:
+                customer_id = str(uuid.uuid4())
+                new_client = LocalClient(
+                    id=customer_id,
+                    first_name=data.get("customer_name", "").split(" ")[0],
+                    last_name=" ".join(data.get("customer_name", "").split(" ")[1:]),
+                    phone=data.get("customer_phone"),
+                    email=data.get("customer_email"),
+                    identity_card_image=data.get("identity_card_image"),
+                    driving_license_image=data.get("driving_license_image"),
+                    status="ACTIVE",
+                    created_at=now_iso,
+                    updated_at=now_iso,
+                    version=1,
+                )
+                session.add(new_client)
+                queue_tmp = SyncQueue(session, self._device_id, self._user_id)
+                queue_tmp.enqueue("client", customer_id, "CREATE", {
+                    "id": customer_id,
+                    "first_name": new_client.first_name,
+                    "last_name": new_client.last_name,
+                    "phone": new_client.phone,
+                    "email": new_client.email,
+                    "identity_card_image": new_client.identity_card_image,
+                    "driving_license_image": new_client.driving_license_image,
+                    "status": "ACTIVE",
+                })
+                data["customer_id"] = customer_id
+            data["customer_name"] = data.get("customer_name")
+
             res = LocalReservation(
                 id=res_id,
                 vehicle_id=data["vehicle_id"],
+                customer_id=customer_id,
                 customer_name=data["customer_name"],
                 customer_phone=data.get("customer_phone"),
                 customer_email=data.get("customer_email"),
@@ -568,16 +676,14 @@ class ReservationWidget(QWidget):
             )
             session.add(res)
 
-            vehicle = session.query(LocalVehicle).filter_by(id=data["vehicle_id"]).first()
-            if vehicle:
-                vehicle.status = "RESERVED"
-                vehicle.updated_at = now_iso
-                vehicle.version += 1
+            # CANONICAL: vehicle.status is NOT changed on reservation creation
+            # (matches the backend — availability is governed by date-overlap,
+            # not by vehicle.status). The old local RESERVED manipulation
+            # caused vehicles to disappear from the available list for all
+            # dates after any booking.
 
             queue = SyncQueue(session, self._device_id, self._user_id)
             queue.enqueue("reservation", res_id, "CREATE", data)
-            if vehicle:
-                queue.enqueue("vehicle", vehicle.id, "UPDATE", {"id": vehicle.id, "status": "RESERVED"})
 
             # Register durable pending-upload records for offline documents.
             from app.sync.uploads import register_pending_upload

@@ -224,7 +224,7 @@ class LoginWindow(QWidget):
 
         card_layout.addSpacing(6)
 
-        self._sub_title = QLabel("Gestion de Flotte Automobile & Opérations")
+        self._sub_title = QLabel(t("app_subtitle"))
         self._sub_title.setFont(QFont("Hanken Grotesk", 10))
         self._sub_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._sub_title.setStyleSheet("color: #6B7264; background: transparent;")

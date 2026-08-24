@@ -10,7 +10,7 @@ Selecting a client opens the Client Details view (canonical rental report).
 """
 import logging
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, Signal, QThread
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
@@ -23,6 +23,25 @@ from app.models.client import LocalClient
 from app.models.reservation import LocalReservation
 
 logger = logging.getLogger(__name__)
+
+
+class ClientsFetcher(QThread):
+    """Fetches the client list from the authoritative API off the UI thread."""
+    clients_ready = Signal(list)
+
+    def __init__(self, api_client, parent=None):
+        super().__init__(parent)
+        self._api = api_client
+
+    def run(self):
+        try:
+            resp = self._api.get_clients(page=1, page_size=100)
+            if isinstance(resp, dict) and "clients" in resp:
+                self.clients_ready.emit(resp["clients"])
+                return
+        except Exception as e:
+            logger.info("Clients fetch failed: %s", e)
+        self.clients_ready.emit(None)  # None == fall back to local cache
 
 
 class ClientsWidget(QWidget):
@@ -94,19 +113,26 @@ class ClientsWidget(QWidget):
     # ── Data loading ──────────────────────────────────────────────
 
     def refresh_data(self):
-        """Refresh clients from the authoritative API; fall back to SQLite."""
-        loaded_live = False
-        if self._api is not None:
-            try:
-                resp = self._api.get_clients(page=1, page_size=100)
-                if isinstance(resp, dict) and "clients" in resp:
-                    self._clients = resp["clients"]
-                    loaded_live = True
-            except Exception as e:
-                logger.info("Clients API fetch failed (offline?): %s", e)
-        if not loaded_live:
+        """Refresh clients: API via background thread when authenticated,
+        otherwise the labeled local cache. Never blocks the UI thread."""
+        if self._api is not None and getattr(self._api, "_access_token", ""):
+            fetcher = ClientsFetcher(self._api, parent=self)
+            fetcher.clients_ready.connect(self._on_clients_fetched)
+            fetcher.finished.connect(fetcher.deleteLater)
+            self._fetcher = fetcher
+            fetcher.start()
+        else:
             self._clients = self._load_from_local_cache()
-        self._set_mode_label(live=loaded_live)
+            self._set_mode_label(live=False)
+            self._render()
+
+    def _on_clients_fetched(self, clients):
+        if clients is None:
+            self._clients = self._load_from_local_cache()
+            self._set_mode_label(live=False)
+        else:
+            self._clients = clients
+            self._set_mode_label(live=True)
         self._render()
 
     @staticmethod
