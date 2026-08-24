@@ -348,3 +348,8 @@ data class ClientRentalsReportDto(
     @Json(name = "rentals") val rentals: List<ClientRentalRowDto> = emptyList(),
     @Json(name = "vehicles") val vehicles: List<ClientVehicleBreakdownDto> = emptyList()
 )
+
+@JsonClass(generateAdapter = true)
+data class LogoutRequestDto(
+    @Json(name = "refresh_token") val refreshToken: String
+)

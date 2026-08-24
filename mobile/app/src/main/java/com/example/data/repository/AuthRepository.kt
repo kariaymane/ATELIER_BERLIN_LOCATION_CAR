@@ -1,7 +1,9 @@
 package com.example.data.repository
 
+import android.util.Log
 import com.example.data.api.ApiClient
 import com.example.data.api.LoginRequestDto
+import com.example.data.api.RefreshRequestDto
 import com.example.data.api.TokenManager
 import com.example.data.model.UserSession
 import kotlinx.coroutines.Dispatchers
@@ -10,6 +12,18 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
 
+/**
+ * Authentication repository.
+ *
+ * Security contract (single source of truth = backend):
+ *  - A stored token is NEVER treated as authentication by itself.
+ *  - Session restore validates against the server (refresh-token flow,
+ *    falling back to an authenticated probe when no refresh token exists).
+ *  - User identity comes only from server responses or identity previously
+ *    persisted from a server response. No fabricated defaults.
+ *  - Logout clears tokens and identity; the next start requires email +
+ *    password again.
+ */
 class AuthRepository(
     private val apiClient: ApiClient,
     private val tokenManager: TokenManager
@@ -17,34 +31,108 @@ class AuthRepository(
     private val _currentUserSession = MutableStateFlow<UserSession?>(null)
     val currentUserSession: StateFlow<UserSession?> = _currentUserSession.asStateFlow()
 
-    init {
-        restoreSession()
+    private val _restoring = MutableStateFlow(false)
+    val restoring: StateFlow<Boolean> = _restoring.asStateFlow()
+
+    /**
+     * Called at app start (during Splash). Validates any stored session
+     * against the backend before the user may enter the application.
+     */
+    suspend fun validateAndRestoreSession() {
+        _restoring.value = true
+        try {
+            val access = tokenManager.getToken()
+            val refresh = tokenManager.getRefreshToken()
+            if (access.isNullOrBlank() && refresh.isNullOrBlank()) {
+                clearLocalSession()
+                return
+            }
+
+            // Preferred path: the server verifies the refresh token.
+            if (!refresh.isNullOrBlank()) {
+                val refreshed = withContext(Dispatchers.IO) {
+                    try {
+                        apiClient.getService()
+                            .refreshToken(RefreshRequestDto(refreshToken = refresh))
+                    } catch (e: Exception) {
+                        Log.w("AUTH", "restore refresh network failure: ${e.message}")
+                        null
+                    }
+                }
+                val body = refreshed?.body()
+                if (refreshed?.isSuccessful == true && body != null && body.accessToken.isNotBlank()) {
+                    tokenManager.saveToken(body.accessToken)
+                    if (body.refreshToken.isNotBlank()) {
+                        tokenManager.saveRefreshToken(body.refreshToken)
+                    }
+                    val session = buildSessionFromStoredIdentity(token = body.accessToken)
+                    if (session != null) {
+                        _currentUserSession.value = session
+                        return
+                    }
+                    clearLocalSession()
+                    return
+                }
+                // Refresh explicitly rejected (401/invalid) -> session dead.
+                if (refreshed != null) {
+                    clearLocalSession()
+                    return
+                }
+                // Network unreachable: do NOT silently authenticate. A stored
+                // session may only unlock the app when the server confirms it.
+                clearLocalSession()
+                return
+            }
+
+            // No refresh token: probe an authenticated endpoint with the
+            // stored access token.
+            val probe = withContext(Dispatchers.IO) {
+                try {
+                    apiClient.getService().getDashboardStats()
+                } catch (e: Exception) {
+                    Log.w("AUTH", "restore probe network failure: ${e.message}")
+                    null
+                }
+            }
+            if (probe?.isSuccessful == true) {
+                val session = buildSessionFromStoredIdentity(token = access!!)
+                if (session != null) {
+                    _currentUserSession.value = session
+                    return
+                }
+            }
+            clearLocalSession()
+        } finally {
+            _restoring.value = false
+        }
     }
 
-    fun restoreSession() {
-        val token = tokenManager.getToken()
-        if (!token.isNullOrBlank()) {
-            val email = tokenManager.getUserEmail()
-            val name = tokenManager.getUserName()
-            val role = tokenManager.getUserRole()
-            val id = tokenManager.getUserId() ?: "u1"
-            val initials = name.split(" ")
-                .mapNotNull { it.firstOrNull()?.uppercase() }
-                .take(2)
-                .joinToString("")
-                .ifEmpty { "SE" }
-
-            _currentUserSession.value = UserSession(
-                id = id,
-                email = email,
-                name = name,
-                role = role,
-                token = token,
-                initials = initials
-            )
-        } else {
-            _currentUserSession.value = null
+    /**
+     * Build a session strictly from identity previously persisted from a
+     * server login response. Returns null when identity is missing — the
+     * user must sign in again (never fabricate identity).
+     */
+    private fun buildSessionFromStoredIdentity(token: String): UserSession? {
+        val id = tokenManager.getUserId()
+        val email = tokenManager.getStoredUserEmail()
+        val name = tokenManager.getStoredUserName()
+        val role = tokenManager.getStoredUserRole()
+        if (id.isNullOrBlank() || email.isNullOrBlank() || role.isNullOrBlank()) {
+            return null
         }
+        val initials = name.split(" ")
+            .mapNotNull { it.firstOrNull()?.uppercase() }
+            .take(2)
+            .joinToString("")
+            .ifEmpty { "SE" }
+        return UserSession(
+            id = id,
+            email = email,
+            name = name,
+            role = role,
+            token = token,
+            initials = initials
+        )
     }
 
     suspend fun login(email: String, password: String): Result<UserSession> = withContext(Dispatchers.IO) {
@@ -55,14 +143,19 @@ class AuthRepository(
 
             if (response.isSuccessful && response.body() != null) {
                 val body = response.body()!!
+                // Identity MUST come from the server. No defaults, no fallbacks.
+                val userId = body.userId
+                val userRole = body.role
+                if (userId.isNullOrBlank() || userRole.isNullOrBlank()) {
+                    return@withContext Result.failure<UserSession>(
+                        Exception("Réponse d'authentification du serveur invalide.")
+                    )
+                }
                 tokenManager.saveToken(body.accessToken)
-                tokenManager.saveRefreshToken(body.refreshToken)
-                val userId = body.user?.id ?: body.userId ?: "user-1"
+                tokenManager.saveRefreshToken(body.refreshToken ?: "")
                 val userEmail = body.user?.email ?: email.trim()
-                val userRole = body.user?.role ?: body.role ?: "ADMIN"
-                val fullName = body.fullName ?: listOfNotNull(body.user?.firstName, body.user?.lastName)
-                    .joinToString(" ")
-                    .ifBlank { userEmail.substringBefore("@").replaceFirstChar { it.uppercase() } }
+                val fullName = body.fullName?.takeIf { it.isNotBlank() }
+                    ?: userEmail.substringBefore("@").replaceFirstChar { it.uppercase() }
 
                 tokenManager.saveUser(
                     id = userId,
@@ -110,8 +203,29 @@ class AuthRepository(
         }
     }
 
-    fun logout() {
-        tokenManager.clearTokens()
+    /**
+     * Logout: clear tokens and identity locally and invalidate the refresh
+     * token server-side (best effort). The next start requires email +
+     * password.
+     */
+    suspend fun logout() = withContext(Dispatchers.IO) {
+        val refresh = tokenManager.getRefreshToken()
+        val access = tokenManager.getToken()
+        if (!refresh.isNullOrBlank() && !access.isNullOrBlank()) {
+            try {
+                apiClient.getService().logout(
+                    com.example.data.api.LogoutRequestDto(refreshToken = refresh),
+                    "Bearer $access"
+                )
+            } catch (e: Exception) {
+                Log.w("AUTH", "server logout skipped: ${e.message}")
+            }
+        }
+        clearLocalSession()
+    }
+
+    private fun clearLocalSession() {
+        tokenManager.clearAll()
         _currentUserSession.value = null
     }
 

@@ -16,6 +16,12 @@ interface ApiService {
         @Body body: LoginRequestDto
     ): Response<LoginResponseDto>
 
+    @POST("auth/logout")
+    suspend fun logout(
+        @Body body: LogoutRequestDto,
+        @Header("Authorization") authorization: String
+    ): Response<Unit>
+
     @POST("auth/refresh")
     suspend fun refreshToken(
         @Body body: RefreshRequestDto
