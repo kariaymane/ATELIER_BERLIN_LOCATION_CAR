@@ -68,6 +68,8 @@ def init_local_db():
         try:
             result = conn.execute(text("PRAGMA table_info(reservations)")).fetchall()
             col_names = [row[1] for row in result]
+            if "customer_id" not in col_names:
+                conn.execute(text("ALTER TABLE reservations ADD COLUMN customer_id VARCHAR(36)"))
             if "customer_email" not in col_names:
                 conn.execute(text("ALTER TABLE reservations ADD COLUMN customer_email VARCHAR(255)"))
             if "identity_card_image" not in col_names:

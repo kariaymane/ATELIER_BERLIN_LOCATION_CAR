@@ -45,6 +45,7 @@ FR: dict[str, str] = {
     "reservation.created": "Réservation créée avec succès.",
     "reservation.cancelled": "Réservation annulée avec succès.",
     "reservation.invalid_dates": "Les dates de réservation sont invalides.",
+    "vehicle.in_maintenance": "Ce véhicule est en maintenance et ne peut pas être réservé.",
 
     # Clients
     "client.not_found": "Client non trouvé.",
@@ -103,6 +104,7 @@ AR: dict[str, str] = {
     "reservation.created": "تم إنشاء الحجز بنجاح.",
     "reservation.cancelled": "تم إلغاء الحجز بنجاح.",
     "reservation.invalid_dates": "تواريخ الحجز غير صالحة.",
+    "vehicle.in_maintenance": "هذه السيارة في الصيانة ولا يمكن حجزها.",
 
     # Clients
     "client.not_found": "العميل غير موجود.",

@@ -299,6 +299,7 @@ class SyncEngine:
                             r = LocalReservation(id=eid)
                             session.add(r)
                         r.vehicle_id = payload.get("vehicle_id", getattr(r, 'vehicle_id', ""))
+                        r.customer_id = payload.get("customer_id", getattr(r, 'customer_id', None))
                         r.customer_name = payload.get("customer_name", getattr(r, 'customer_name', ""))
                         r.customer_phone = payload.get("customer_phone", getattr(r, 'customer_phone', None))
                         r.customer_email = payload.get("customer_email", getattr(r, 'customer_email', None))

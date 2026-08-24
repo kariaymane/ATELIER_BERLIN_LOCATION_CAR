@@ -287,6 +287,7 @@ class SyncService:
             res = Reservation(
                 id=UUID(res_id) if res_id else None,
                 vehicle_id=UUID(payload["vehicle_id"]),
+                customer_id=UUID(payload["customer_id"]) if payload.get("customer_id") else None,
                 customer_name=payload.get("customer_name"),
                 customer_phone=payload.get("customer_phone"),
                 customer_email=payload.get("customer_email"),
@@ -608,7 +609,9 @@ class SyncService:
                 items.append({
                     "entity_type": "reservation", "entity_id": str(r.id), "operation": "UPDATE",
                     "payload": {
-                        "id": str(r.id), "vehicle_id": str(r.vehicle_id), "customer_name": r.customer_name,
+                        "id": str(r.id), "vehicle_id": str(r.vehicle_id),
+                        "customer_id": str(r.customer_id) if r.customer_id else None,
+                        "customer_name": r.customer_name,
                         "customer_phone": r.customer_phone, "customer_email": r.customer_email, "identity_card_image": r.identity_card_image, "driving_license_image": r.driving_license_image, "start_datetime": r.start_datetime.isoformat(),
                         "end_datetime": r.end_datetime.isoformat(), "daily_price": float(r.daily_price),
                         "num_days": r.num_days, "total_price": float(r.total_price), "deposit": float(r.deposit),

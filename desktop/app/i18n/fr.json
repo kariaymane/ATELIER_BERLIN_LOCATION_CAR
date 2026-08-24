@@ -144,7 +144,13 @@
     "summary_calc": "{days} jours x {daily} DH = {total} DH",
     "btn_confirm": "Confirmer la réservation",
     "err_name_req": "Le nom du client est obligatoire.",
-    "err_date_order": "La date de fin doit être après la date de début."
+    "err_date_order": "La date de fin doit être après la date de début.",
+    "email_client": "Email du Client",
+    "id_card": "Carte d'identification",
+    "license": "Permis de conduire",
+    "choose_image": "Choisir une image...",
+    "new_client": "— Nouveau client —",
+    "double_booking": "Ce véhicule est déjà réservé pendant cette période."
   },
   "maintenance": {
     "title": "Maintenance",
@@ -267,6 +273,29 @@
     "doc_missing": "Document non disponible",
     "open_details": "Détails",
     "offline_data": "Données locales (hors ligne)",
-    "live_data": "Données serveur en direct"
+    "live_data": "Données serveur en direct",
+    "col_name": "Client",
+    "col_phone": "Téléphone",
+    "col_email": "Email",
+    "col_cin": "CIN",
+    "col_vehicle": "Véhicule",
+    "col_registration": "Immatriculation",
+    "col_start": "Début",
+    "col_end": "Fin",
+    "col_daily_price": "Prix/jour",
+    "col_total": "Total",
+    "rental_short": "loc",
+    "day_short": "j"
+  },
+  "notifications": {
+    "title": "Centre de Notifications",
+    "empty": "✅ Aucune notification en attente. Tous les documents et véhicules sont à jour.",
+    "due_date": "Date d'échéance : "
+  },
+  "mobile": {
+    "title": "Contrôle de l'application Mobile",
+    "header": "📱 Intégration Mobile App",
+    "info": "L'application mobile est une interface connectée directement à cette même base de données centrale PostgreSQL.",
+    "checking": "Vérification..."
   }
 }

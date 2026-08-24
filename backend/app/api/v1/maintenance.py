@@ -241,7 +241,15 @@ async def create_maintenance(
         data={"maintenance_id": str(new_maint.id), "status": new_maint.status, "step": new_maint.step}
     )
 
-    return new_maint
+    # Re-query with eager-loaded parts (same pattern as GET endpoints) so
+    # response serialization cannot hit a detached instance.
+    from sqlalchemy.orm import selectinload as _selectinload
+    reloaded = await db.execute(
+        select(Maintenance)
+        .options(_selectinload(Maintenance.parts))
+        .where(Maintenance.id == new_maint.id)
+    )
+    return reloaded.scalar_one()
 
 @router.post("/{maintenance_id}/advance", response_model=MaintenanceResponse)
 async def advance_maintenance_step(
