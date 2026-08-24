@@ -99,8 +99,11 @@ class FleetRepository(
         if (isoString.isNullOrBlank()) return ""
         return try {
             val parser = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", java.util.Locale.getDefault())
+            parser.timeZone = java.util.TimeZone.getTimeZone("UTC")
             val formatter = java.text.SimpleDateFormat("dd MMM yyyy, HH:mm", java.util.Locale.getDefault())
-            val date = parser.parse(isoString.replace("Z", "").substringBefore("."))
+            formatter.timeZone = java.util.TimeZone.getDefault()
+            val cleanIso = isoString.substringBefore(".").replace("Z", "")
+            val date = parser.parse(cleanIso)
             date?.let { formatter.format(it) } ?: isoString.take(10)
         } catch (e: Exception) {
             isoString.take(10)

@@ -101,13 +101,26 @@ class TestMaintenanceGuard:
     async def test_vehicle_in_maintenance_rejected(
         self, client: AsyncClient, admin_token, db_session
     ):
-        v = await _vehicle(db_session, status="MAINTENANCE", reg="MNT-1-D-4")
-        resp = await client.post("/api/v1/rentals/", json=_payload(v),
+        v = await _vehicle(db_session, status="AVAILABLE", reg="MNT-1-D-4")
+        from app.models.maintenance import Maintenance
+        now = datetime.now()
+        m = Maintenance(
+            vehicle_id=v.id,
+            type="panne",
+            start_datetime=now,
+            expected_end_datetime=now + timedelta(days=10),
+            status="ACTIVE",
+            step="DIAGNOSTIC",
+            parts_cost=0, labor_cost=0, other_cost=0
+        )
+        db_session.add(m)
+        await db_session.commit()
+        
+        # Try to book during maintenance
+        resp = await client.post("/api/v1/rentals/", json=_payload(v, start=now + timedelta(days=1), days=2, total=500.0),
                                  headers={"Authorization": f"Bearer {admin_token}"})
         assert resp.status_code == 400
-        assert "maintenance" in resp.json().get("detail", "").lower() or \
-               "صيانة" in resp.json().get("detail", "") or \
-               "maintenance" in str(resp.json())
+        assert "double" in str(resp.json()).lower() or "maintenance" in str(resp.json()).lower() or "réservé" in str(resp.json()).lower()
 
     async def test_operational_vehicle_still_bookable(
         self, client: AsyncClient, admin_token, db_session

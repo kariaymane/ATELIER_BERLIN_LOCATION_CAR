@@ -30,8 +30,12 @@ class RentalRepository(BaseRepository[Reservation]):
         exclude_id: Optional[UUID] = None,
     ) -> bool:
         """Check if a vehicle is available for the given date range.
-        Uses the same logic as the EXCLUSION constraint for consistency."""
-        query = (
+        Checks both reservations and maintenance schedules."""
+        from app.models.maintenance import Maintenance
+        from sqlalchemy import func, or_, text
+        
+        # 1. Check Reservations
+        query_res = (
             select(func.count(Reservation.id))
             .where(
                 Reservation.vehicle_id == vehicle_id,
@@ -41,10 +45,26 @@ class RentalRepository(BaseRepository[Reservation]):
             )
         )
         if exclude_id:
-            query = query.where(Reservation.id != exclude_id)
-        result = await self._session.execute(query)
-        count = result.scalar()
-        return count == 0
+            query_res = query_res.where(Reservation.id != exclude_id)
+        count_res = await self._session.scalar(query_res)
+        
+        if count_res and count_res > 0:
+            return False
+
+        # 2. Check Maintenances
+        # We need to coalesce expected_end_datetime, actual_end_datetime, or start_datetime
+        query_maint = (
+            select(func.count(Maintenance.id))
+            .where(
+                Maintenance.vehicle_id == vehicle_id,
+                Maintenance.status.notin_(["CANCELLED", "COMPLETED"]),
+                Maintenance.start_datetime < end_dt,
+                func.coalesce(Maintenance.expected_end_datetime, Maintenance.actual_end_datetime, Maintenance.start_datetime) > start_dt
+            )
+        )
+        count_maint = await self._session.scalar(query_maint)
+        
+        return count_maint == 0
 
     async def get_by_vehicle(
         self,

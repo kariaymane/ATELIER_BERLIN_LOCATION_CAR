@@ -23,7 +23,7 @@ class LoginWorker(QThread):
     local SQLite cache when the server is unreachable.
     """
     succeeded = Signal(dict)
-    rejected = Signal()
+    rejected = Signal(str)
 
     def __init__(self, email: str, password: str, parent=None):
         super().__init__(parent)
@@ -42,11 +42,17 @@ class LoginWorker(QThread):
                 logger.error("Failed to cache credentials locally: %s", e)
             self.succeeded.emit(user_data)
             return
+
+        if getattr(self, '_server_rejected', False):
+            self.rejected.emit(t("login.error"))
+            return
+
         user_data = self._authenticate_offline()
         if user_data is not None:
             self.succeeded.emit(user_data)
         else:
-            self.rejected.emit()
+            # Network failed AND offline failed
+            self.rejected.emit(t("common.error_connection"))
 
     def _cache_credentials_locally(self, email, password, user_data):
         """Securely store Argon2 hashed password and metadata in SQLite."""
@@ -358,7 +364,7 @@ class LoginWindow(QWidget):
             self._password_input.setEchoMode(QLineEdit.EchoMode.Password)
 
     def _on_login(self):
-        email = self._email_input.text().strip()
+        email = self._email_input.text().strip().lower()
         password = self._password_input.text()
 
         if not email or not password:
@@ -384,8 +390,10 @@ class LoginWindow(QWidget):
         self._login_btn.setText(t("login.login_button"))
         self.login_success.emit(user_data)
 
-    def _on_login_rejected(self):
-        self._show_error(t("login.error"))
+    def _on_login_rejected(self, error_msg: str = None):
+        if not error_msg:
+            error_msg = t("login.error")
+        self._show_error(error_msg)
         self._login_btn.setEnabled(True)
         self._login_btn.setText(t("login.login_button"))
 

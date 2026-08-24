@@ -2,7 +2,7 @@
 Maintenance list and creation view.
 Fully localized for French and Arabic with RTL layout support.
 """
-from datetime import datetime, timezone
+
 import uuid
 import json
 from PySide6.QtWidgets import (
@@ -18,6 +18,7 @@ from app.i18n import t, is_rtl
 from app.database import get_local_session
 from app.models.vehicle import LocalVehicle
 from app.models.maintenance import LocalMaintenance
+from datetime import datetime, timezone
 from app.sync.queue import SyncQueue
 
 
@@ -311,7 +312,16 @@ class MaintenanceWidget(QWidget):
                 self._table.setItem(i, 2, QTableWidgetItem(m.description or "—"))
 
                 # 3. Retour Prévu
-                return_date = str(m.expected_end_datetime)[:10] if m.expected_end_datetime else "—"
+                return_date = "—"
+                if m.expected_end_datetime:
+                    try:
+                        
+                        dt = datetime.fromisoformat(m.expected_end_datetime.replace('Z', '+00:00'))
+                        if dt.tzinfo is None:
+                            dt = dt.replace(tzinfo=timezone.utc)
+                        return_date = dt.astimezone().strftime("%Y-%m-%d")
+                    except Exception:
+                        return_date = str(m.expected_end_datetime)[:10]
                 self._table.setItem(i, 3, QTableWidgetItem(return_date))
 
                 # 4. Étape (Badge)

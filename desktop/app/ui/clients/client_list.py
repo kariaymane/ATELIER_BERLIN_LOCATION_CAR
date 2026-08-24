@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 
 class ClientsFetcher(QThread):
     """Fetches the client list from the authoritative API off the UI thread."""
-    clients_ready = Signal(list)
+    clients_ready = Signal(object)
 
     def __init__(self, api_client, parent=None):
         super().__init__(parent)

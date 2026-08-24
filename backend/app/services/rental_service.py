@@ -69,10 +69,8 @@ class RentalService:
         if end_dt <= start_dt:
             return {"error": get_message("reservation.invalid_dates", lang)}
 
-        # A vehicle under maintenance cannot be reserved for any period
-        # (canonical rule: vehicle.status == MAINTENANCE blocks new bookings).
-        if vehicle.status == "MAINTENANCE":
-            return {"error": get_message("vehicle.in_maintenance", lang)}
+        # Maintenance availability is now handled by check_availability 
+        # based on date overlaps rather than a global vehicle status lock.
 
         # Validate the client link when provided (authoritative Clients table).
         if data.customer_id is not None:

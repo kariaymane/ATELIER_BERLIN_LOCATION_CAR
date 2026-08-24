@@ -426,28 +426,8 @@ class ReservationWidget(QWidget):
             queue = SyncQueue(session, self._device_id, self._user_id)
 
             for i, r in enumerate(reservations):
-                # Auto-complete expired reservations
-                if r.status in ("ACTIVE", "RESERVED") and r.end_datetime:
-                    try:
-                        end_dt = datetime.fromisoformat(r.end_datetime.replace('Z', '+00:00'))
-                        if end_dt.tzinfo is None:
-                            end_dt = end_dt.replace(tzinfo=timezone.utc)
-                    except Exception:
-                        end_dt = None
-
-                    if end_dt and end_dt < now_time:
-                        r.status = "COMPLETED"
-                        r.updated_at = now_time.isoformat()
-                        r.version += 1
-                        queue.enqueue("reservation", r.id, "UPDATE", {"id": r.id, "status": "COMPLETED"})
-
-                        v_auto = session.query(LocalVehicle).filter_by(id=r.vehicle_id).first()
-                        if v_auto and v_auto.status == "RESERVED":
-                            v_auto.status = "AVAILABLE"
-                            v_auto.updated_at = now_time.isoformat()
-                            v_auto.version += 1
-                            queue.enqueue("vehicle", v_auto.id, "UPDATE", {"id": v_auto.id, "status": "AVAILABLE"})
-                        session.commit()
+                # Removed erroneous auto-complete of expired reservations logic.
+                # A reservation must be manually closed when the vehicle is returned.
 
                 # Vehicle details
                 v = session.query(LocalVehicle).filter_by(id=r.vehicle_id).first()
@@ -462,9 +442,11 @@ class ReservationWidget(QWidget):
                 self._table.setItem(i, 1, QTableWidgetItem(v_name))
 
                 # 2. Dates
-                start_raw = r.start_datetime[:10] if r.start_datetime else ""
-                end_raw = r.end_datetime[:10] if r.end_datetime else ""
-                dates_str = f"{start_raw} - {end_raw}" if (start_raw or end_raw) else "-"
+                start_dt_obj = self._parse_dt(r.start_datetime)
+                end_dt_obj = self._parse_dt(r.end_datetime)
+                start_local = start_dt_obj.astimezone().strftime("%Y-%m-%d") if start_dt_obj else ""
+                end_local = end_dt_obj.astimezone().strftime("%Y-%m-%d") if end_dt_obj else ""
+                dates_str = f"{start_local} - {end_local}" if (start_local or end_local) else "-"
                 self._table.setItem(i, 2, QTableWidgetItem(dates_str))
 
                 # 3. Prix Total
@@ -612,6 +594,22 @@ class ReservationWidget(QWidget):
                 if r_start and r_end and r_start < new_end and r_end > new_start:
                     overlapping = True
                     break
+
+            if not overlapping:
+                from app.models.maintenance import LocalMaintenance
+                from datetime import timedelta
+                for m in session.query(LocalMaintenance).filter(
+                    LocalMaintenance.vehicle_id == v_id,
+                    LocalMaintenance.status.notin_(["CANCELLED", "COMPLETED"]),
+                ).all():
+                    m_start = self._parse_dt(m.start_datetime)
+                    m_end = self._parse_dt(m.expected_end_datetime) or self._parse_dt(m.actual_end_datetime)
+                    if m_end is None and m_start:
+                        m_end = m_start + timedelta(days=1)
+                    if m_start and m_end and m_start < new_end and m_end > new_start:
+                        overlapping = True
+                        break
+
             if overlapping:
                 QMessageBox.warning(self, t("common.error"), t("reservations.double_booking"))
                 return

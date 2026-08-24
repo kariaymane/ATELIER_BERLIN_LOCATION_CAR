@@ -230,6 +230,7 @@
     "loading": "Chargement...",
     "no_data": "Aucune donnée",
     "error": "Erreur",
+  "error_connection": "Erreur de connexion",
     "success": "Succès",
     "profile_msg": "Connecté en tant que {name} ({email})"
   },
