@@ -78,9 +78,15 @@ class TokenManager(context: Context) {
     }
 
     fun getUserId(): String? = prefs.getString(KEY_USER_ID, null)
-    fun getUserEmail(): String = prefs.getString(KEY_USER_EMAIL, "BERLINECAR@GMAIL.COM") ?: "BERLINECAR@GMAIL.COM"
-    fun getUserName(): String = prefs.getString(KEY_USER_NAME, "Berlin Car Admin") ?: "Berlin Car Admin"
+    fun getUserEmail(): String = prefs.getString(KEY_USER_EMAIL, "") ?: ""
+    fun getUserName(): String = prefs.getString(KEY_USER_NAME, "") ?: ""
     fun getUserRole(): String = prefs.getString(KEY_USER_ROLE, "ADMIN") ?: "ADMIN"
+
+    // Strict identity accessors: values previously persisted from a SERVER
+    // login response only. No fabricated defaults — null means "unknown".
+    fun getStoredUserEmail(): String? = prefs.getString(KEY_USER_EMAIL, null)
+    fun getStoredUserName(): String = prefs.getString(KEY_USER_NAME, "") ?: ""
+    fun getStoredUserRole(): String? = prefs.getString(KEY_USER_ROLE, null)
 
     fun clearAll() {
         prefs.edit().clear().commit()

@@ -209,7 +209,7 @@ class LoginWindow(QWidget):
         if os.path.exists(logo_path):
             pixmap = QPixmap(logo_path)
             if not pixmap.isNull():
-                self._logo_lbl.setPixmap(pixmap.scaledToWidth(360, Qt.TransformationMode.SmoothTransformation))
+                self._logo_lbl.setPixmap(pixmap.scaledToWidth(440, Qt.TransformationMode.SmoothTransformation))
         card_layout.addWidget(self._logo_lbl)
 
         card_layout.addSpacing(20)

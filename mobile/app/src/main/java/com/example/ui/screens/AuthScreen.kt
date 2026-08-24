@@ -82,7 +82,7 @@ fun AuthScreen(
                 contentDescription = "ATELIER BERLIN LOCATION CAR Logo",
                 contentScale = ContentScale.Fit,
                 modifier = Modifier
-                    .width(220.dp)
+                    .width(260.dp)
                     .wrapContentHeight()
             )
 

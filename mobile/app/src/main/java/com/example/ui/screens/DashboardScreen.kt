@@ -91,7 +91,7 @@ fun DashboardScreen(
                     contentDescription = "ATELIER BERLIN LOCATION CAR Logo",
                     contentScale = ContentScale.Fit,
                     modifier = Modifier
-                        .width(160.dp)
+                        .width(190.dp)
                         .wrapContentHeight()
                 )
                 Spacer(modifier = Modifier.height(4.dp))

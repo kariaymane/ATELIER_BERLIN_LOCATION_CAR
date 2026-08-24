@@ -120,6 +120,14 @@ class FleetViewModel(
                 }
             }
         }
+        // SECURITY: a stored token is never authentication by itself.
+        // Validate any saved session against the backend during Splash;
+        // the collector above then routes to Dashboard (valid) or Auth.
+        viewModelScope.launch {
+            // Give the session collector a tick to install before emitting.
+            kotlinx.coroutines.delay(50)
+            authRepository.validateAndRestoreSession()
+        }
     }
 
     override fun onCleared() {
@@ -239,7 +247,9 @@ class FleetViewModel(
     }
 
     fun logout() {
-        authRepository.logout()
+        viewModelScope.launch {
+            authRepository.logout()
+        }
         _navigationStack.value = listOf(Screen.Auth)
     }
 

@@ -506,42 +506,20 @@ class MainWindow(QMainWindow):
     def _refresh_dashboard(self):
         """Render instantly from local data, then refresh via API in background.
 
-        Never performs network I/O on the UI thread. On transient API errors
-        the last known values are kept instead of showing zeros.
+        Never performs network I/O on the UI thread. The offline snapshot uses
+        EXACTLY the backend canonical rule (status ACTIVE+COMPLETED, start in
+        [start, end), Africa/Casablanca) so cached values never contradict the
+        server. On transient API errors the last known server values win.
         """
-        # Instant local snapshot (fast SQLite queries) so cards are populated
-        # before any network round-trip completes.
         try:
-            session = get_local_session()
-            try:
-                total = session.query(LocalVehicle).count()
-                available = session.query(LocalVehicle).filter_by(status="AVAILABLE").count()
-                rented = session.query(LocalVehicle).filter_by(status="RENTED").count()
-                reserved = session.query(LocalVehicle).filter_by(status="RESERVED").count()
-                maint = session.query(LocalVehicle).filter_by(status="MAINTENANCE").count()
-                overview = {
-                    "total_vehicles": total,
-                    "available": available,
-                    "rented": rented,
-                    "reserved": reserved,
-                    "maintenance": maint,
-                    "active_maintenances": 0,
-                    "day_locations": 0,
-                    "today_revenue": None,
-                    "week_locations": 0,
-                    "week_revenue": None,
-                    "month_locations": 0,
-                    "month_revenue": None,
-                }
-            finally:
-                session.close()
-
-            # Keep previously fetched revenue values when offline/unknown.
-            prev = getattr(self, "_last_dashboard_overview", None) or {}
+            from app.sync.dashboard_cache import compute_local_overview
+            overview = compute_local_overview()
+            # Keep previously fetched server revenue when offline values are
+            # unavailable (e.g. no cached reservations yet).
+            prev = getattr(self, "_last_server_overview", None) or {}
             for key in ("today_revenue", "week_revenue", "month_revenue"):
-                if overview[key] is None:
+                if overview.get(key) is None:
                     overview[key] = prev.get(key, 0.0)
-            self._last_dashboard_overview = dict(overview)
             self._dashboard.refresh_data(overview, [])
         except Exception as e:
             logger.error("Local dashboard snapshot failed: %s", e)
@@ -555,19 +533,36 @@ class MainWindow(QMainWindow):
 
     def _on_dashboard_stats(self, overview: dict, top_vehicles: list):
         """Apply API dashboard results (delivered on the UI thread)."""
-        self._last_dashboard_overview = dict(overview)
+        self._last_server_overview = dict(overview)
         self._dashboard.refresh_data(overview, top_vehicles or [])
+
     def _run_sync(self):
         """Execute the sync cycle in a background thread (never blocks UI)."""
-        if getattr(self, "_sync_thread", None) and self._sync_thread.isRunning():
-            return  # previous cycle still running — skip, avoid pile-up
+        thread = getattr(self, "_sync_thread", None)
+        if thread is not None:
+            try:
+                if thread.isRunning():
+                    return  # previous cycle still running — skip, avoid pile-up
+            except RuntimeError:
+                pass  # C++ object already deleted — safe to start a new one
+            self._sync_thread = None
         thread = SyncThread(
             self._device_id, self._access_token, self._refresh_token, parent=self
         )
         thread.sync_finished.connect(self._on_sync_finished)
+        thread.finished.connect(self._on_sync_thread_finished)
         thread.finished.connect(thread.deleteLater)
         self._sync_thread = thread
         thread.start()
+
+    def _on_sync_thread_finished(self):
+        """Release the Python reference once the thread truly finished.
+
+        deleteLater destroys the C++ object asynchronously; clearing the
+        attribute here prevents any later isRunning() access on a deleted
+        object (which previously killed the sync loop silently).
+        """
+        self._sync_thread = None
 
     def _on_sync_finished(self, report: dict):
         """Handle background sync results on the UI thread."""
