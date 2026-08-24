@@ -235,6 +235,11 @@ class ApiClient:
         r = self._request("get", f"/api/v1/clients/{cid}/history")
         return r.json() if r and r.status_code == 200 else None
 
+    def get_client_rentals_report(self, cid: str) -> Optional[dict]:
+        """Canonical live client report: summary KPIs + rentals + vehicles."""
+        r = self._request("get", f"/api/v1/clients/{cid}/rentals")
+        return r.json() if r and r.status_code == 200 else None
+
     def upload_client_image(self, file_path: str) -> Optional[dict]:
         from pathlib import Path
         import mimetypes

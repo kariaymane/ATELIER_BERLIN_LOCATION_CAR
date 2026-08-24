@@ -35,6 +35,8 @@ from app.ui.vehicles.vehicle_form import VehicleFormDialog
 from app.ui.vehicles.vehicle_hover_preview import get_hover_preview, get_existing_hover_preview
 from app.ui.reservations.reservation_list import ReservationWidget
 from app.ui.maintenance.maintenance_list import MaintenanceWidget
+from app.ui.clients.client_list import ClientsWidget
+from app.ui.clients.client_details import ClientDetailsDialog
 from app.ui.settings.settings_widget import SettingsWidget
 
 logger = logging.getLogger(__name__)
@@ -329,7 +331,13 @@ class MainWindow(QMainWindow):
         self._maintenance.maintenance_add_requested.connect(self._save_maintenance)
         self._add_page("maintenance", self._maintenance)
 
-        # 5. Settings
+        # 5. Clients (live canonical data from the API)
+        self._clients_page = ClientsWidget(api_client=self._api)
+        self._clients_page.client_selected.connect(self._open_client_details)
+        self._add_page("clients", self._clients_page)
+
+
+        # 6. Settings
         self._settings = SettingsWidget(user_data=self._user_data)
         self._settings.theme_changed.connect(self._apply_theme)
         self._settings.language_changed.connect(self._change_language)
@@ -362,10 +370,26 @@ class MainWindow(QMainWindow):
             self._load_vehicles_from_local()
         elif page_key == "dashboard":
             self._refresh_dashboard()
+        elif page_key == "clients":
+            self._clients_page.refresh_data()
         elif page_key == "reservations":
             self._reservations.refresh_data()
         elif page_key == "maintenance":
             self._maintenance.refresh_data()
+
+    def _open_client_details(self, client_id: str):
+        """Open the canonical Client Details view for the selected client."""
+        row = None
+        for c in getattr(self._clients_page, "_clients", []):
+            if str(c.get("id")) == str(client_id):
+                row = c
+                break
+        if row is None:
+            row = {"id": client_id}
+        dialog = ClientDetailsDialog(row, api_client=self._api, parent=self)
+        dialog.exec()
+        # After closing (possible mutations elsewhere), refresh live state.
+        self._clients_page.refresh_data()
 
 
     def _change_language(self, lang: str):
@@ -400,6 +424,7 @@ class MainWindow(QMainWindow):
         self._vehicle_list.retranslate_ui()
         self._reservations.retranslate_ui()
         self._maintenance.retranslate_ui()
+        self._clients_page.retranslate_ui()
         self._settings.retranslate_ui()
         get_hover_preview().retranslate_ui()
 
@@ -573,6 +598,9 @@ class MainWindow(QMainWindow):
                     self._refresh_dashboard()
                     self._reservations.refresh_data()
                     self._maintenance.refresh_data()
+                    # Client KPIs/history must never go stale after mutations.
+                    if self._current_page_key == "clients":
+                        self._clients_page.refresh_data()
 
                 status_text = t("sync.reconnected") if was_offline else t("sync.online")
                 self.statusBar().showMessage(status_text, 4000)

@@ -11,11 +11,11 @@
 | Item | Value |
 |---|---|
 | Package name | `ATELIER_BERLIN_LOCATION_CAR_WINDOWS.zip` |
-| Size | 61,339,586 bytes |
+| Size | 61,360,394 bytes |
 | Build date | 2026-08-23 19:49 (UTC+1) |
 | Contents | `ATELIER_BERLIN_LOCATION_CAR.exe` + `_internal/` (bundled Qt DLLs incl. `qwindows.dll`, assets, translations) |
 | Validation | Built via PyInstaller; launch-tested under Wine (application start, local database initialization, GUI event loop, zero errors). Physical-Windows validation not performed. |
-| SHA-256 | `3c7851edd4c3ee08924fa6b96471db8114d015d445ad7a1d52aa10361cd75412` |
+| SHA-256 | `66ddb0c83c5ee45e4c7521eb87e2424e76520257aaa541aba4e0e89f710fbe66` |
 
 ## Android Package
 
@@ -27,7 +27,7 @@
 | Build date | 2026-08-23 |
 | API endpoint | Production server URL embedded (`car-rental-system.fly.dev`) |
 | Validation | Unit tests passed; login/bootstrap/vehicles/reservations/maintenance/notifications verified in code and tests; Room read cache included; no Flutter components |
-| SHA-256 | `3dba4431211613b37c60f06b67c509db8668f78b2d3e11438f6a1a940736eea5` |
+| SHA-256 | `a6158f5b34e2399e0597010c2ed5a2d3be7a70e7917956f3696680efe6d1adaf` |
 | Signing | EXTERNAL SIGNING REQUIRED — release keystore passwords exist only in the project's CI secrets; a release APK must be produced through the configured CI pipeline or by the client's signing authority |
 
 ## Backend Status
@@ -50,13 +50,14 @@
 
 | Suite | Result |
 |---|---|
-| Backend pytest | 60 passed, 1 skipped |
-| Desktop pytest | 31 passed, 1 skipped |
+| Backend pytest | 73 passed, 1 skipped |
+| Desktop pytest | 41 passed, 1 skipped |
 | Realtime authentication tests | 19/19 PASS |
 | Offline pending upload tests | 17/17 PASS |
 | Double-booking protection | PASS |
 | Client synchronization | PASS |
 | Android unit tests | 11/11 PASS |
+| Clients canonical report tests | 6/6 PASS + live container probe PASS |
 | Android debug build | PASS |
 | Android release compilation (no signing) | PASS |
 | Docker rebuild verification | PASS |

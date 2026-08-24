@@ -21,6 +21,8 @@ sealed class Screen {
     data class ReservationDetail(val reservationId: String) : Screen()
     data object Maintenance : Screen()
     data class MaintenanceDetail(val maintenanceId: String) : Screen()
+    data object Clients : Screen()
+    data class ClientDetail(val clientId: String) : Screen()
     data object Profile : Screen()
     data object Auth : Screen()
 }
@@ -125,6 +127,11 @@ class FleetViewModel(
         realtimeSyncManager?.stop()
     }
 
+    // ── Clients (read-only passthrough to canonical backend contract) ──
+    suspend fun getClients(search: String? = null) = fleetRepository.getClients(search)
+    suspend fun getClientRentalsReport(clientId: String) =
+        fleetRepository.getClientRentalsReport(clientId)
+
     fun navigateTo(screen: Screen) {
         _navigationStack.value = _navigationStack.value + screen
         updateTabForScreen(screen)
@@ -155,6 +162,8 @@ class FleetViewModel(
         when (screen) {
             is Screen.Dashboard -> _currentTab.value = BottomNavTab.DASHBOARD
             is Screen.Vehicles, is Screen.VehicleDetail -> _currentTab.value = BottomNavTab.VEHICLES
+            is Screen.Clients -> _currentTab.value = BottomNavTab.RESERVATIONS
+            is Screen.ClientDetail -> _currentTab.value = BottomNavTab.RESERVATIONS
             is Screen.Reservations, is Screen.ReservationDetail -> _currentTab.value = BottomNavTab.RESERVATIONS
             is Screen.Maintenance, is Screen.MaintenanceDetail -> _currentTab.value = BottomNavTab.MAINTENANCE
             is Screen.Profile -> _currentTab.value = BottomNavTab.PROFILE
