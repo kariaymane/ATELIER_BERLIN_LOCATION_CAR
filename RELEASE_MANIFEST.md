@@ -11,11 +11,11 @@
 | Item | Value |
 |---|---|
 | Package name | `ATELIER_BERLIN_LOCATION_CAR_WINDOWS.zip` |
-| Size | 61,426,741 bytes |
+| Size | 61,426,740 bytes |
 | Build date | 2026-08-23 19:49 (UTC+1) |
 | Contents | `ATELIER_BERLIN_LOCATION_CAR.exe` + `_internal/` (bundled Qt DLLs incl. `qwindows.dll`, assets, translations) |
 | Validation | Built via PyInstaller; launch-tested under Wine (application start, local database initialization, GUI event loop, zero errors). Physical-Windows validation not performed. |
-| SHA-256 | `a6165c8b08bffcb03885b7ec9bc4bc4ca19a9a1b59b2ed29e5092531c4e81905` |
+| SHA-256 | `9dcf54997f1bbd346a8293671c830d9faf227bcfd75338ee5fedf81038634cf2` |
 
 ## Android Package
 
@@ -27,7 +27,7 @@
 | Build date | 2026-08-23 |
 | API endpoint | Production server URL embedded (`car-rental-system.fly.dev`) |
 | Validation | Unit tests passed; login/bootstrap/vehicles/reservations/maintenance/notifications verified in code and tests; Room read cache included; no Flutter components |
-| SHA-256 | `dc9fb7ad76bbe4c956234935640e1827494ce8ac9228e9de790386ac2f5fbf9b` |
+| SHA-256 | `a7ebebce1788346127c1325642687d8d8614f4fd2567ea017c1634290e568286` |
 | Signing | EXTERNAL SIGNING REQUIRED — release keystore passwords exist only in the project's CI secrets; a release APK must be produced through the configured CI pipeline or by the client's signing authority |
 
 ## Backend Status
