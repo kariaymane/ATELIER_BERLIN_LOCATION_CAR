@@ -230,6 +230,7 @@
     "loading": "جاري التحميل...",
     "no_data": "لا توجد بيانات",
     "error": "خطأ",
+  "error_connection": "خطأ في الاتصال",
     "success": "نجاح",
     "profile_msg": "متصل بحساب {name} ({email})"
   },

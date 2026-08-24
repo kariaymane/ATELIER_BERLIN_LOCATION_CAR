@@ -9,6 +9,7 @@ import sys
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ["CAR_RENTAL_DB_RESET"] = "1"
+os.environ["API_BASE_URL"] = "http://localhost:9999"  # Force offline fallback for test
 
 from PySide6.QtWidgets import QApplication
 from PySide6.QtCore import QTimer, QEventLoop
@@ -98,6 +99,7 @@ def main() -> int:
                 QApplication.processEvents()
                 results["sync_thread_clean"] = True
         except Exception as e:
+            print("MainWindow construction exception:", type(e).__name__, str(e), file=sys.stderr)
             errors.append(f"MainWindow construction: {type(e).__name__}: {e}")
             timer.start(0)
             return
@@ -105,11 +107,25 @@ def main() -> int:
             if not timer.isActive():
                 timer.start(0)
 
+    login.login_success.connect(lambda x: print("LOGIN SUCCESS", file=sys.stderr))
     login.login_success.connect(on_success)
+
+    def on_rejected(msg):
+        print("LOGIN REJECTED:", msg, file=sys.stderr)
+        errors.append(f"Login rejected: {msg}")
+        timer.start(0)
+        
+    login._error_label.linkActivated.connect(on_rejected)
+    
+    # We also need to capture LoginWorker emitted events!
+    # Let's connect after _on_login has created the worker!
 
     # Trigger the real login path (worker thread).
     login._on_login()
+    if getattr(login, "_login_worker", None):
+        login._login_worker.rejected.connect(on_rejected)
 
+    print("WAITING FOR LOGIN...", file=sys.stderr)
     timer.start(30000)  # hard timeout
     loop.exec()
 
