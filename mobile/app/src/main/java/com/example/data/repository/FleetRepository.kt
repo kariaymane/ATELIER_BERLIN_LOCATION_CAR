@@ -3,6 +3,8 @@ package com.example.data.repository
 import android.util.Log
 import androidx.room.withTransaction
 import com.example.data.api.ApiClient
+import com.example.data.api.ClientRentalsReportDto
+import com.example.data.api.ClientDto
 import com.example.data.api.MaintenanceDto
 import com.example.data.api.NotificationDto
 import com.example.data.api.RentalDto
@@ -777,4 +779,36 @@ class FleetRepository(
             Result.failure(e)
         }
     }
+
+    // ── Clients (read-only, canonical backend contract) ──
+
+    suspend fun getClients(search: String? = null): Result<List<ClientDto>> =
+        withContext(Dispatchers.IO) {
+            try {
+                val response = apiClient.getService().getClients(search = search)
+                if (response.isSuccessful && response.body() != null) {
+                    Result.success(response.body()!!.clients)
+                } else {
+                    Result.failure(Exception("HTTP ${'$'}{response.code()}"))
+                }
+            } catch (e: Exception) {
+                Log.e("CLIENTS", "getClients failed: ${'$'}{e.message}")
+                Result.failure(e)
+            }
+        }
+
+    suspend fun getClientRentalsReport(clientId: String): Result<ClientRentalsReportDto> =
+        withContext(Dispatchers.IO) {
+            try {
+                val response = apiClient.getService().getClientRentalsReport(clientId)
+                if (response.isSuccessful && response.body() != null) {
+                    Result.success(response.body()!!)
+                } else {
+                    Result.failure(Exception("HTTP ${'$'}{response.code()}"))
+                }
+            } catch (e: Exception) {
+                Log.e("CLIENTS", "client report failed: ${'$'}{e.message}")
+                Result.failure(e)
+            }
+        }
 }

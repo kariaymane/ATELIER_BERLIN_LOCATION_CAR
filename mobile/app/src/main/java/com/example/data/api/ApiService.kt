@@ -121,4 +121,21 @@ interface ApiService {
 
     @POST("notifications/mark-all-read")
     suspend fun markAllNotificationsRead(): Response<Unit>
+
+    @GET("clients/")
+    suspend fun getClients(
+        @Query("page") page: Int = 1,
+        @Query("page_size") pageSize: Int = 100,
+        @Query("search") search: String? = null
+    ): Response<ClientListResponseDto>
+
+    @GET("clients/{id}")
+    suspend fun getClient(
+        @Path("id") id: String
+    ): Response<ClientDto>
+
+    @GET("clients/{id}/rentals")
+    suspend fun getClientRentalsReport(
+        @Path("id") id: String
+    ): Response<ClientRentalsReportDto>
 }

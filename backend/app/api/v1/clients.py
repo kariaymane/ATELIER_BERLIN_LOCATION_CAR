@@ -155,3 +155,20 @@ async def get_client_history(
     service = ClientService(db)
     history = await service.get_client_history(client_id)
     return {"history": history, "total": len(history)}
+
+@router.get("/{client_id}/rentals")
+async def get_client_rentals_report(
+    client_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(require_perm(Permission.RESERVATIONS_READ)),
+):
+    """Canonical client rental report: summary KPIs, rental rows, vehicle breakdown.
+
+    Business rule: CANCELLED rentals are reported but excluded from
+    totals; days use the server-stored canonical duration (num_days).
+    """
+    service = ClientService(db)
+    report = await service.get_client_rentals_report(client_id)
+    if report is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Client introuvable")
+    return report

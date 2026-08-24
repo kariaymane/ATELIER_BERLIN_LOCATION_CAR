@@ -115,3 +115,81 @@ class ClientService:
             return []
         full_name = f"{client.first_name} {client.last_name}".strip()
         return await self._repo.get_client_rentals(client_id, client_name=full_name, client_phone=client.phone)
+
+    async def get_client_rentals_report(self, client_id: UUID) -> Optional[dict]:
+        """Canonical client rental report.
+
+        Business rules (single definition, derived from authoritative rows):
+          - Eligible rental  : any reservation of this client whose status is
+                               RESERVED, ACTIVE or COMPLETED (CANCELLED is
+                               reported but excluded from all totals).
+          - total_rentals    = COUNT(eligible)
+          - total_days       = SUM(reservation.num_days) over eligible
+                               (server-stored canonical duration; >= 1 day,
+                               same-day rentals count as 1)
+          - total_amount     = SUM(total_price) over eligible (Numeric-backed,
+                               returned as float for JSON)
+          - active/completed/cancelled counts from real statuses
+          - vehicles rented  = COUNT(DISTINCT vehicle_id) with per-vehicle
+                               rentals/days/amount breakdown.
+        """
+        client = await self._repo.get_by_id(client_id)
+        if not client:
+            return None
+        full_name = f"{client.first_name} {client.last_name}".strip()
+        rentals = await self._repo.get_client_rentals(
+            client_id, client_name=full_name, client_phone=client.phone
+        )
+
+        ELIGIBLE = ("RESERVED", "ACTIVE", "COMPLETED")
+        summary = {
+            "total_rentals": 0,
+            "total_days": 0,
+            "total_amount": 0.0,
+            "active_rentals": 0,
+            "completed_rentals": 0,
+            "cancelled_rentals": 0,
+            "vehicles_rented": 0,
+        }
+        vehicles: dict[str, dict] = {}
+        for r in rentals:
+            status = r["status"]
+            vid = r["vehicle_id"]
+            if status == "CANCELLED":
+                summary["cancelled_rentals"] += 1
+                continue
+            if status not in ELIGIBLE:
+                continue
+            days = int(r.get("num_days") or 1)
+            amount = float(r.get("total_price") or 0.0)
+            summary["total_rentals"] += 1
+            summary["total_days"] += days
+            summary["total_amount"] += amount
+            if status == "ACTIVE":
+                summary["active_rentals"] += 1
+            elif status == "COMPLETED":
+                summary["completed_rentals"] += 1
+            entry = vehicles.setdefault(vid, {
+                "vehicle_id": vid,
+                "registration": r.get("vehicle_registration") or "",
+                "brand": r.get("vehicle_brand") or "",
+                "model": r.get("vehicle_model") or "",
+                "rentals": 0,
+                "days": 0,
+                "amount": 0.0,
+            })
+            entry["rentals"] += 1
+            entry["days"] += days
+            entry["amount"] += amount
+
+        summary["vehicles_rented"] = len(vehicles)
+        # Round only for presentation precision; sums are decimal-derived.
+        summary["total_amount"] = round(summary["total_amount"], 2)
+        vehicle_list = sorted(
+            vehicles.values(), key=lambda x: x["rentals"], reverse=True
+        )
+        return {
+            "summary": summary,
+            "rentals": rentals,
+            "vehicles": vehicle_list,
+        }

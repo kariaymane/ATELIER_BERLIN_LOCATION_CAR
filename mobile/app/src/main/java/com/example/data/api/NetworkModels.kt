@@ -278,3 +278,73 @@ data class WebSocketEventDto(
     @Json(name = "vehicle_registration") val vehicleRegistration: String? = null,
     @Json(name = "timestamp") val timestamp: String? = null
 )
+
+// ── Clients (read-only, canonical backend contract) ──
+
+@JsonClass(generateAdapter = true)
+data class ClientDto(
+    @Json(name = "id") val id: String,
+    @Json(name = "first_name") val firstName: String = "",
+    @Json(name = "last_name") val lastName: String = "",
+    @Json(name = "email") val email: String? = null,
+    @Json(name = "phone") val phone: String? = null,
+    @Json(name = "cin_number") val cinNumber: String? = null,
+    @Json(name = "license_number") val licenseNumber: String? = null,
+    @Json(name = "identity_card_image") val identityCardImage: String? = null,
+    @Json(name = "driving_license_image") val drivingLicenseImage: String? = null,
+    @Json(name = "photo_url") val photoUrl: String? = null,
+    @Json(name = "status") val status: String = "ACTIVE",
+    @Json(name = "created_at") val createdAt: String? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class ClientListResponseDto(
+    @Json(name = "clients") val clients: List<ClientDto> = emptyList(),
+    @Json(name = "total") val total: Int = 0,
+    @Json(name = "page") val page: Int = 1,
+    @Json(name = "page_size") val pageSize: Int = 25
+)
+
+@JsonClass(generateAdapter = true)
+data class ClientRentalRowDto(
+    @Json(name = "id") val id: String,
+    @Json(name = "vehicle_id") val vehicleId: String? = null,
+    @Json(name = "vehicle_brand") val vehicleBrand: String? = null,
+    @Json(name = "vehicle_model") val vehicleModel: String? = null,
+    @Json(name = "vehicle_registration") val vehicleRegistration: String? = null,
+    @Json(name = "start_datetime") val startDatetime: String? = null,
+    @Json(name = "end_datetime") val endDatetime: String? = null,
+    @Json(name = "daily_price") val dailyPrice: Double = 0.0,
+    @Json(name = "num_days") val numDays: Int = 1,
+    @Json(name = "total_price") val totalPrice: Double = 0.0,
+    @Json(name = "status") val status: String = ""
+)
+
+@JsonClass(generateAdapter = true)
+data class ClientVehicleBreakdownDto(
+    @Json(name = "vehicle_id") val vehicleId: String,
+    @Json(name = "registration") val registration: String = "",
+    @Json(name = "brand") val brand: String = "",
+    @Json(name = "model") val model: String = "",
+    @Json(name = "rentals") val rentals: Int = 0,
+    @Json(name = "days") val days: Int = 0,
+    @Json(name = "amount") val amount: Double = 0.0
+)
+
+@JsonClass(generateAdapter = true)
+data class ClientSummaryDto(
+    @Json(name = "total_rentals") val totalRentals: Int = 0,
+    @Json(name = "total_days") val totalDays: Int = 0,
+    @Json(name = "total_amount") val totalAmount: Double = 0.0,
+    @Json(name = "active_rentals") val activeRentals: Int = 0,
+    @Json(name = "completed_rentals") val completedRentals: Int = 0,
+    @Json(name = "cancelled_rentals") val cancelledRentals: Int = 0,
+    @Json(name = "vehicles_rented") val vehiclesRented: Int = 0
+)
+
+@JsonClass(generateAdapter = true)
+data class ClientRentalsReportDto(
+    @Json(name = "summary") val summary: ClientSummaryDto = ClientSummaryDto(),
+    @Json(name = "rentals") val rentals: List<ClientRentalRowDto> = emptyList(),
+    @Json(name = "vehicles") val vehicles: List<ClientVehicleBreakdownDto> = emptyList()
+)

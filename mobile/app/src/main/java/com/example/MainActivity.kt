@@ -139,6 +139,11 @@ fun AtelierBerlinApp(viewModel: FleetViewModel) {
                             vehicleId = screen.vehicleId,
                             viewModel = viewModel
                         )
+                        is Screen.Clients -> ClientsScreen(viewModel = viewModel)
+                        is Screen.ClientDetail -> ClientDetailScreen(
+                            clientId = screen.clientId,
+                            viewModel = viewModel
+                        )
                         is Screen.Reservations -> ReservationsScreen(viewModel = viewModel)
                         is Screen.ReservationDetail -> ReservationDetailScreen(
                             reservationId = screen.reservationId,

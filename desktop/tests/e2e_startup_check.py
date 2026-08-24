@@ -75,15 +75,25 @@ def main() -> int:
                 QApplication.processEvents()
                 results[f"nav_{key}"] = True
             # Verify background sync thread does not crash and finishes.
-            deadline = 0
-            while getattr(mw, "_sync_thread", None) and mw._sync_thread.isRunning() and deadline < 100:
+            from PySide6.QtCore import QEventLoop as _Loop
+            st = getattr(mw, "_sync_thread", None)
+            if st is not None:
+                wait_loop = _Loop()
+                st.finished.connect(wait_loop.quit)
+                QTimer.singleShot(20000, wait_loop.quit)  # hard cap
+                wait_loop.exec()
+                results["sync_thread_clean"] = not st.isRunning()
+                # Give the UI thread a chance to deliver the finished signal.
                 QApplication.processEvents()
-                deadline += 1
-            results["sync_thread_clean"] = True
+            else:
+                results["sync_thread_clean"] = True
         except Exception as e:
-            errors.append(f"MainWindow construction: {type_ if False else type(e).__name__}: {e}")
-        finally:
+            errors.append(f"MainWindow construction: {type(e).__name__}: {e}")
             timer.start(0)
+            return
+        finally:
+            if not timer.isActive():
+                timer.start(0)
 
     login.login_success.connect(on_success)
 

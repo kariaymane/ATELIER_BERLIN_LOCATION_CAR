@@ -19,6 +19,7 @@ class Sidebar(QWidget):
     PAGE_KEYS = [
         ("dashboard", "🏠", "sidebar.dashboard"),
         ("vehicles", "🚗", "sidebar.vehicles"),
+        ("clients", "👥", "sidebar.clients"),
         ("reservations", "📅", "sidebar.reservations"),
         ("maintenance", "🔧", "sidebar.maintenance"),
         ("settings", "⚙️", "sidebar.settings"),
