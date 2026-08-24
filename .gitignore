@@ -132,3 +132,5 @@ venv/
 # Generated files
 __pycache__/
 *.pyc
+ATELIER_BERLIN_LOCATION_CAR.exe
+app-debug.apk
