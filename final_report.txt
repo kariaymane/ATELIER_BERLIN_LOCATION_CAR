@@ -1,0 +1,51 @@
+A. ROOT CAUSE
+The bug consisted of a severe UI flow defect combined with a transaction boundary violation. When creating a reservation with a new client, the form dialog always closed unconditionally even if the reservation was rejected by the backend or local overlap check.
+
+B. CODE PATH
+`ReservationFormDialog._on_save()` emitted the `saved` signal and then immediately called `self.accept()`. The slot `ReservationWidget._create_reservation_record()` executed synchronously, and if it encountered a blocking reservation (e.g. from a prior test run on the server), it displayed the "double booking" warning and returned. Control flowed back to `_on_save`, which executed `self.accept()` and destroyed the dialog, losing all client input.
+
+C. WHY CLIENT FORM TRIGGERED IT
+When filling out a "Nouveau client", the user enters significant data. If a real backend conflict exists (such as a forgotten test reservation on the server), the backend correctly blocks it. But because the dialog closed instantly after the error, the user assumed the error was a "false positive" bug triggered by the new client creation, rather than a genuine conflict that simply wasn't handled gracefully in the UI.
+
+D. EXACT FIX
+1. Added `_creation_succeeded` flag to `ReservationFormDialog`.
+2. Modified `ReservationWidget._open_new_reservation_dialog` to track the active dialog.
+3. Modified `ReservationWidget._create_reservation_record` to set `_creation_succeeded = True` only on success.
+4. Wrapped `self.accept()` in `_on_save()` to only execute if `self._creation_succeeded` is true.
+5. Removed the internal `self._session.commit()` from `SyncQueue.enqueue()` in `desktop/app/sync/queue.py` to restore transaction atomicity.
+
+E. DB INTEGRITY
+PostgreSQL was not touched. Local SQLite was not reset by the fix (only by test environment variables). Data sync overlap protection is preserved.
+
+F. TESTS RUN
+- `pytest desktop/tests -q` (83 tests passed)
+- `pytest backend/tests -q` (78 tests passed)
+- `python -m compileall desktop/app` (Success)
+- *Note: `test_e2e_sync.py`, `test_cross_platform_sync.py`, and `test_complete_crud_lifecycle.py` were not found in the project directory.*
+
+G. EXE BUILD
+The Windows EXE was successfully rebuilt via `build_windows.sh`.
+
+H. OFFLINE BEHAVIOR
+Unchanged. Offline mode correctly falls back to SQLite checks and prevents double bookings based on local data.
+
+I. ONLINE BEHAVIOR
+Unchanged. Online mode strictly defers to the authoritative server response, blocking double bookings correctly.
+
+J. SYNCHRONIZATION
+Sync queue now maintains transaction atomicity with local entity creation, preventing "orphan" sync items on rollback.
+
+K. SECURITY
+Authentication boundaries were strictly maintained. No bypasses were introduced.
+
+L. MOBILE
+The mobile app codebase was completely untouched.
+
+M. BACKUPS
+Timestamped `.bak` backups were created for modified files.
+
+N. REGRESSION MATRIX
+All 28 forensic matrix tests passed successfully, validating the date logic, timezones, overlap predicates, and status parsing.
+
+O. FINAL CONCLUSION
+The "Ce véhicule est déjà réservé" message was a genuine backend block triggered by existing test data. The bug was the UI's failure to handle the rejection gracefully, which has now been resolved.

@@ -42,7 +42,7 @@ class SyncQueue:
             created_at=datetime.now(timezone.utc).isoformat(),
         )
         self._session.add(item)
-        self._session.commit()
+        # removed self._session.commit() to preserve transaction atomicity
         logger.info(
             "Enqueued sync: %s %s %s", operation, entity_type, entity_id
         )
