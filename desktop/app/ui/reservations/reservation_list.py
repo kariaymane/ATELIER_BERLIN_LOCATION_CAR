@@ -21,6 +21,7 @@ from app.models.vehicle import LocalVehicle
 from app.models.reservation import LocalReservation
 from app.models.client import LocalClient
 from app.sync.queue import SyncQueue
+from app.models.sync_queue import SyncQueueItem
 
 logger = logging.getLogger(__name__)
 
@@ -251,6 +252,10 @@ class ReservationFormDialog(QDialog):
         return self._customer_name
 
 
+# Canonical datetime/overlap helpers (single source of truth).
+from app.utils.datetime_utils import parse_datetime_utc, reservations_overlap
+
+
 class ReservationWidget(QWidget):
     """Reservations module."""
 
@@ -426,9 +431,6 @@ class ReservationWidget(QWidget):
             queue = SyncQueue(session, self._device_id, self._user_id)
 
             for i, r in enumerate(reservations):
-                # Removed erroneous auto-complete of expired reservations logic.
-                # A reservation must be manually closed when the vehicle is returned.
-
                 # Vehicle details
                 v = session.query(LocalVehicle).filter_by(id=r.vehicle_id).first()
                 v_name = f"{v.brand} {v.model}" if v else (r.vehicle_id or "—")
@@ -558,75 +560,153 @@ class ReservationWidget(QWidget):
         dialog.exec()
 
     _save_reservation = lambda self, data: self._create_reservation_record(data)
+
     @staticmethod
     def _parse_dt(value):
-        """Parse an ISO datetime string tolerating Z / offsets / naive forms."""
-        if not value:
-            return None
-        try:
-            dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
-            return dt
-        except Exception:
-            return None
+        """Parse an ISO datetime string into timezone-aware UTC datetime."""
+        return parse_datetime_utc(value)
 
     def _create_reservation_record(self, data: dict):
         session = get_local_session()
         try:
             v_id = data["vehicle_id"]
-            new_start = self._parse_dt(data["start_datetime"])
-            new_end = self._parse_dt(data["end_datetime"])
+            new_start = parse_datetime_utc(data["start_datetime"])
+            new_end = parse_datetime_utc(data["end_datetime"])
 
             if not new_start or not new_end or new_end <= new_start:
                 QMessageBox.warning(self, t("common.error"), t("reservations.err_date_order"))
                 return
 
-            # Double-booking prevention — canonical overlap rule, real
-            # datetime comparison (never string comparison):
-            #   start_A < end_B AND end_A > start_B   (adjacent allowed)
-            # CANCELLED and COMPLETED reservations never block.
-            overlapping = False
-            for r in session.query(LocalReservation).filter(
-                LocalReservation.vehicle_id == v_id,
-                LocalReservation.status.in_(["ACTIVE", "RESERVED"]),
-            ).all():
-                r_start = self._parse_dt(r.start_datetime)
-                r_end = self._parse_dt(r.end_datetime)
-                if r_start and r_end and r_start < new_end and r_end > new_start:
-                    overlapping = True
-                    break
+            # Check server availability first if online and authenticated
+            server_checked = False
+            if self._api and getattr(self._api, "_access_token", ""):
+                try:
+                    avail_resp = self._api.check_availability(
+                        v_id,
+                        new_start.isoformat(),
+                        new_end.isoformat()
+                    )
+                    if isinstance(avail_resp, dict) and "http_error" in avail_resp:
+                        # TECHNICAL error (network/5xx/401): never report a
+                        # business conflict. Block creation with a technical
+                        # message and keep the reservation uncreated.
+                        logger.warning(
+                            "RESERVATION_AVAILABILITY_CHECK: server HTTP error %s — treating as technical, not conflict",
+                            avail_resp["http_error"])
+                        QMessageBox.warning(self, t("common.error"),
+                                            t("sync.server_unavailable"))
+                        return
+                    if isinstance(avail_resp, dict) and "available" not in avail_resp:
+                        # MALFORMED server response: technical error, never a
+                        # business conflict, never a silent local fallback.
+                        logger.warning(
+                            "RESERVATION_AVAILABILITY_CHECK: malformed server response %s — technical",
+                            avail_resp)
+                        QMessageBox.warning(self, t("common.error"),
+                                            t("sync.server_unavailable"))
+                        return
+                    if isinstance(avail_resp, dict) and "available" in avail_resp:
+                        server_checked = True
+                        if not avail_resp["available"]:
+                            logger.info(
+                                "RESERVATION_AVAILABILITY_CHECK: vehicle_id=%s requested_start_utc=%s requested_end_utc=%s source=SERVER result=BLOCKED",
+                                v_id, new_start.isoformat(), new_end.isoformat()
+                            )
+                            QMessageBox.warning(self, t("common.error"), t("reservations.double_booking"))
+                            return
+                        else:
+                            logger.info(
+                                "RESERVATION_AVAILABILITY_CHECK: vehicle_id=%s requested_start_utc=%s requested_end_utc=%s source=SERVER result=AVAILABLE",
+                                v_id, new_start.isoformat(), new_end.isoformat()
+                            )
+                except Exception as e:
+                    logger.warning("Online availability check failed, falling back to local: %s", e)
 
-            if not overlapping:
-                from app.models.maintenance import LocalMaintenance
-                from datetime import timedelta
-                for m in session.query(LocalMaintenance).filter(
-                    LocalMaintenance.vehicle_id == v_id,
-                    LocalMaintenance.status.notin_(["CANCELLED", "COMPLETED"]),
+            if not server_checked:
+                # Double-booking prevention — canonical overlap rule, real
+                # datetime comparison (never string comparison):
+                #   existing_start < requested_end AND existing_end > requested_start (adjacent allowed)
+                # Only ACTIVE and RESERVED block; CANCELLED and COMPLETED reservations never block.
+                overlapping = False
+                blocking_info = {}
+                for r in session.query(LocalReservation).filter(
+                    LocalReservation.vehicle_id == v_id
                 ).all():
-                    m_start = self._parse_dt(m.start_datetime)
-                    m_end = self._parse_dt(m.expected_end_datetime) or self._parse_dt(m.actual_end_datetime)
-                    if m_end is None and m_start:
-                        m_end = m_start + timedelta(days=1)
-                    if m_start and m_end and m_start < new_end and m_end > new_start:
+                    r_status = (r.status or "").strip().upper()
+                    if r_status not in ("ACTIVE", "RESERVED"):
+                        continue
+                    r_start = parse_datetime_utc(r.start_datetime)
+                    r_end = parse_datetime_utc(r.end_datetime)
+                    if reservations_overlap(r_start, r_end, new_start, new_end):
                         overlapping = True
+                        blocking_info = {
+                            "entity": "RESERVATION",
+                            "id": r.id,
+                            "status": r_status,
+                            "start": r_start.isoformat(),
+                            "end": r_end.isoformat(),
+                        }
                         break
 
-            if overlapping:
-                QMessageBox.warning(self, t("common.error"), t("reservations.double_booking"))
-                return
+                if not overlapping:
+                    from app.models.maintenance import LocalMaintenance
+                    from datetime import timedelta
+                    for m in session.query(LocalMaintenance).filter(
+                        LocalMaintenance.vehicle_id == v_id
+                    ).all():
+                        m_status = (m.status or "").strip().upper()
+                        if m_status in ("CANCELLED", "COMPLETED"):
+                            continue
+                        m_start = parse_datetime_utc(m.start_datetime)
+                        m_end = parse_datetime_utc(m.expected_end_datetime) or parse_datetime_utc(m.actual_end_datetime)
+                        if m_end is None and m_start:
+                            m_end = m_start + timedelta(days=1)
+                        if reservations_overlap(m_start, m_end, new_start, new_end):
+                            overlapping = True
+                            blocking_info = {
+                                "entity": "MAINTENANCE",
+                                "id": m.id,
+                                "status": m_status,
+                                "start": m_start.isoformat(),
+                                "end": m_end.isoformat(),
+                            }
+                            break
+
+                if overlapping:
+                    logger.info(
+                        "RESERVATION_AVAILABILITY_CHECK: vehicle_id=%s requested_start_utc=%s requested_end_utc=%s source=LOCAL result=BLOCKED blocking_entity=%s blocking_id=%s blocking_status=%s blocking_start=%s blocking_end=%s",
+                        v_id, new_start.isoformat(), new_end.isoformat(),
+                        blocking_info.get("entity"), blocking_info.get("id"),
+                        blocking_info.get("status"), blocking_info.get("start"), blocking_info.get("end")
+                    )
+                    QMessageBox.warning(self, t("common.error"), t("reservations.double_booking"))
+                    return
+                else:
+                    logger.info(
+                        "RESERVATION_AVAILABILITY_CHECK: vehicle_id=%s requested_start_utc=%s requested_end_utc=%s source=LOCAL result=AVAILABLE",
+                        v_id, new_start.isoformat(), new_end.isoformat()
+                    )
 
             res_id = str(uuid.uuid4())
             data["id"] = res_id
             now_iso = datetime.now(timezone.utc).isoformat()
 
-            # Client relationship: existing client selected in the dialog, or
-            # a new Client created from the entered information.
+            # TRANSACTIONAL: client + reservation + sync queue items are
+            # committed as ONE unit. Any failure compensates: the queued
+            # client CREATE is removed together with the local client row —
+            # no orphan client, no orphan reservation.
+            client_queue_item = None
             customer_id = data.get("customer_id")
             if not customer_id:
                 customer_id = str(uuid.uuid4())
+                raw_name = (data.get("customer_name") or "").strip()
+                name_parts = raw_name.split(" ", 1)
+                first_name = name_parts[0] if name_parts and name_parts[0] else "Client"
+                last_name = name_parts[1] if len(name_parts) > 1 else ""
                 new_client = LocalClient(
                     id=customer_id,
-                    first_name=data.get("customer_name", "").split(" ")[0],
-                    last_name=" ".join(data.get("customer_name", "").split(" ")[1:]),
+                    first_name=first_name,
+                    last_name=last_name,
                     phone=data.get("customer_phone"),
                     email=data.get("customer_email"),
                     identity_card_image=data.get("identity_card_image"),
@@ -638,7 +718,7 @@ class ReservationWidget(QWidget):
                 )
                 session.add(new_client)
                 queue_tmp = SyncQueue(session, self._device_id, self._user_id)
-                queue_tmp.enqueue("client", customer_id, "CREATE", {
+                client_queue_item = queue_tmp.enqueue("client", customer_id, "CREATE", {
                     "id": customer_id,
                     "first_name": new_client.first_name,
                     "last_name": new_client.last_name,
@@ -651,52 +731,74 @@ class ReservationWidget(QWidget):
                 data["customer_id"] = customer_id
             data["customer_name"] = data.get("customer_name")
 
-            res = LocalReservation(
-                id=res_id,
-                vehicle_id=data["vehicle_id"],
-                customer_id=customer_id,
-                customer_name=data["customer_name"],
-                customer_phone=data.get("customer_phone"),
-                customer_email=data.get("customer_email"),
-                identity_card_image=data.get("identity_card_image"),
-                driving_license_image=data.get("driving_license_image"),
-                start_datetime=data["start_datetime"],
-                end_datetime=data["end_datetime"],
-                daily_price=data.get("daily_price", 0.0),
-                num_days=data.get("num_days", 1),
-                total_price=data.get("total_price", 0.0),
-                deposit=data.get("deposit", 0.0),
-                payment_status=data.get("payment_status", "PENDING"),
-                status="RESERVED",
-                created_at=now_iso,
-                updated_at=now_iso,
-                version=1
-            )
-            session.add(res)
+            try:
 
-            # CANONICAL: vehicle.status is NOT changed on reservation creation
-            # (matches the backend — availability is governed by date-overlap,
-            # not by vehicle.status). The old local RESERVED manipulation
-            # caused vehicles to disappear from the available list for all
-            # dates after any booking.
-
-            queue = SyncQueue(session, self._device_id, self._user_id)
-            queue.enqueue("reservation", res_id, "CREATE", data)
-
-            # Register durable pending-upload records for offline documents.
-            from app.sync.uploads import register_pending_upload
-            for field in ("identity_card_image", "driving_license_image"):
-                register_pending_upload(
-                    session,
-                    marker=data.get(field) or "",
-                    entity_type="reservation",
-                    entity_id=res_id,
-                    upload_type="CLIENT_DOCUMENT",
-                    remote_endpoint="/api/v1/clients/upload-image",
-                    field_name=field,
+                res = LocalReservation(
+                    id=res_id,
+                    vehicle_id=data["vehicle_id"],
+                    customer_id=customer_id,
+                    customer_name=data["customer_name"],
+                    customer_phone=data.get("customer_phone"),
+                    customer_email=data.get("customer_email"),
+                    identity_card_image=data.get("identity_card_image"),
+                    driving_license_image=data.get("driving_license_image"),
+                    start_datetime=data["start_datetime"],
+                    end_datetime=data["end_datetime"],
+                    daily_price=data.get("daily_price", 0.0),
+                    num_days=data.get("num_days", 1),
+                    total_price=data.get("total_price", 0.0),
+                    deposit=data.get("deposit", 0.0),
+                    payment_status=data.get("payment_status", "PENDING"),
+                    status="RESERVED",
+                    created_at=now_iso,
+                    updated_at=now_iso,
+                    version=1
                 )
+                session.add(res)
 
-            session.commit()
+                # CANONICAL: vehicle.status is NOT changed on reservation creation
+                # (matches the backend — availability is governed by date-overlap,
+                # not by vehicle.status). The old local RESERVED manipulation
+                # caused vehicles to disappear from the available list for all
+                # dates after any booking.
+
+                queue = SyncQueue(session, self._device_id, self._user_id)
+                queue.enqueue("reservation", res_id, "CREATE", data)
+
+                # Register durable pending-upload records for offline documents.
+                from app.sync.uploads import register_pending_upload
+                for field in ("identity_card_image", "driving_license_image"):
+                    register_pending_upload(
+                        session,
+                        marker=data.get(field) or "",
+                        entity_type="reservation",
+                        entity_id=res_id,
+                        upload_type="CLIENT_DOCUMENT",
+                        remote_endpoint="/api/v1/clients/upload-image",
+                        field_name=field,
+                    )
+
+                session.commit()
+            except Exception as creation_error:
+                # ROLLBACK + COMPENSATE: remove the already-committed client
+                # CREATE queue item and the local client row so no orphan
+                # client survives a failed reservation creation.
+                session.rollback()
+                if client_queue_item is not None:
+                    try:
+                        session.query(SyncQueueItem).filter_by(
+                            id=client_queue_item.id).delete()
+                        session.query(LocalClient).filter_by(
+                            id=customer_id).delete()
+                        session.commit()
+                        logger.warning(
+                            "Reservation creation failed (%s) — compensated: client %s removed",
+                            creation_error, customer_id)
+                    except Exception as comp_error:
+                        logger.error("Compensation failed: %s", comp_error)
+                QMessageBox.warning(self, t("common.error"),
+                                    str(creation_error) or t("common.error"))
+                return
 
             self._tabs.setCurrentIndex(0)
             self.refresh_data()

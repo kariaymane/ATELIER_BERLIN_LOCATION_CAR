@@ -117,8 +117,25 @@ class ApiClient:
         return r is not None and r.status_code == 204
 
     def check_availability(self, vid: str, start: str, end: str) -> Optional[dict]:
-        r = self._request("get", f"/api/v1/vehicles/{vid}/availability?start={start}&end={end}")
-        return r.json() if r and r.status_code == 200 else None
+        """Server availability verdict.
+
+        Returns the JSON dict on HTTP 200.
+        Returns {"http_error": <code>} for HTTP-level failures so callers can
+        distinguish TECHNICAL errors from business conflicts (a network or
+        5xx error must never be reported as "already reserved").
+        Returns None only when no response object exists at all.
+        """
+        from urllib.parse import urlencode
+        query = urlencode({"start": start, "end": end})
+        r = self._request("get", f"/api/v1/vehicles/{vid}/availability?{query}")
+        if r is None:
+            return None
+        if r.status_code == 200:
+            try:
+                return r.json()
+            except Exception:
+                return {"http_error": r.status_code, "parse_error": True}
+        return {"http_error": r.status_code}
 
     # ── Rentals ──
 
@@ -199,13 +216,27 @@ class ApiClient:
     # ── Clients ──
 
     def get_clients(self, page: int = 1, page_size: int = 100, search: Optional[str] = None, status: Optional[str] = None) -> Optional[dict]:
+        """Fetch clients.
+
+        Returns the JSON dict on HTTP 200 (clients list may be empty —
+        SUCCESS_EMPTY is distinct from errors).
+        Returns {"http_error": <code>} for HTTP failures so the UI can
+        distinguish NETWORK_ERROR / 401 / 403 / 500 from an empty table.
+        """
         url = f"/api/v1/clients/?page={page}&page_size={page_size}"
         if search:
             url += f"&search={search}"
         if status:
             url += f"&status={status}"
         r = self._request("get", url)
-        return r.json() if r and r.status_code == 200 else None
+        if r is None:
+            return {"http_error": "NETWORK"}
+        if r.status_code == 200:
+            try:
+                return r.json()
+            except Exception:
+                return {"http_error": 200, "parse_error": True}
+        return {"http_error": r.status_code}
 
     def get_client(self, cid: str) -> Optional[dict]:
         r = self._request("get", f"/api/v1/clients/{cid}")

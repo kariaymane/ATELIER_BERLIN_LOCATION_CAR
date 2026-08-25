@@ -588,6 +588,7 @@ class MainWindow(QMainWindow):
                     push_res.get("pushed", 0) > 0
                     or len(pull_res.get("items", [])) > 0
                     or upload_res.get("uploaded", 0) > 0
+                    or push_res.get("conflicts")
                 ):
                     self._load_vehicles_from_local()
                     self._refresh_dashboard()
@@ -596,6 +597,11 @@ class MainWindow(QMainWindow):
                     # Client KPIs/history must never go stale after mutations.
                     if self._current_page_key == "clients":
                         self._clients_page.refresh_data()
+                # Surface server-rejected reservations visibly (never silent).
+                for conflict in push_res.get("conflicts") or []:
+                    if conflict.get("entity_type") == "reservation":
+                        self.statusBar().showMessage(
+                            t("reservations.rejected_by_server"), 8000)
 
                 status_text = t("sync.reconnected") if was_offline else t("sync.online")
                 self.statusBar().showMessage(status_text, 4000)
@@ -993,6 +999,8 @@ class MainWindow(QMainWindow):
     def _on_reservation_updated(self):
         self._load_vehicles_from_local()
         self._refresh_dashboard()
+        self._reservations.refresh_data()
+        self._clients_page.refresh_data()
         self._run_sync()
 
     def _on_maintenance_updated(self):

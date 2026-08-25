@@ -316,9 +316,8 @@ class MaintenanceWidget(QWidget):
                 if m.expected_end_datetime:
                     try:
                         
-                        dt = datetime.fromisoformat(m.expected_end_datetime.replace('Z', '+00:00'))
-                        if dt.tzinfo is None:
-                            dt = dt.replace(tzinfo=timezone.utc)
+                        from app.utils.datetime_utils import parse_datetime_utc
+                        dt = parse_datetime_utc(m.expected_end_datetime)
                         return_date = dt.astimezone().strftime("%Y-%m-%d")
                     except Exception:
                         return_date = str(m.expected_end_datetime)[:10]
