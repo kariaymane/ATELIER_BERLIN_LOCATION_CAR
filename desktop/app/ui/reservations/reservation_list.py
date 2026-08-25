@@ -228,6 +228,11 @@ class ReservationFormDialog(QDialog):
         id_url = self._upload_file(self._id_card_path)
         lic_url = self._upload_file(self._license_path)
         
+        # _creation_succeeded is set by the slot connected to `saved`
+        # (_create_reservation_record). The dialog must only close when
+        # the reservation was actually persisted — otherwise the user
+        # loses all input and has to re-enter everything.
+        self._creation_succeeded = False
         self.saved.emit({
             "vehicle_id": self.vehicle.get("id"),
             "customer_id": self._selected_client_id,
@@ -245,7 +250,12 @@ class ReservationFormDialog(QDialog):
             "payment_status": "PENDING",
             "status": "RESERVED",
         })
-        self.accept()
+        # Only close the dialog when the reservation was successfully
+        # created.  On failure the dialog stays open so the user can
+        # adjust dates / pick a different vehicle without re-entering
+        # all client data.
+        if self._creation_succeeded:
+            self.accept()
 
     @property
     def customer_name(self):
@@ -556,8 +566,10 @@ class ReservationWidget(QWidget):
 
     def _open_new_reservation_dialog(self, vehicle_dict: dict):
         dialog = ReservationFormDialog(vehicle_dict, self, api_client=self._api)
+        self._active_reservation_dialog = dialog
         dialog.saved.connect(self._create_reservation_record)
         dialog.exec()
+        self._active_reservation_dialog = None
 
     _save_reservation = lambda self, data: self._create_reservation_record(data)
 
@@ -799,6 +811,11 @@ class ReservationWidget(QWidget):
                 QMessageBox.warning(self, t("common.error"),
                                     str(creation_error) or t("common.error"))
                 return
+
+            # Signal success back to the dialog so it closes.
+            dlg = getattr(self, "_active_reservation_dialog", None)
+            if dlg is not None:
+                dlg._creation_succeeded = True
 
             self._tabs.setCurrentIndex(0)
             self.refresh_data()

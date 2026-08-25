@@ -137,3 +137,7 @@ app-debug.apk
 
 # Local delivery package folder
 dist_final/
+
+# Forensic backups
+.backups/
+*.bak.*
