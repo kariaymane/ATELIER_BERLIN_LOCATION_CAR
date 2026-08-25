@@ -147,6 +147,7 @@ class SyncEngine:
 
                 if response.status_code == 200:
                     results = response.json().get("results", [])
+                    conflicts = []
                     for i, result in enumerate(results):
                         if i < len(pending):
                             res_status = result.get("status", "error")
@@ -160,11 +161,35 @@ class SyncEngine:
                                         session.commit()
                             elif res_status == "conflict":
                                 queue.mark_conflict(pending[i].id, result.get("message", "Conflict"))
+                                conflicts.append({
+                                    "entity_type": pending[i].entity_type,
+                                    "entity_id": pending[i].entity_id,
+                                    "message": result.get("message", "Conflict"),
+                                })
+                                # SERVER AUTHORITY: a server-rejected reservation
+                                # must NOT remain RESERVED locally — a stale local
+                                # row would permanently block those vehicle dates
+                                # in the offline overlap check.
+                                if pending[i].entity_type == "reservation" and pending[i].operation == "CREATE":
+                                    from app.models.reservation import LocalReservation
+                                    lr = session.query(LocalReservation).filter_by(
+                                        id=pending[i].entity_id).first()
+                                    if lr and (lr.status or "").upper() in ("RESERVED", "ACTIVE"):
+                                        lr.status = "CANCELLED"
+                                        lr.payment_status = "CANCELLED"
+                                        lr.updated_at = datetime.now(timezone.utc).isoformat()
+                                        lr.version += 1
+                                        session.commit()
+                                        logger.warning(
+                                            "SYNC CONFLICT: reservation %s rejected by server (%s) — reverted locally",
+                                            pending[i].entity_id, result.get("message"),
+                                        )
                             else:
                                 queue.mark_failed(pending[i].id, result.get("message", "Error"))
                     pushed_count = sum(1 for r in results if r.get("status") == "ok")
                     self._is_online = True
-                    return {"status": "ok", "pushed": pushed_count, "results": results}
+                    return {"status": "ok", "pushed": pushed_count,
+                            "conflicts": conflicts, "results": results}
                 elif response.status_code == 401:
                     return {"status": "auth_error", "message": "Token expired"}
                 else:
@@ -208,9 +233,8 @@ class SyncEngine:
 
                 if response.status_code == 200:
                     data = response.json()
-                    self._last_sync = datetime.fromisoformat(
-                        data["server_time"].replace("Z", "+00:00")
-                    )
+                    from app.utils.datetime_utils import parse_datetime_utc
+                    self._last_sync = parse_datetime_utc(data["server_time"])
                     self._is_online = True
                     items = data.get("items", [])
                     self.apply_pulled_items(items)

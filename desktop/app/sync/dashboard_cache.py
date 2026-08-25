@@ -28,13 +28,8 @@ REVENUE_STATUSES = ("ACTIVE", "COMPLETED")
 def _parse_dt(value):
     if not value:
         return None
-    try:
-        dt = datetime.fromisoformat(str(value))
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
-        return dt
-    except Exception:
-        return None
+    from app.utils.datetime_utils import parse_datetime_utc
+    return parse_datetime_utc(value)
 
 
 def _period_bounds(now=None):

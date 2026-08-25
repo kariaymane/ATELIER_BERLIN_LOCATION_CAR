@@ -11,11 +11,11 @@
 | Item | Value |
 |---|---|
 | Package name | `ATELIER_BERLIN_LOCATION_CAR_WINDOWS.zip` |
-| Size | 61,430,861 bytes |
+| Size | 61,439,783 bytes |
 | Build date | 2026-08-23 19:49 (UTC+1) |
 | Contents | `ATELIER_BERLIN_LOCATION_CAR.exe` + `_internal/` (bundled Qt DLLs incl. `qwindows.dll`, assets, translations) |
 | Validation | Built via PyInstaller; launch-tested under Wine (application start, local database initialization, GUI event loop, zero errors). Physical-Windows validation not performed. |
-| SHA-256 | `ccaf40b7e2bc453a0dcc816ded848421cf04bb71bca47fd5e1f633a8144df263` |
+| SHA-256 | `e49efd62ddb6bdbe6914c2a3d84cdbb94abb009f91484b3ef891329d5f16e8b3` |
 
 ## Android Package
 

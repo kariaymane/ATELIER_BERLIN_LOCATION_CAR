@@ -26,8 +26,12 @@ logger = logging.getLogger(__name__)
 
 
 class ClientsFetcher(QThread):
-    """Fetches the client list from the authoritative API off the UI thread."""
-    clients_ready = Signal(object)
+    """Fetches the client list from the authoritative API off the UI thread.
+
+    Emits (clients_or_None, status): SUCCESS_WITH_DATA, SUCCESS_EMPTY,
+    NETWORK_ERROR, HTTP_401, HTTP_403, HTTP_500, PARSE_ERROR.
+    """
+    clients_ready = Signal(object, str)
 
     def __init__(self, api_client, parent=None):
         super().__init__(parent)
@@ -37,11 +41,22 @@ class ClientsFetcher(QThread):
         try:
             resp = self._api.get_clients(page=1, page_size=100)
             if isinstance(resp, dict) and "clients" in resp:
-                self.clients_ready.emit(resp["clients"])
+                status = "SUCCESS_WITH_DATA" if resp["clients"] else "SUCCESS_EMPTY"
+                self.clients_ready.emit(resp["clients"], status)
+                return
+            if isinstance(resp, dict) and "http_error" in resp:
+                code = resp["http_error"]
+                if code == "NETWORK":
+                    self.clients_ready.emit(None, "NETWORK_ERROR")
+                    return
+                if code == 200:
+                    self.clients_ready.emit(None, "PARSE_ERROR")
+                    return
+                self.clients_ready.emit(None, f"HTTP_{code}")
                 return
         except Exception as e:
             logger.info("Clients fetch failed: %s", e)
-        self.clients_ready.emit(None)  # None == fall back to local cache
+        self.clients_ready.emit(None, "NETWORK_ERROR")
 
 
 class ClientsWidget(QWidget):
@@ -110,6 +125,13 @@ class ClientsWidget(QWidget):
         self._table.doubleClicked.connect(self._on_row_double_clicked)
         layout.addWidget(self._table, 1)
 
+        self._empty_lbl = QLabel(t("clients.no_data") if t("clients.no_data") != "clients.no_data" else "Aucun client trouvé")
+        self._empty_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._empty_lbl.setFont(QFont("Hanken Grotesk", 12))
+        self._empty_lbl.setStyleSheet("color: #6B7264; padding: 40px;")
+        self._empty_lbl.hide()
+        layout.addWidget(self._empty_lbl, 1)
+
     # ── Data loading ──────────────────────────────────────────────
 
     def refresh_data(self):
@@ -126,13 +148,26 @@ class ClientsWidget(QWidget):
             self._set_mode_label(live=False)
             self._render()
 
-    def _on_clients_fetched(self, clients):
-        if clients is None:
+    def _on_clients_fetched(self, clients, status):
+        """Apply fetch result. API ERRORS are never rendered as '0 clients'."""
+        if status in ("SUCCESS_WITH_DATA", "SUCCESS_EMPTY"):
+            self._clients = clients or []
+            self._set_mode_label(live=True)
+            if status == "SUCCESS_EMPTY":
+                self._mode_lbl.setText(t("clients.empty_server"))
+        elif status == "NETWORK_ERROR":
             self._clients = self._load_from_local_cache()
             self._set_mode_label(live=False)
-        else:
-            self._clients = clients
-            self._set_mode_label(live=True)
+        elif status == "HTTP_401":
+            self._mode_lbl.setText(t("clients.session_expired"))
+            self._mode_lbl.setStyleSheet(
+                "color: #B91C1C; background: #FEE2E2; border-radius: 6px; padding: 4px 10px;")
+            return
+        else:  # HTTP_403 / HTTP_500 / PARSE_ERROR
+            self._clients = self._load_from_local_cache()
+            self._mode_lbl.setText(t("clients.server_error"))
+            self._mode_lbl.setStyleSheet(
+                "color: #B91C1C; background: #FEE2E2; border-radius: 6px; padding: 4px 10px;")
         self._render()
 
     @staticmethod
@@ -170,24 +205,30 @@ class ClientsWidget(QWidget):
     def _render(self):
         rows = self._filter_rows(self._clients, self._search.text().strip())
         self._table.setRowCount(len(rows))
-        for i, c in enumerate(rows):
-            name = f"{c.get('first_name', '')} {c.get('last_name', '')}".strip() or "—"
-            values = [
-                name,
-                c.get("phone") or "—",
-                c.get("email") or "—",
-                c.get("cin_number") or "—",
-                t(f"status.{c['status']}") if c.get("status") else "—",
-            ]
-            for col, val in enumerate(values):
-                item = QTableWidgetItem(str(val))
-                item.setData(Qt.ItemDataRole.UserRole, c.get("id"))
-                self._table.setItem(i, col, item)
-            btn = QPushButton(t("clients.open_details"))
-            btn.setProperty("class", "primary")
-            cid = c.get("id")
-            btn.clicked.connect(lambda _, cid_=cid: self.client_selected.emit(cid_))
-            self._table.setCellWidget(i, 5, btn)
+        if len(rows) == 0:
+            self._empty_lbl.show()
+            self._table.hide()
+        else:
+            self._empty_lbl.hide()
+            self._table.show()
+            for i, c in enumerate(rows):
+                name = f"{c.get('first_name', '')} {c.get('last_name', '')}".strip() or "—"
+                values = [
+                    name,
+                    c.get("phone") or "—",
+                    c.get("email") or "—",
+                    c.get("cin_number") or "—",
+                    t(f"status.{c['status']}") if c.get("status") else "—",
+                ]
+                for col, val in enumerate(values):
+                    item = QTableWidgetItem(str(val))
+                    item.setData(Qt.ItemDataRole.UserRole, c.get("id"))
+                    self._table.setItem(i, col, item)
+                btn = QPushButton(t("clients.open_details") if t("clients.open_details") != "clients.open_details" else "Détails")
+                btn.setProperty("class", "primary")
+                cid = c.get("id")
+                btn.clicked.connect(lambda _, cid_=cid: self.client_selected.emit(cid_))
+                self._table.setCellWidget(i, 5, btn)
 
     def _filter_rows(self, rows, text):
         if not text:
@@ -212,9 +253,14 @@ class ClientsWidget(QWidget):
                 self.client_selected.emit(cid)
 
     def retranslate_ui(self):
+        self.setLayoutDirection(
+            Qt.LayoutDirection.RightToLeft if is_rtl() else Qt.LayoutDirection.LeftToRight
+        )
         self._title_lbl.setText(t("sidebar.clients"))
         self._search.setPlaceholderText(t("clients.search_ph"))
         self._refresh_btn.setText(t("topbar.refresh"))
         self._headers = ["Client", "Téléphone", "Email", "CIN", t("vehicles.status"), ""]
         self._table.setHorizontalHeaderLabels(self._headers)
+        self._empty_lbl.setText(t("clients.no_data") if t("clients.no_data") != "clients.no_data" else "Aucun client trouvé")
         self.refresh_data()
+

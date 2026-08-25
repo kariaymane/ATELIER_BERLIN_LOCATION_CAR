@@ -150,7 +150,8 @@
     "license": "Permis de conduire",
     "choose_image": "Choisir une image...",
     "new_client": "— Nouveau client —",
-    "double_booking": "Ce véhicule est déjà réservé pendant cette période."
+    "double_booking": "Ce véhicule est déjà réservé pendant cette période.",
+    "rejected_by_server": "Réservation refusée par le serveur : la période est déjà réservée."
   },
   "maintenance": {
     "title": "Maintenance",
@@ -230,7 +231,7 @@
     "loading": "Chargement...",
     "no_data": "Aucune donnée",
     "error": "Erreur",
-  "error_connection": "Erreur de connexion",
+    "error_connection": "Erreur de connexion",
     "success": "Succès",
     "profile_msg": "Connecté en tant que {name} ({email})"
   },
@@ -238,7 +239,8 @@
     "online": "Connecté — Synchronisé",
     "offline": "Hors connexion (Données locales)",
     "syncing": "Synchronisation...",
-    "reconnected": "Connexion rétablie — Synchronisé"
+    "reconnected": "Connexion rétablie — Synchronisé",
+    "server_unavailable": "Serveur injoignable. Réessayez lorsque la connexion sera rétablie."
   },
   "settings": {
     "title": "Paramètres",
@@ -286,7 +288,10 @@
     "col_daily_price": "Prix/jour",
     "col_total": "Total",
     "rental_short": "loc",
-    "day_short": "j"
+    "day_short": "j",
+    "empty_server": "Aucun client sur le serveur.",
+    "session_expired": "Session expirée — reconnectez-vous.",
+    "server_error": "Erreur serveur — affichage des données locales."
   },
   "notifications": {
     "title": "Centre de Notifications",
