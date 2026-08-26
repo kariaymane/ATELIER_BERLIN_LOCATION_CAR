@@ -29,10 +29,13 @@ from app.models.vehicle import Vehicle
 TZ = ZoneInfo("Africa/Casablanca")
 
 
+import uuid
+
 async def _make_vehicle(db_session) -> Vehicle:
+    uid = uuid.uuid4().hex[:6]
     v = Vehicle(
-        registration="REV-111-A-1",
-        vin="1M8GDM9AXKP042788",
+        registration=f"REV-{uid}",
+        vin=f"WF0XXXGCD{uid}XX",
         brand="Renault",
         model="Clio",
         year=2024,
@@ -85,11 +88,11 @@ class TestRevenueSemantics:
         vehicle = await _make_vehicle(db_session)
         base = _today_at(10).replace(tzinfo=None)
         # In-period qualifying reservations
-        await _make_reservation(db_session, vehicle, base - timedelta(days=1), 1000.0, "COMPLETED")
-        await _make_reservation(db_session, vehicle, base + timedelta(hours=1), 500.0, "ACTIVE")
+        await _make_reservation(db_session, await _make_vehicle(db_session), base - timedelta(days=1), 1000.0, "COMPLETED")
+        await _make_reservation(db_session, await _make_vehicle(db_session), base + timedelta(hours=1), 500.0, "ACTIVE")
         # Excluded statuses
-        await _make_reservation(db_session, vehicle, base + timedelta(hours=2), 999.0, "CANCELLED")
-        await _make_reservation(db_session, vehicle, base + timedelta(hours=3), 888.0, "RESERVED")
+        await _make_reservation(db_session, await _make_vehicle(db_session), base + timedelta(hours=2), 999.0, "CANCELLED")
+        await _make_reservation(db_session, await _make_vehicle(db_session), base + timedelta(hours=3), 888.0, "RESERVED")
 
         resp = await client.get(
             "/api/v1/dashboard/stats", headers={"Authorization": f"Bearer {admin_token}"}
@@ -124,8 +127,8 @@ class TestRevenueSemantics:
         vehicle = await _make_vehicle(db_session)
         base = _today_at(9).replace(tzinfo=None)
         # Values that expose binary float drift when summed naively
-        await _make_reservation(db_session, vehicle, base + timedelta(minutes=1), 0.1, "COMPLETED")
-        await _make_reservation(db_session, vehicle, base + timedelta(minutes=2), 0.2, "COMPLETED")
+        await _make_reservation(db_session, await _make_vehicle(db_session), base + timedelta(minutes=1), 0.1, "COMPLETED")
+        await _make_reservation(db_session, await _make_vehicle(db_session), base + timedelta(minutes=2), 0.2, "COMPLETED")
 
         resp = await client.get(
             "/api/v1/dashboard/stats", headers={"Authorization": f"Bearer {admin_token}"}
