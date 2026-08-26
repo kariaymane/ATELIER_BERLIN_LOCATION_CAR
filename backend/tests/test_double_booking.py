@@ -33,11 +33,7 @@ class TestDoubleBookingPrevention:
     """Test that PostgreSQL EXCLUSION constraint prevents double booking."""
 
     async def test_overlapping_reservations_rejected(self, db_session: AsyncSession):
-        """Two overlapping reservations for the same vehicle must be rejected by PostgreSQL."""
-        bind = db_session.get_bind()
-        if bind and bind.dialect.name != "postgresql":
-            pytest.skip("PostgreSQL EXCLUSION constraint test requires PostgreSQL engine")
-
+        """Two overlapping reservations for the same vehicle must be rejected by PostgreSQL/SQLite."""
         vehicle = Vehicle(
             id=uuid4(),
             registration="OVERLAP-01",
