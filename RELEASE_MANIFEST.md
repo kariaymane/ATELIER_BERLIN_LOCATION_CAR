@@ -76,3 +76,17 @@
 ## Final Status
 
 CLIENT DELIVERY READY — EXTERNAL SIGNING/DEPLOYMENT REQUIRED
+
+
+## Version 1.0.1 (Verification Build)
+
+- **Build date**: 2026-08-26 21:42
+- **Commit hash**: `1eada32a46aca77528ac9963462ea073ef48abec`
+- **Reason**: Live re-verification of reservation availability fix
+
+### Artifacts
+
+| Component | Hash / Identifier | Details |
+|---|---|---|
+| **Backend Docker** | `sha256:f87fadf687b46a16e451332d099759997845d8ae95fa4a617844145eca1d4485` | `docker/Dockerfile.backend`, verified via `/health` |
+| **Windows Desktop** | `2879b0f73c3e05ac594794b2a2c09e9474524aa86e1bcd32df61fc1f1b3daeb5` | 61,440,979 bytes |
