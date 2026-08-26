@@ -47,6 +47,43 @@ async def test_engine():
                 __import__("sqlalchemy").text("CREATE EXTENSION IF NOT EXISTS btree_gist")
             )
         await conn.run_sync(Base.metadata.create_all)
+        
+        # Emulate PostgreSQL exclusion constraint for double booking in SQLite tests
+        if "sqlite" in url:
+            from sqlalchemy import text
+            await conn.execute(text("""
+                CREATE TRIGGER IF NOT EXISTS trg_check_overlap_res
+                BEFORE INSERT ON reservations
+                FOR EACH ROW
+                WHEN NEW.status NOT IN ('CANCELLED', 'COMPLETED')
+                BEGIN
+                    SELECT RAISE(ABORT, 'IntegrityError: Overlapping reservation exists')
+                    WHERE EXISTS (
+                        SELECT 1 FROM reservations
+                        WHERE vehicle_id = NEW.vehicle_id
+                          AND status NOT IN ('CANCELLED', 'COMPLETED')
+                          AND start_datetime < NEW.end_datetime
+                          AND end_datetime > NEW.start_datetime
+                    );
+                END;
+            """))
+            await conn.execute(text("""
+                CREATE TRIGGER IF NOT EXISTS trg_check_overlap_res_update
+                BEFORE UPDATE ON reservations
+                FOR EACH ROW
+                WHEN NEW.status NOT IN ('CANCELLED', 'COMPLETED')
+                BEGIN
+                    SELECT RAISE(ABORT, 'IntegrityError: Overlapping reservation exists')
+                    WHERE EXISTS (
+                        SELECT 1 FROM reservations
+                        WHERE vehicle_id = NEW.vehicle_id
+                          AND id != NEW.id
+                          AND status NOT IN ('CANCELLED', 'COMPLETED')
+                          AND start_datetime < NEW.end_datetime
+                          AND end_datetime > NEW.start_datetime
+                    );
+                END;
+            """))
 
     yield engine
 
