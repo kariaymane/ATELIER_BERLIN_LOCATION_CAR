@@ -44,7 +44,7 @@ class RentalService:
         start_dt: datetime,
         end_dt: datetime,
         exclude_rental_id: Optional[UUID] = None,
-    ) -> bool:
+    ) -> tuple[bool, Optional[str]]:
         """Check if a vehicle is available for the given period."""
         return await self._repo.check_availability(
             vehicle_id, start_dt, end_dt, exclude_rental_id
@@ -81,10 +81,12 @@ class RentalService:
                 return {"error": get_message("client.not_found", lang)}
 
         # Check availability (application-level, before the DB constraint)
-        available = await self._repo.check_availability(
+        available, reason = await self._repo.check_availability(
             data.vehicle_id, start_dt, end_dt
         )
         if not available:
+            if reason == "MAINTENANCE":
+                return {"error": get_message("vehicle.in_maintenance", lang)}
             return {"error": get_message("reservation.double_booking", lang)}
 
         # Calculate pricing
@@ -287,11 +289,13 @@ class RentalService:
         if data.start_datetime and data.end_datetime:
             if data.end_datetime <= data.start_datetime:
                 return {"error": get_message("reservation.invalid_dates", lang)}
-            available = await self._repo.check_availability(
+            available, reason = await self._repo.check_availability(
                 rental.vehicle_id, data.start_datetime, data.end_datetime,
                 exclude_id=rental_id,
             )
             if not available:
+                if reason == "MAINTENANCE":
+                    return {"error": get_message("vehicle.in_maintenance", lang)}
                 return {"error": get_message("reservation.double_booking", lang)}
             rental.start_datetime = data.start_datetime
             rental.end_datetime = data.end_datetime
