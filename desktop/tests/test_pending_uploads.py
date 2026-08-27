@@ -1,3 +1,4 @@
+import uuid
 """
 Offline pending-upload tests.
 
@@ -24,6 +25,7 @@ from app.database import get_local_session, init_local_db
 from app.models.vehicle import LocalVehicle
 from app.models.reservation import LocalReservation
 from app.models.client import LocalClient
+from app.models.sync_queue import SyncQueueItem
 from app.models.pending_upload import LocalPendingUpload
 from app.sync.uploads import (
     PENDING_DIR,
@@ -576,9 +578,29 @@ def test_sync_cycle_processes_uploads_first(session, monkeypatch, image_file):
 
 
 def test_replace_marker_helper_direct(session, image_file):
+    import uuid
     marker = f"pending_uploads/manual-{uuid.uuid4().hex}.png"
     remote = "/static/uploads/vehicles/reconciled.png"
     _seed_vehicle_with_marker(session, marker)
+    
+    # Add a SyncQueueItem with the marker
+    from app.models.sync_queue import SyncQueueItem
+    import uuid
+    import json
+    payload_str = json.dumps({"image_url": marker})
+    queue_item = SyncQueueItem(
+        id=uuid.uuid4().hex,
+        entity_type="vehicle",
+        entity_id="veh-img-1",
+        operation="CREATE",
+        payload=payload_str,
+        device_id="dev-1",
+        user_id="user-1",
+        idempotency_key=uuid.uuid4().hex,
+        created_at="2026-01-01T00:00:00Z"
+    )
+    session.add(queue_item)
+    session.commit()
 
     replace_marker_in_entities(session, marker, remote)
 
@@ -586,6 +608,12 @@ def test_replace_marker_helper_direct(session, image_file):
     v = fresh.query(LocalVehicle).filter_by(id="veh-img-1").first()
     assert remote in v.image_url
     assert marker not in v.image_url
+    
+    # Verify SyncQueueItem payload is updated
+    updated_item = fresh.query(SyncQueueItem).filter_by(id=queue_item.id).first()
+    payload = json.loads(updated_item.payload)
+    assert payload["image_url"] == remote
+    assert marker not in updated_item.payload
     fresh.close()
 
 
