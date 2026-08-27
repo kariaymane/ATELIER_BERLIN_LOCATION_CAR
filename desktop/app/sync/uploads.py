@@ -30,6 +30,7 @@ from app.models.vehicle import LocalVehicle
 from app.models.vehicle_image import LocalVehicleImage
 from app.models.reservation import LocalReservation
 from app.models.client import LocalClient
+from app.models.sync_queue import SyncQueueItem
 
 logger = logging.getLogger(__name__)
 
@@ -330,6 +331,14 @@ def replace_marker_in_entities(session: Session, marker: str, remote_url: str):
                 c.identity_card_image = remote_url
             if getattr(c, "driving_license_image", None) == marker:
                 c.driving_license_image = remote_url
+
+        # SyncQueue: replace in JSON payloads
+        queue_items = session.query(SyncQueueItem).filter(
+            SyncQueueItem.payload.like(f"%{marker}%")
+        ).all()
+        for item in queue_items:
+            item.payload = item.payload.replace(marker, remote_url)
+
 
         session.commit()
     except Exception as e:

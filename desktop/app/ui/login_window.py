@@ -376,7 +376,7 @@ class LoginWindow(QWidget):
                 return
         except RuntimeError:
             self._login_worker = None
-            return  # login already in progress
+            pass  # Worker was deleted, it is safe to proceed
 
         self._error_label.hide()
         self._login_btn.setEnabled(False)
