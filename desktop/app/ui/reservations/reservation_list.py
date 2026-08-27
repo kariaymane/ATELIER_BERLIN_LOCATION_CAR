@@ -86,7 +86,11 @@ class ReservationFormDialog(QDialog):
         form.addRow(t("reservations.license"), self._license_btn)
 
         # Dates
+        from PySide6.QtCore import QTime
         now = QDateTime.currentDateTime()
+        # Normalize to canonical 09:00:00 local time to avoid accidental 
+        # offset overlaps when user only modifies the date.
+        now.setTime(QTime(9, 0, 0))
         self._start_dt = QDateTimeEdit(now)
         self._start_dt.setCalendarPopup(True)
         self._start_dt.dateTimeChanged.connect(self._recalculate)
@@ -598,6 +602,10 @@ class ReservationWidget(QWidget):
                         new_start.isoformat(),
                         new_end.isoformat()
                     )
+                    if avail_resp is None:
+                        logger.warning("RESERVATION_AVAILABILITY_CHECK: server connection failed (None) — treating as technical")
+                        QMessageBox.warning(self, t("common.error"), t("sync.server_unavailable"))
+                        return
                     if isinstance(avail_resp, dict) and "http_error" in avail_resp:
                         # TECHNICAL error (network/5xx/401): never report a
                         # business conflict. Block creation with a technical
