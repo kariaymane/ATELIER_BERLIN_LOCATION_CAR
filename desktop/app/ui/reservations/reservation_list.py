@@ -91,11 +91,15 @@ class ReservationFormDialog(QDialog):
         # Normalize to canonical 09:00:00 local time to avoid accidental 
         # offset overlaps when user only modifies the date.
         now.setTime(QTime(9, 0, 0))
-        self._start_dt = QDateTimeEdit(now)
+        
+        start_val = self.vehicle.get("start_dt") or now
+        end_val = self.vehicle.get("end_dt") or now.addDays(1)
+        
+        self._start_dt = QDateTimeEdit(start_val)
         self._start_dt.setCalendarPopup(True)
         self._start_dt.dateTimeChanged.connect(self._recalculate)
 
-        self._end_dt = QDateTimeEdit(now.addDays(1))
+        self._end_dt = QDateTimeEdit(end_val)
         self._end_dt.setCalendarPopup(True)
         self._end_dt.dateTimeChanged.connect(self._recalculate)
 
@@ -106,6 +110,13 @@ class ReservationFormDialog(QDialog):
         self._summary_lbl = QLabel()
         self._summary_lbl.setFont(QFont("Hanken Grotesk", 12, QFont.Weight.Bold))
         form.addRow(t("reservations.summary"), self._summary_lbl)
+
+        # Availability Warning
+        self._avail_lbl = QLabel()
+        self._avail_lbl.setFont(QFont("Hanken Grotesk", 10, QFont.Weight.Bold))
+        self._avail_lbl.setStyleSheet("color: #991B1B;")  # Red for warnings
+        self._avail_lbl.hide()
+        form.addRow("", self._avail_lbl)
 
         layout.addLayout(form)
         self._recalculate()
@@ -169,6 +180,59 @@ class ReservationFormDialog(QDialog):
         self._summary_lbl.setText(t("reservations.summary_calc", days=days, daily=daily, total=total))
         self._calculated_days = days
         self._calculated_total = total
+        
+        # Immediate local availability check
+        req_start = parse_datetime_utc(start.toPython())
+        req_end = parse_datetime_utc(end.toPython())
+        
+        if not req_start or not req_end or req_start >= req_end:
+            self._avail_lbl.setText(t("reservations.err_date_order"))
+            self._avail_lbl.show()
+            if hasattr(self, 'save_btn'):
+                self.save_btn.setEnabled(False)
+            return
+            
+        v_id = self.vehicle.get("id")
+        session = get_local_session()
+        blocked_reason = None
+        try:
+            reservations = session.query(LocalReservation).filter(
+                LocalReservation.vehicle_id == v_id,
+                LocalReservation.status.in_(BLOCKING_RESERVATION_STATUSES)
+            ).all()
+            for r in reservations:
+                r_start = parse_datetime_utc(r.start_datetime)
+                r_end = parse_datetime_utc(r.end_datetime)
+                if reservations_overlap(r_start, r_end, req_start, req_end):
+                    blocked_reason = t("reservations.double_booking")
+                    break
+                    
+            if not blocked_reason:
+                maintenances = session.query(LocalMaintenance).filter(
+                    LocalMaintenance.vehicle_id == v_id,
+                    ~LocalMaintenance.status.in_(["CANCELLED", "COMPLETED"])
+                ).all()
+                for m in maintenances:
+                    m_start = parse_datetime_utc(m.start_datetime)
+                    m_end = parse_datetime_utc(m.actual_end_datetime) if m.actual_end_datetime else parse_datetime_utc(m.expected_end_datetime)
+                    if m_start and not m_end and req_end > m_start:
+                        blocked_reason = t("reservations.in_maintenance")
+                        break
+                    if reservations_overlap(m_start, m_end, req_start, req_end):
+                        blocked_reason = t("reservations.in_maintenance")
+                        break
+        finally:
+            session.close()
+
+        if blocked_reason:
+            self._avail_lbl.setText("⚠️ " + blocked_reason)
+            self._avail_lbl.show()
+            if hasattr(self, 'save_btn'):
+                self.save_btn.setEnabled(False)
+        else:
+            self._avail_lbl.hide()
+            if hasattr(self, 'save_btn'):
+                self.save_btn.setEnabled(True)
 
 
     def _choose_id_card(self):
@@ -267,7 +331,8 @@ class ReservationFormDialog(QDialog):
 
 
 # Canonical datetime/overlap helpers (single source of truth).
-from app.utils.datetime_utils import parse_datetime_utc, reservations_overlap
+from app.utils.datetime_utils import parse_datetime_utc, reservations_overlap, BLOCKING_RESERVATION_STATUSES
+from app.models.maintenance import LocalMaintenance
 
 
 class ReservationWidget(QWidget):
@@ -347,6 +412,30 @@ class ReservationWidget(QWidget):
     def _setup_new_res_tab(self):
         layout = QVBoxLayout(self._new_res_tab)
 
+        # Interval selection header
+        filter_layout = QHBoxLayout()
+        filter_layout.setContentsMargins(0, 0, 0, 10)
+        
+        now = QDateTime.currentDateTime()
+        now.setTime(QTime(9, 0, 0))
+        
+        self._filter_start_dt = QDateTimeEdit(now)
+        self._filter_start_dt.setCalendarPopup(True)
+        self._filter_start_dt.dateTimeChanged.connect(self._refresh_available_vehicles)
+        
+        self._filter_end_dt = QDateTimeEdit(now.addDays(1))
+        self._filter_end_dt.setCalendarPopup(True)
+        self._filter_end_dt.dateTimeChanged.connect(self._refresh_available_vehicles)
+        
+        filter_layout.addWidget(QLabel(t("reservations.start_date")))
+        filter_layout.addWidget(self._filter_start_dt)
+        filter_layout.addSpacing(20)
+        filter_layout.addWidget(QLabel(t("reservations.end_date")))
+        filter_layout.addWidget(self._filter_end_dt)
+        filter_layout.addStretch()
+        
+        layout.addLayout(filter_layout)
+
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
@@ -406,16 +495,71 @@ class ReservationWidget(QWidget):
                 if item and text in item.text().lower():
                     match = True
             self._table.setRowHidden(row, not match)
+    def _refresh_available_vehicles(self):
+        """Update the vehicle grid to only show cars available for the selected dates."""
+        if not hasattr(self, '_filter_start_dt') or not hasattr(self, '_filter_end_dt'):
+            return
 
-    def refresh_data(self):
-        """Fetch all real reservations and vehicles from SQLite local DB."""
+        start_dt = self._filter_start_dt.dateTime()
+        end_dt = self._filter_end_dt.dateTime()
+        
+        # Parse to canonical UTC
+        req_start = parse_datetime_utc(start_dt.toPython())
+        req_end = parse_datetime_utc(end_dt.toPython())
+        
+        if not req_start or not req_end or req_start >= req_end:
+            # Invalid interval, clear grid
+            while self._grid.count():
+                item = self._grid.takeAt(0)
+                if item.widget():
+                    item.widget().deleteLater()
+            return
+
         session = get_local_session()
         try:
-            # Operational vehicles for new reservations: availability for the
-            # chosen dates is governed by the overlap check, not by status.
-            available = session.query(LocalVehicle).filter(
+            # Get operational vehicles
+            vehicles = session.query(LocalVehicle).filter(
                 ~LocalVehicle.status.in_(["MAINTENANCE", "SOLD", "INACTIVE"])
             ).all()
+            
+            # Fetch blocking intervals for memory check (faster than querying per vehicle)
+            blocking_reservations = session.query(LocalReservation).filter(
+                LocalReservation.status.in_(BLOCKING_RESERVATION_STATUSES)
+            ).all()
+            
+            blocking_maintenances = session.query(LocalMaintenance).filter(
+                ~LocalMaintenance.status.in_(["CANCELLED", "COMPLETED"])
+            ).all()
+
+            available_vehicles = []
+            for v in vehicles:
+                blocked = False
+                # Check reservations
+                for r in blocking_reservations:
+                    if r.vehicle_id == v.id:
+                        r_start = parse_datetime_utc(r.start_datetime)
+                        r_end = parse_datetime_utc(r.end_datetime)
+                        if reservations_overlap(r_start, r_end, req_start, req_end):
+                            blocked = True
+                            break
+                
+                # Check maintenances
+                if not blocked:
+                    for m in blocking_maintenances:
+                        if m.vehicle_id == v.id:
+                            m_start = parse_datetime_utc(m.start_datetime)
+                            # Maintenance blocks until actual_end_datetime, or expected_end_datetime
+                            m_end = parse_datetime_utc(m.actual_end_datetime) if m.actual_end_datetime else parse_datetime_utc(m.expected_end_datetime)
+                            # If no end time is specified (e.g., indefinite maintenance), it blocks everything after start
+                            if m_start and not m_end and req_end > m_start:
+                                blocked = True
+                                break
+                            if reservations_overlap(m_start, m_end, req_start, req_end):
+                                blocked = True
+                                break
+
+                if not blocked:
+                    available_vehicles.append(v)
 
             while self._grid.count():
                 item = self._grid.takeAt(0)
@@ -423,13 +567,20 @@ class ReservationWidget(QWidget):
                     item.widget().deleteLater()
 
             row, col = 0, 0
-            for v in available:
+            for v in available_vehicles:
                 card = self._create_available_card(v)
                 self._grid.addWidget(card, row, col)
                 col += 1
                 if col >= 3:
                     col = 0
                     row += 1
+        finally:
+            session.close()
+    def refresh_data(self):
+        """Fetch all real reservations and vehicles from SQLite local DB."""
+        session = get_local_session()
+        try:
+            self._refresh_available_vehicles()
 
             reservations = session.query(LocalReservation).order_by(LocalReservation.created_at.desc()).all()
             self._table.setRowCount(len(reservations))
@@ -557,7 +708,9 @@ class ReservationWidget(QWidget):
             "brand": vehicle.brand,
             "model": vehicle.model,
             "registration": vehicle.registration,
-            "daily_rental_price": vehicle.daily_rental_price
+            "daily_rental_price": vehicle.daily_rental_price,
+            "start_dt": self._filter_start_dt.dateTime() if hasattr(self, '_filter_start_dt') else None,
+            "end_dt": self._filter_end_dt.dateTime() if hasattr(self, '_filter_end_dt') else None
         }
         btn.clicked.connect(lambda _, vd=v_dict: self._open_new_reservation_dialog(vd))
 
