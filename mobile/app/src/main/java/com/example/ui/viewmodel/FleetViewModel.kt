@@ -232,8 +232,11 @@ class FleetViewModel(
         viewModelScope.launch {
             _isLoading.value = true
             _errorMessage.value = null
-            val result = authRepository.login(email, pass)
-            _isLoading.value = false
+            val result = try {
+                authRepository.login(email, pass)
+            } finally {
+                _isLoading.value = false
+            }
             if (result.isSuccess) {
                 _navigationStack.value = listOf(Screen.Dashboard)
                 _currentTab.value = BottomNavTab.DASHBOARD
