@@ -371,7 +371,11 @@ class LoginWindow(QWidget):
             self._show_error(t("login.error"))
             return
 
-        if getattr(self, "_login_worker", None) and self._login_worker.isRunning():
+        try:
+            if getattr(self, "_login_worker", None) and self._login_worker.isRunning():
+                return
+        except RuntimeError:
+            self._login_worker = None
             return  # login already in progress
 
         self._error_label.hide()

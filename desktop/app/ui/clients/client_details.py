@@ -26,6 +26,38 @@ from app.services.image_cache import get_image_cache
 logger = logging.getLogger(__name__)
 
 
+
+class HoverableImageLabel(QLabel):
+    def __init__(self, placeholder_text, parent=None):
+        super().__init__(placeholder_text, parent)
+        self.setMouseTracking(True)
+        self.full_pixmap = None
+        self._hover_popup = None
+
+    def enterEvent(self, event):
+        if self.full_pixmap and not self.full_pixmap.isNull():
+            if not self._hover_popup:
+                self._hover_popup = QLabel()
+                self._hover_popup.setWindowFlags(Qt.WindowType.ToolTip | Qt.WindowType.FramelessWindowHint)
+                self._hover_popup.setStyleSheet("background: white; border: 2px solid #D5DDD3; border-radius: 8px;")
+                self._hover_popup.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            scaled = self.full_pixmap.scaled(600, 400, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+            self._hover_popup.setPixmap(scaled)
+            self._hover_popup.setFixedSize(scaled.size().width() + 10, scaled.size().height() + 10)
+            
+            # Show below the cursor/label
+            import PySide6.QtGui as QtGui
+            pos = QtGui.QCursor.pos()
+            self._hover_popup.move(pos.x() + 15, pos.y() + 15)
+            self._hover_popup.show()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        if self._hover_popup:
+            self._hover_popup.hide()
+        super().leaveEvent(event)
+
+
 class ClientReportFetcher(QThread):
     """Fetches the canonical client rental report off the UI thread."""
     report_ready = Signal(dict)
@@ -157,7 +189,7 @@ class ClientDetailsDialog(QDialog):
                                ("driving_license_image", "docs_license")):
             cap = QLabel(t(f"clients.{label_key}"))
             cap.setStyleSheet("color: #6B7264; font-size: 11px;")
-            thumb = QLabel(t("clients.doc_missing"))
+            thumb = HoverableImageLabel(t("clients.doc_missing"))
             thumb.setFixedSize(96, 64)
             thumb.setAlignment(Qt.AlignmentFlag.AlignCenter)
             thumb.setStyleSheet(
@@ -443,6 +475,7 @@ class ClientDetailsDialog(QDialog):
         for key, thumb in self._doc_thumbs.items():
             if thumb.property("cache_key") == cache_key:
                 thumb.setText("")
+                thumb.full_pixmap = pixmap
                 thumb.setPixmap(pixmap.scaled(
                     thumb.size(), Qt.AspectRatioMode.KeepAspectRatio,
                     Qt.TransformationMode.SmoothTransformation))

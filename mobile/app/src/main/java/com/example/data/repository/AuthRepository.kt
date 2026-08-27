@@ -54,7 +54,7 @@ class AuthRepository(
                     try {
                         apiClient.getService()
                             .refreshToken(RefreshRequestDto(refreshToken = refresh))
-                    } catch (e: Exception) {
+                    } catch (e: Throwable) {
                         Log.w("AUTH", "restore refresh network failure: ${e.message}")
                         null
                     }
@@ -89,7 +89,7 @@ class AuthRepository(
             val probe = withContext(Dispatchers.IO) {
                 try {
                     apiClient.getService().getDashboardStats()
-                } catch (e: Exception) {
+                } catch (e: Throwable) {
                     Log.w("AUTH", "restore probe network failure: ${e.message}")
                     null
                 }
@@ -190,7 +190,7 @@ class AuthRepository(
                 }
                 Result.failure(Exception(errorMsg))
             }
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             val msg = if (e.message?.contains("Unable to resolve host") == true ||
                           e.message?.contains("Failed to connect") == true ||
                           e.message?.contains("ConnectException") == true ||
@@ -217,7 +217,7 @@ class AuthRepository(
                     com.example.data.api.LogoutRequestDto(refreshToken = refresh),
                     "Bearer $access"
                 )
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
                 Log.w("AUTH", "server logout skipped: ${e.message}")
             }
         }

@@ -70,6 +70,7 @@ class ReservationFormDialog(QDialog):
         self._customer_name = QLineEdit()
         self._customer_phone = QLineEdit()
         self._customer_email = QLineEdit()
+        self._customer_cin = QLineEdit()
         self._selected_client_id = None
         self._id_card_path = ""
         self._license_path = ""
@@ -82,6 +83,7 @@ class ReservationFormDialog(QDialog):
         form.addRow(t("reservations.client_name"), self._customer_name)
         form.addRow(t("reservations.client_phone"), self._customer_phone)
         form.addRow(t("reservations.email_client"), self._customer_email)
+        form.addRow(t("clients.col_cin") if t("clients.col_cin") != "clients.col_cin" else "CIN", self._customer_cin)
         form.addRow(t("reservations.id_card"), self._id_card_btn)
         form.addRow(t("reservations.license"), self._license_btn)
 
@@ -165,6 +167,7 @@ class ReservationFormDialog(QDialog):
                         f"{c.get('first_name', '')} {c.get('last_name', '')}".strip())
                     self._customer_phone.setText(c.get("phone", ""))
                     self._customer_email.setText(c.get("email", ""))
+                    self._customer_cin.setText(c.get("cin_number", ""))
                     break
 
     def _recalculate(self):
@@ -307,6 +310,7 @@ class ReservationFormDialog(QDialog):
             "customer_name": self.customer_name.text().strip(),
             "customer_phone": self._customer_phone.text().strip(),
             "customer_email": self._customer_email.text().strip(),
+            "customer_cin": self._customer_cin.text().strip(),
             "identity_card_image": id_url,
             "driving_license_image": lic_url,
             "start_datetime": start.toPython().astimezone(timezone.utc).isoformat(),
@@ -889,6 +893,7 @@ class ReservationWidget(QWidget):
                     last_name=last_name,
                     phone=data.get("customer_phone"),
                     email=data.get("customer_email"),
+                    cin_number=data.get("customer_cin"),
                     identity_card_image=data.get("identity_card_image"),
                     driving_license_image=data.get("driving_license_image"),
                     status="ACTIVE",
@@ -904,6 +909,7 @@ class ReservationWidget(QWidget):
                     "last_name": new_client.last_name,
                     "phone": new_client.phone,
                     "email": new_client.email,
+                    "cin_number": new_client.cin_number,
                     "identity_card_image": new_client.identity_card_image,
                     "driving_license_image": new_client.driving_license_image,
                     "status": "ACTIVE",
