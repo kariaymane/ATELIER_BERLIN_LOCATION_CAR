@@ -504,7 +504,7 @@ class MainWindow(QMainWindow):
         finally:
             session.close()
 
-    def _refresh_dashboard(self):
+    def _refresh_dashboard(self, fetch_server: bool = False):
         """Render instantly from local data, then refresh via API in background.
 
         Never performs network I/O on the UI thread. The offline snapshot uses
@@ -521,11 +521,11 @@ class MainWindow(QMainWindow):
             for key in ("today_revenue", "week_revenue", "month_revenue"):
                 if overview.get(key) is None:
                     overview[key] = prev.get(key, 0.0)
-            self._dashboard.refresh_data(overview, [])
+            self._dashboard.refresh_data(overview, getattr(self, "_last_server_top_vehicles", []))
         except Exception as e:
             logger.error("Local dashboard snapshot failed: %s", e)
 
-        if self._is_online and self._access_token:
+        if fetch_server and self._is_online and self._access_token:
             fetcher = DashboardFetcher(self._access_token, parent=self)
             fetcher.stats_ready.connect(self._on_dashboard_stats)
             fetcher.finished.connect(fetcher.deleteLater)
@@ -535,6 +535,7 @@ class MainWindow(QMainWindow):
     def _on_dashboard_stats(self, overview: dict, top_vehicles: list):
         """Apply API dashboard results (delivered on the UI thread)."""
         self._last_server_overview = dict(overview)
+        self._last_server_top_vehicles = top_vehicles
         self._dashboard.refresh_data(overview, top_vehicles or [])
 
     def _run_sync(self):
@@ -600,6 +601,9 @@ class MainWindow(QMainWindow):
 
                 status_text = t("sync.reconnected") if was_offline else t("sync.online")
                 self.statusBar().showMessage(status_text, 4000)
+                
+                # Safe to fetch dashboard stats now that push/pull have stabilized state
+                self._refresh_dashboard(fetch_server=True)
             else:
                 self._is_online = False
                 self.statusBar().showMessage(t("sync.offline"))
