@@ -664,6 +664,25 @@ class SyncService:
                 },
             )
 
+        # Fetch hard deletions from AuditLog
+        from app.models.audit_log import AuditLog
+        audit_result = await self._session.execute(
+            select(AuditLog).where(
+                AuditLog.action == "DELETED",
+                AuditLog.created_at >= since
+            )
+        )
+        for log in audit_result.scalars().all():
+            if not entity_types or log.entity_type.lower() in entity_types:
+                items.append({
+                    "entity_type": log.entity_type.lower(),
+                    "entity_id": str(log.entity_id),
+                    "operation": "DELETE",
+                    "payload": {},
+                    "version": 1,
+                    "updated_at": log.created_at.isoformat(),
+                })
+
         return {
             "items": items,
             "server_time": server_time,
