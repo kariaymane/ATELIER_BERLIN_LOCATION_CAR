@@ -757,10 +757,30 @@ class VehicleRow(QFrame):
 
     def _show_details(self):
         # Hide hover preview immediately BEFORE opening detail modal
-
         self._is_hovered = False
         _safely_cancel_hover()
-        modal = VehicleDetailModal(self._data, self.window())
+        
+        # Load fresh data before displaying
+        from app.database import get_local_session
+        from app.models.vehicle import LocalVehicle
+        session = get_local_session()
+        fresh_data = dict(self._data)
+        try:
+            v = session.query(LocalVehicle).filter_by(id=self._data.get("id")).first()
+            if v:
+                fresh_data = {
+                    "id": v.id, "brand": v.brand, "model": v.model, "year": v.year,
+                    "color": v.color, "current_mileage": v.current_mileage, "fuel_type": v.fuel_type,
+                    "transmission": v.transmission, "status": v.status,
+                    "daily_rental_price": v.daily_rental_price,
+                    "image_url": getattr(v, "image_url", None),
+                    "registration_number": getattr(v, "registration_number", None),
+                    "vin_number": getattr(v, "vin_number", None)
+                }
+        finally:
+            session.close()
+            
+        modal = VehicleDetailModal(fresh_data, self.window())
         modal.exec()
 
     def _on_image_loaded(self, url: str, pixmap: QPixmap):

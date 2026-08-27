@@ -59,10 +59,44 @@ class ClientDetailsDialog(QDialog):
         self._fetcher = None
         self.setWindowTitle(t("clients.client_details"))
         self.resize(1080, 720)
+
         self._setup_ui()
+        self._reload_client_locally()
+        from app.services.event_bus import get_event_bus
+        get_event_bus().data_refreshed.connect(self._reload_client_locally)
         self._load()
 
     # ── UI construction ───────────────────────────────────────────
+
+
+    def _reload_client_locally(self):
+        from app.database import get_local_session
+        from app.models.client import LocalClient
+        session = get_local_session()
+        try:
+            local = session.query(LocalClient).filter_by(id=self._client_id).first()
+            if local:
+                self._client = {
+                    "id": local.id,
+                    "first_name": local.first_name,
+                    "last_name": local.last_name,
+                    "phone": local.phone,
+                    "email": local.email,
+                    "cin_number": local.cin_number,
+                    "identity_card_image": local.identity_card_image,
+                    "driving_license_image": local.driving_license_image,
+                    "photo_url": getattr(local, "photo_url", None),
+                    "notes": local.notes,
+                    "status": local.status,
+                }
+                title = f"{self._client.get('first_name', '')} {self._client.get('last_name', '')}".strip() or "—"
+                self._name_lbl.setText(title)
+                for key in ("id", "phone", "email", "cin_number"):
+                    if key in self._info_labels:
+                        self._info_labels[key].setText(self._display(self._client.get(key)))
+                self._load_document_thumbnails()
+        finally:
+            session.close()
 
     def _setup_ui(self):
         self.setLayoutDirection(
@@ -397,7 +431,7 @@ class ClientDetailsDialog(QDialog):
             self._doc_cache_connected = True
         for key, thumb in self._doc_thumbs.items():
             url = self._client.get(key)
-            if not url or not str(url).startswith("/static"):
+            if not url:
                 continue  # keep "Document non disponible"
             thumb.setProperty("cache_key", f"{self._client_id}_{cache._build_url(url)}")
             thumb.setText("⏳")

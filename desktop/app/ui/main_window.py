@@ -17,6 +17,7 @@ from PySide6.QtCore import Qt, QTimer, QEvent, QThread, Signal
 from PySide6.QtGui import QFont, QAction
 
 from app.i18n import t, is_rtl, set_language, load_translations, get_language
+from app.services.event_bus import get_event_bus
 from app.config import (
     API_BASE_URL, THEMES, DEFAULT_THEME, get_saved_theme, save_theme,
     get_saved_language, save_language, SYNC_INTERVAL_SECONDS
@@ -175,6 +176,9 @@ class MainWindow(QMainWindow):
 
         # Initial data load
         QTimer.singleShot(100, self._initial_load)
+        
+        # Connect to global event bus
+        get_event_bus().data_refreshed.connect(self._on_global_data_refreshed)
 
     def _on_realtime_event(self, event: dict):
         if not hasattr(self, "_immediate_sync_timer"):
@@ -454,10 +458,7 @@ class MainWindow(QMainWindow):
     # ──── Data Loading ────
 
     def _initial_load(self):
-        self._load_vehicles_from_local()
-        self._refresh_dashboard()
-        self._reservations.refresh_data()
-        self._maintenance.refresh_data()
+        get_event_bus().data_refreshed.emit()
         self._run_sync()
 
     def _load_vehicles_from_local(self):
@@ -590,13 +591,7 @@ class MainWindow(QMainWindow):
                     or upload_res.get("uploaded", 0) > 0
                     or push_res.get("conflicts")
                 ):
-                    self._load_vehicles_from_local()
-                    self._refresh_dashboard()
-                    self._reservations.refresh_data()
-                    self._maintenance.refresh_data()
-                    # Client KPIs/history must never go stale after mutations.
-                    if self._current_page_key == "clients":
-                        self._clients_page.refresh_data()
+                    get_event_bus().data_refreshed.emit()
                 # Surface server-rejected reservations visibly (never silent).
                 for conflict in push_res.get("conflicts") or []:
                     if conflict.get("entity_type") == "reservation":
@@ -614,10 +609,7 @@ class MainWindow(QMainWindow):
     def _on_refresh_clicked(self):
         self._refresh_btn.setText(t("topbar.refreshing"))
         self._run_sync()
-        self._load_vehicles_from_local()
-        self._refresh_dashboard()
-        self._reservations.refresh_data()
-        self._maintenance.refresh_data()
+        get_event_bus().data_refreshed.emit()
         self._refresh_btn.setText(t("topbar.updated"))
         QTimer.singleShot(2000, lambda: self._refresh_btn.setText(t("topbar.refresh")))
 
@@ -995,18 +987,20 @@ class MainWindow(QMainWindow):
         finally:
             session.close()
 
-    def _on_reservation_updated(self):
+    def _on_global_data_refreshed(self):
+        # Refresh all open main tabs
         self._load_vehicles_from_local()
         self._refresh_dashboard()
         self._reservations.refresh_data()
+        self._maintenance.refresh_data()
         self._clients_page.refresh_data()
+
+    def _on_reservation_updated(self):
+        get_event_bus().data_refreshed.emit()
         self._run_sync()
 
     def _on_maintenance_updated(self):
-        self._load_vehicles_from_local()
-        self._refresh_dashboard()
-        self._maintenance.refresh_data()
-        self._reservations.refresh_data()
+        get_event_bus().data_refreshed.emit()
         self._run_sync()
 
     def changeEvent(self, event):
