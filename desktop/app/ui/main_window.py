@@ -985,12 +985,11 @@ class MainWindow(QMainWindow):
 
             session.commit()
 
-            if self._current_view == "maintenance":
-                self._views["maintenance"].refresh_data()
-            if self._current_view == "dashboard":
-                self._views["dashboard"].refresh_data()
-            if self._current_view == "vehicles":
-                self._views["vehicles"].refresh_data()
+            self._load_vehicles_from_local()
+            self._refresh_dashboard()
+            self._maintenance.refresh_data()
+            self._reservations.refresh_data()
+            self._run_sync()
         except Exception as e:
             print("Error creating maintenance:", e)
         finally:
@@ -1006,6 +1005,8 @@ class MainWindow(QMainWindow):
     def _on_maintenance_updated(self):
         self._load_vehicles_from_local()
         self._refresh_dashboard()
+        self._maintenance.refresh_data()
+        self._reservations.refresh_data()
         self._run_sync()
 
     def changeEvent(self, event):
