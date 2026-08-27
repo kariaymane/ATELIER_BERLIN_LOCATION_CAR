@@ -28,9 +28,10 @@ class RentalRepository(BaseRepository[Reservation]):
         start_dt: datetime,
         end_dt: datetime,
         exclude_id: Optional[UUID] = None,
-    ) -> bool:
+    ) -> tuple[bool, Optional[str]]:
         """Check if a vehicle is available for the given date range.
-        Checks both reservations and maintenance schedules."""
+        Checks both reservations and maintenance schedules.
+        Returns a tuple: (is_available, blocking_entity_type)"""
         from app.models.maintenance import Maintenance
         from sqlalchemy import func, or_, text
         
@@ -49,7 +50,7 @@ class RentalRepository(BaseRepository[Reservation]):
         count_res = await self._session.scalar(query_res)
         
         if count_res and count_res > 0:
-            return False
+            return False, "RESERVATION"
 
         # 2. Check Maintenances
         # We need to coalesce expected_end_datetime, actual_end_datetime, or start_datetime
@@ -64,7 +65,10 @@ class RentalRepository(BaseRepository[Reservation]):
         )
         count_maint = await self._session.scalar(query_maint)
         
-        return count_maint == 0
+        if count_maint and count_maint > 0:
+            return False, "MAINTENANCE"
+            
+        return True, None
 
     async def get_by_vehicle(
         self,

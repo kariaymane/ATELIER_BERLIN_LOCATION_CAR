@@ -226,13 +226,14 @@ async def check_availability(
 
     vehicle = result["vehicle"]
     rental_service = RentalService(db)
-    available = await rental_service.check_availability(vehicle_id, start_dt, end_dt)
+    available, reason = await rental_service.check_availability(vehicle_id, start_dt, end_dt)
     num_days = rental_service.calculate_days(start_dt, end_dt)
     daily_price = float(vehicle.daily_rental_price)
 
     return {
         "vehicle_id": str(vehicle_id),
         "available": available,
+        "reason": reason,
         "daily_price": daily_price,
         "start_datetime": start_dt.isoformat(),
         "end_datetime": end_dt.isoformat(),

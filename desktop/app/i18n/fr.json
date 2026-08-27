@@ -151,6 +151,7 @@
     "choose_image": "Choisir une image...",
     "new_client": "— Nouveau client —",
     "double_booking": "Ce véhicule est déjà réservé pendant cette période.",
+    "in_maintenance": "Ce véhicule est en maintenance et ne peut pas être réservé.",
     "rejected_by_server": "Réservation refusée par le serveur : la période est déjà réservée."
   },
   "maintenance": {

@@ -632,7 +632,11 @@ class ReservationWidget(QWidget):
                                 "RESERVATION_AVAILABILITY_CHECK: vehicle_id=%s requested_start_utc=%s requested_end_utc=%s source=SERVER result=BLOCKED",
                                 v_id, new_start.isoformat(), new_end.isoformat()
                             )
-                            QMessageBox.warning(self, t("common.error"), t("reservations.double_booking"))
+                            reason = avail_resp.get("reason")
+                            if reason == "MAINTENANCE":
+                                QMessageBox.warning(self, t("common.error"), t("reservations.in_maintenance"))
+                            else:
+                                QMessageBox.warning(self, t("common.error"), t("reservations.double_booking"))
                             return
                         else:
                             logger.info(
@@ -699,7 +703,10 @@ class ReservationWidget(QWidget):
                         blocking_info.get("entity"), blocking_info.get("id"),
                         blocking_info.get("status"), blocking_info.get("start"), blocking_info.get("end")
                     )
-                    QMessageBox.warning(self, t("common.error"), t("reservations.double_booking"))
+                    if blocking_info.get("entity") == "MAINTENANCE":
+                        QMessageBox.warning(self, t("common.error"), t("reservations.in_maintenance"))
+                    else:
+                        QMessageBox.warning(self, t("common.error"), t("reservations.double_booking"))
                     return
                 else:
                     logger.info(
