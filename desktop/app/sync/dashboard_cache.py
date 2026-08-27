@@ -81,23 +81,39 @@ def compute_local_overview(session=None):
                 if in_period(start_dt, p0, p1):
                     totals[period][0] += 1
                     totals[period][1] += float(r.total_price or 0)
-
         active_maintenances = (
             session.query(LocalMaintenance)
             .filter(LocalMaintenance.status == "ACTIVE")
             .count()
         )
 
-        def count_status(status):
-            return session.query(LocalVehicle).filter_by(status=status).count()
+        now = datetime.now(timezone.utc)
+        
+        total_vehicles = session.query(LocalVehicle).filter(LocalVehicle.status != "INACTIVE").count()
+        
+        rented = 0
+        reserved = 0
+        for r in session.query(LocalReservation).all():
+            r_start = _parse_dt(r.start_datetime)
+            r_end = _parse_dt(r.end_datetime)
+            if r_start and r_end and r_start <= now < r_end:
+                if (r.status or "").upper() == "ACTIVE":
+                    rented += 1
+                elif (r.status or "").upper() in ("CONFIRMED", "PENDING"):
+                    reserved += 1
 
-        available = count_status("AVAILABLE")
-        rented = count_status("RENTED")
-        reserved = count_status("RESERVED")
-        maintenance = count_status("MAINTENANCE")
+        maintenance = 0
+        for m in session.query(LocalMaintenance).filter(LocalMaintenance.status == "ACTIVE").all():
+            m_start = _parse_dt(m.start_datetime)
+            m_end = _parse_dt(getattr(m, 'actual_end_datetime', None) or m.expected_end_datetime)
+            if m_start and m_end and m_start <= now < m_end:
+                maintenance += 1
+
+        available = max(0, total_vehicles - (rented + reserved + maintenance))
 
         return {
-            "total_vehicles": available + rented + reserved + maintenance,
+            "total_vehicles": total_vehicles,
+
             "available": available,
             "rented": rented,
             "reserved": reserved,

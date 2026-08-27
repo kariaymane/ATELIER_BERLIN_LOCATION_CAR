@@ -17,13 +17,61 @@ class DashboardService:
         self._session = session
         self._rental_repo = RentalRepository(session)
         self._vehicle_repo = VehicleRepository(session)
-
     async def get_overview(self) -> dict:
         """Main dashboard overview."""
-        from sqlalchemy import select, func
+        from sqlalchemy import select, func, or_
         from app.models.maintenance import Maintenance
+        from app.models.reservation import Reservation
+        from app.models.vehicle import Vehicle
+        
+        now = datetime.now(ZoneInfo('Africa/Casablanca'))
+        
+        # 1. Total active vehicles (not deleted/inactive)
+        v_res = await self._session.execute(
+            select(func.count(Vehicle.id)).where(Vehicle.status != "INACTIVE")
+        )
+        total_vehicles = v_res.scalar() or 0
+        
+        # 2. Rented vehicles (ACTIVE reservation overlapping now)
+        rented_res = await self._session.execute(
+            select(func.count(func.distinct(Reservation.vehicle_id))).where(
+                Reservation.status == "ACTIVE",
+                Reservation.start_datetime <= now,
+                Reservation.end_datetime > now
+            )
+        )
+        rented = rented_res.scalar() or 0
+        
+        # 3. Reserved vehicles (CONFIRMED/PENDING reservation overlapping now)
+        reserved_res = await self._session.execute(
+            select(func.count(func.distinct(Reservation.vehicle_id))).where(
+                Reservation.status.in_(["CONFIRMED", "PENDING"]),
+                Reservation.start_datetime <= now,
+                Reservation.end_datetime > now
+            )
+        )
+        reserved = reserved_res.scalar() or 0
+        
+        # 4. Maintenance vehicles
+        maint_res = await self._session.execute(
+            select(func.count(func.distinct(Maintenance.vehicle_id))).where(
+                Maintenance.status == "ACTIVE",
+                Maintenance.start_datetime <= now,
+                func.coalesce(Maintenance.actual_end_datetime, Maintenance.expected_end_datetime) > now
+            )
+        )
+        maintenance = maint_res.scalar() or 0
+        
+        # A vehicle cannot be rented AND in maintenance realistically, but just in case:
+        available = max(0, total_vehicles - (rented + reserved + maintenance))
+        
+        vehicle_counts = {
+            "AVAILABLE": available,
+            "RENTED": rented,
+            "RESERVED": reserved,
+            "MAINTENANCE": maintenance
+        }
 
-        vehicle_counts = await self._vehicle_repo.count_by_status()
         rental_counts = await self._rental_repo.count_by_status()
         today_rentals = await self._rental_repo.get_today_rentals()
         today_returns = await self._rental_repo.get_today_returns()
@@ -34,8 +82,8 @@ class DashboardService:
         )
         active_maintenances = m_res.scalar() or 0
 
-        now = datetime.now(ZoneInfo('Africa/Casablanca'))
         today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+
         today_end = today_start + timedelta(days=1)
         today_revenue = await self._rental_repo.get_revenue_between(today_start, today_end)
 

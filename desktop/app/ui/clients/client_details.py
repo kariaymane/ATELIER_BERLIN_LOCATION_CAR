@@ -13,11 +13,12 @@ Displayed rules come from the backend canonical report:
 """
 import logging
 
-from PySide6.QtCore import Qt, QThread, Signal
+from PySide6.QtCore import Qt, QThread, Signal, QSize
 from PySide6.QtGui import QFont, QPixmap
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QTableWidget,
     QTableWidgetItem, QHeaderView, QPushButton, QFrame, QMessageBox,
+    QSizePolicy,
 )
 
 from app.i18n import t, is_rtl
@@ -33,6 +34,35 @@ class HoverableImageLabel(QLabel):
         self.setMouseTracking(True)
         self.full_pixmap = None
         self._hover_popup = None
+        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.setMinimumSize(240, 160)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+
+    def setPixmap(self, pixmap):
+        if not hasattr(self, '_setting_pixmap'):
+            self.full_pixmap = pixmap
+            self._update_pixmap_scale()
+            return
+        super().setPixmap(pixmap)
+        
+    def _update_pixmap_scale(self):
+        if self.full_pixmap and not self.full_pixmap.isNull():
+            self._setting_pixmap = True
+            sz = self.size()
+            if sz.isEmpty():
+                sz = self.minimumSize()
+                if sz.isEmpty():
+                    sz = QSize(240, 160)
+            scaled = self.full_pixmap.scaled(
+                sz, Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation)
+            super().setPixmap(scaled)
+            if hasattr(self, '_setting_pixmap'):
+                del self._setting_pixmap
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._update_pixmap_scale()
 
     def enterEvent(self, event):
         if self.full_pixmap and not self.full_pixmap.isNull():
@@ -190,7 +220,7 @@ class ClientDetailsDialog(QDialog):
             cap = QLabel(t(f"clients.{label_key}"))
             cap.setStyleSheet("color: #6B7264; font-size: 11px;")
             thumb = HoverableImageLabel(t("clients.doc_missing"))
-            thumb.setFixedSize(96, 64)
+            
             thumb.setAlignment(Qt.AlignmentFlag.AlignCenter)
             thumb.setStyleSheet(
                 "background: #FFFFFF; border: 1px solid #D5DDD3; border-radius: 8px; color: #9CA3AF; font-size: 10px;")
@@ -475,8 +505,5 @@ class ClientDetailsDialog(QDialog):
         for key, thumb in self._doc_thumbs.items():
             if thumb.property("cache_key") == cache_key:
                 thumb.setText("")
-                thumb.full_pixmap = pixmap
-                thumb.setPixmap(pixmap.scaled(
-                    thumb.size(), Qt.AspectRatioMode.KeepAspectRatio,
-                    Qt.TransformationMode.SmoothTransformation))
+                thumb.setPixmap(pixmap)
                 break
