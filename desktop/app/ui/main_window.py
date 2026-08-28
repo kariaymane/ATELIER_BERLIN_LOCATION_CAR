@@ -465,6 +465,35 @@ class MainWindow(QMainWindow):
         session = get_local_session()
         try:
             vehicles = session.query(LocalVehicle).all()
+            
+            # Compute effective status based on active reservations and maintenance
+            from datetime import datetime, timezone
+            from app.models.reservation import LocalReservation
+            from app.models.maintenance import LocalMaintenance
+            from app.utils.datetime_utils import parse_datetime_utc
+            
+            now = datetime.now(timezone.utc)
+            
+            # Load active overlaps
+            rented_vids = set()
+            reserved_vids = set()
+            for r in session.query(LocalReservation).filter(LocalReservation.status != "CANCELLED").all():
+                r_start = parse_datetime_utc(r.start_datetime)
+                r_end = parse_datetime_utc(r.end_datetime)
+                if r_start and r_end and r_start <= now < r_end:
+                    st = (r.status or "").upper()
+                    if st == "ACTIVE":
+                        rented_vids.add(r.vehicle_id)
+                    elif st == "RESERVED":
+                        reserved_vids.add(r.vehicle_id)
+                        
+            maintenance_vids = set()
+            for m in session.query(LocalMaintenance).filter(LocalMaintenance.status == "ACTIVE").all():
+                m_start = parse_datetime_utc(m.start_datetime)
+                m_end = parse_datetime_utc(getattr(m, 'actual_end_datetime', None) or m.expected_end_datetime)
+                if m_start and m_end and m_start <= now < m_end:
+                    maintenance_vids.add(m.vehicle_id)
+            
             vehicle_dicts = []
             for v in vehicles:
                 try:
@@ -472,6 +501,16 @@ class MainWindow(QMainWindow):
                 except Exception as e:
                     images_list = []
                     print("Error getting images:", e)
+
+                # Determine effective status
+                effective_status = v.status
+                if effective_status not in ("SOLD", "INACTIVE"):
+                    if v.id in maintenance_vids:
+                        effective_status = "MAINTENANCE"
+                    elif v.id in rented_vids:
+                        effective_status = "RENTED"
+                    elif v.id in reserved_vids:
+                        effective_status = "RESERVED"
 
                 vehicle_dicts.append({
                     "id": v.id,
@@ -487,7 +526,7 @@ class MainWindow(QMainWindow):
                     "purchase_mileage": v.purchase_mileage,
                     "purchase_price": v.purchase_price,
                     "daily_rental_price": v.daily_rental_price,
-                    "status": v.status,
+                    "status": effective_status,
                     "image_url": v.image_url,
                     "images": images_list,
                     "assurance_expiry": v.assurance_expiry,
@@ -525,15 +564,23 @@ class MainWindow(QMainWindow):
         except Exception as e:
             logger.error("Local dashboard snapshot failed: %s", e)
 
+        self._dashboard_generation = getattr(self, "_dashboard_generation", 0) + 1
+        current_generation = self._dashboard_generation
+
         if fetch_server and self._is_online and self._access_token:
             fetcher = DashboardFetcher(self._access_token, parent=self)
-            fetcher.stats_ready.connect(self._on_dashboard_stats)
+            fetcher.stats_ready.connect(
+                lambda overview, top, gen=current_generation: self._on_dashboard_stats(overview, top, gen)
+            )
             fetcher.finished.connect(fetcher.deleteLater)
             self._dashboard_fetcher = fetcher  # keep reference
             fetcher.start()
 
-    def _on_dashboard_stats(self, overview: dict, top_vehicles: list):
+    def _on_dashboard_stats(self, overview: dict, top_vehicles: list, generation: int = 0):
         """Apply API dashboard results (delivered on the UI thread)."""
+        if generation > 0 and getattr(self, "_dashboard_generation", 0) > generation:
+            return
+            
         self._last_server_overview = dict(overview)
         self._last_server_top_vehicles = top_vehicles
         self._dashboard.refresh_data(overview, top_vehicles or [])
