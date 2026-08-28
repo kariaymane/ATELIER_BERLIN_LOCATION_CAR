@@ -712,8 +712,7 @@ class MainWindow(QMainWindow):
                 )
 
             session.commit()
-            self._load_vehicles_from_local()
-            self._refresh_dashboard()
+            get_event_bus().data_refreshed.emit()
             self._run_sync()
             self.statusBar().showMessage(t("vehicles.form_success_create"), 3000)
         except Exception as e:
@@ -828,8 +827,7 @@ class MainWindow(QMainWindow):
                 )
 
             session.commit()
-            self._load_vehicles_from_local()
-            self._refresh_dashboard()
+            get_event_bus().data_refreshed.emit()
             self._run_sync()
             self.statusBar().showMessage(t("vehicles.form_success_edit"), 3000)
         except Exception as e:
@@ -868,8 +866,7 @@ class MainWindow(QMainWindow):
 
                 session.delete(v)
                 session.commit()
-                self._load_vehicles_from_local()
-                self._refresh_dashboard()
+                get_event_bus().data_refreshed.emit()
                 self._run_sync()
         except Exception as e:
             session.rollback()
@@ -980,11 +977,7 @@ class MainWindow(QMainWindow):
                 queue.enqueue("vehicle", vehicle.id, "UPDATE", {"id": vehicle.id, "status": "MAINTENANCE"})
 
             session.commit()
-
-            self._load_vehicles_from_local()
-            self._refresh_dashboard()
-            self._maintenance.refresh_data()
-            self._reservations.refresh_data()
+            get_event_bus().data_refreshed.emit()
             self._run_sync()
         except Exception as e:
             print("Error creating maintenance:", e)
