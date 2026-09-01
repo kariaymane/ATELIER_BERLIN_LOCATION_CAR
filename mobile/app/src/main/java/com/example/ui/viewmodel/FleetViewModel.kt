@@ -205,11 +205,23 @@ class FleetViewModel(
             _errorMessage.value = null
             val result = fleetRepository.refreshAll()
             if (result.isFailure) {
-                _errorMessage.value = result.exceptionOrNull()?.message ?: "Erreur de synchronisation avec le serveur API."
+                // If Room already holds data, the screens fall back to it and
+                // show a non-fatal offline banner (driven by syncStatus). Only
+                // raise a blocking error message when there is nothing cached.
+                val hasCache = vehicles.value.isNotEmpty() ||
+                    reservations.value.isNotEmpty() ||
+                    maintenances.value.isNotEmpty()
+                if (!hasCache) {
+                    _errorMessage.value = result.exceptionOrNull()?.message
+                        ?: "Erreur de synchronisation avec le serveur API."
+                }
             }
             _isRefreshing.value = false
         }
     }
+
+    /** Manual retry from the offline banner. */
+    fun retrySync() = refreshAll()
 
     fun refreshVehicles() {
         viewModelScope.launch {

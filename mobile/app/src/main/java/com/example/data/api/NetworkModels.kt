@@ -257,6 +257,20 @@ data class SyncHealthResponseDto(
     @Json(name = "server_id") val serverId: String? = "car-rental-server-v1"
 )
 
+/**
+ * Backend readiness probe payload (`/health/ready`, `/api/v1/sync/ready`).
+ * HTTP 200 ⇒ `status == "ready"` / `database == "connected"`.
+ * HTTP 503 ⇒ `status == "not_ready"` / `database == "unavailable"` with a
+ * safe `errorCategory` (an exception class name only — never a DSN/secret).
+ */
+@JsonClass(generateAdapter = true)
+data class ReadinessResponseDto(
+    @Json(name = "status") val status: String = "unknown",
+    @Json(name = "database") val database: String = "unknown",
+    @Json(name = "version") val version: String? = null,
+    @Json(name = "error_category") val errorCategory: String? = null
+)
+
 @JsonClass(generateAdapter = true)
 data class SyncBootstrapResponseDto(
     @Json(name = "sync_version") val syncVersion: Int = 1,

@@ -28,6 +28,13 @@ import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.*
 
+/**
+ * The server was reached but explicitly reported its database as unavailable
+ * (readiness probe / bootstrap returned HTTP 503). This is a TRANSIENT backend
+ * condition — never a reason to wipe the local cache or the session.
+ */
+class DbUnavailableException(message: String) : Exception(message)
+
 class FleetRepository(
     private val apiClient: ApiClient,
     private val database: AppDatabase,
@@ -378,19 +385,35 @@ class FleetRepository(
             if (response.isSuccessful && response.body() != null) {
                 val body = response.body()!!
                 Log.i("SYNC", "[SYNC] HEALTH SUCCESS: version=${body.version}, server_id=${body.serverId}")
-                _syncStatus.value = _syncStatus.value.copy(
-                    state = SyncStatusState.CONNECTED,
-                    message = "Connecté au serveur API (v${body.version})",
-                    serverId = body.serverId
-                )
-                Result.success("Connecté (v${body.version})")
+                // Liveness passed; now check that the DATABASE is actually usable.
+                when (probeServer()) {
+                    ServerReachability.DATABASE_DOWN -> {
+                        val err = "Serveur accessible, mais sa base de données est indisponible."
+                        _syncStatus.value = _syncStatus.value.copy(
+                            state = SyncStatusState.SERVER_DB_UNAVAILABLE,
+                            message = err, errorMessage = err, serverId = body.serverId,
+                            reachability = ServerReachability.DATABASE_DOWN
+                        )
+                        Result.failure(DbUnavailableException(err))
+                    }
+                    else -> {
+                        _syncStatus.value = _syncStatus.value.copy(
+                            state = SyncStatusState.CONNECTED,
+                            message = "Connecté au serveur API (v${body.version})",
+                            serverId = body.serverId,
+                            reachability = ServerReachability.ONLINE
+                        )
+                        Result.success("Connecté (v${body.version})")
+                    }
+                }
             } else {
                 val err = "Serveur inaccessible (Code: ${response.code()})"
                 Log.e("SYNC", "[SYNC] HEALTH FAILED: $err")
                 _syncStatus.value = _syncStatus.value.copy(
                     state = SyncStatusState.SYNC_ERROR,
                     message = err,
-                    errorMessage = err
+                    errorMessage = err,
+                    reachability = ServerReachability.UNREACHABLE
                 )
                 Result.failure(Exception(err))
             }
@@ -400,10 +423,64 @@ class FleetRepository(
             _syncStatus.value = _syncStatus.value.copy(
                 state = SyncStatusState.SYNC_ERROR,
                 message = "Serveur inaccessible",
-                errorMessage = err
+                errorMessage = err,
+                reachability = ServerReachability.UNREACHABLE
             )
             Result.failure(e)
         }
+    }
+
+    /**
+     * Classify backend availability via the readiness probe (`/health/ready`).
+     *
+     *   ONLINE        — reachable AND its database answered `SELECT 1`
+     *   DATABASE_DOWN — reachable but readiness returned 503 / database:"unavailable"
+     *   UNREACHABLE   — DNS / connect / timeout, or any non-503 transport failure
+     *
+     * Never throws. An older backend without `/health/ready` (404) falls back to
+     * the liveness endpoint so it is still classified ONLINE vs UNREACHABLE.
+     */
+    suspend fun probeServer(): ServerReachability = withContext(Dispatchers.IO) {
+        try {
+            val ready = apiClient.getService().getReadiness()
+            val body = ready.body()
+            when {
+                ready.isSuccessful && (body?.status == "ready" || body?.database == "connected") ->
+                    ServerReachability.ONLINE
+                ready.code() == 503 || body?.database == "unavailable" || body?.status == "not_ready" ->
+                    ServerReachability.DATABASE_DOWN
+                ready.code() == 404 -> {
+                    val live = try { apiClient.getService().getHealth() } catch (e: Exception) { null }
+                    if (live?.isSuccessful == true) ServerReachability.ONLINE
+                    else ServerReachability.UNREACHABLE
+                }
+                else -> ServerReachability.UNREACHABLE
+            }
+        } catch (e: Exception) {
+            Log.w("SYNC", "[SYNC] probeServer transport failure: ${e.message}")
+            ServerReachability.UNREACHABLE
+        }
+    }
+
+    /**
+     * Publish a failed-sync status WITHOUT touching Room. When the server's
+     * database is down we surface a distinct, non-alarming state and keep the
+     * cached snapshot on screen; a genuine transport failure stays SYNC_ERROR.
+     */
+    private suspend fun publishSyncFailure(cause: Throwable?) {
+        val reach = when (cause) {
+            is DbUnavailableException -> ServerReachability.DATABASE_DOWN
+            else -> probeServer()
+        }
+        val dbDown = reach == ServerReachability.DATABASE_DOWN
+        _syncStatus.value = _syncStatus.value.copy(
+            state = if (dbDown) SyncStatusState.SERVER_DB_UNAVAILABLE else SyncStatusState.SYNC_ERROR,
+            message = if (dbDown)
+                "Base de données du serveur indisponible — données hors ligne affichées"
+            else "Synchronisation échouée — données hors ligne affichées",
+            errorMessage = cause?.localizedMessage ?: "Erreur de synchronisation",
+            reachability = reach
+        )
     }
 
     /**
@@ -518,6 +595,13 @@ class FleetRepository(
         try {
             val res = apiClient.getService().getBootstrap()
             if (!res.isSuccessful || res.body() == null) {
+                // 503 == server up, database temporarily unavailable. Keep the
+                // existing complete snapshot; this is not a transport failure.
+                if (res.code() == 503) {
+                    return@withContext Result.failure(
+                        DbUnavailableException("Base de données du serveur indisponible (HTTP 503).")
+                    )
+                }
                 return@withContext Result.failure(
                     Exception("Snapshot serveur indisponible : HTTP ${res.code()}")
                 )
@@ -545,11 +629,13 @@ class FleetRepository(
                 message = "Connexion au logiciel..."
             )
 
-            // Step 1: Health check
-            val healthRes = apiClient.getService().getHealth()
-            Log.i("SYNC", "[SYNC] HEALTH RESPONSE CODE = ${healthRes.code()}")
-            if (!healthRes.isSuccessful) {
-                throw Exception("Serveur inaccessible : HTTP ${healthRes.code()}")
+            // Step 1: readiness probe — distinguish unreachable vs DB-down vs OK
+            when (probeServer()) {
+                ServerReachability.DATABASE_DOWN ->
+                    throw DbUnavailableException("Serveur accessible, mais sa base de données est indisponible.")
+                ServerReachability.UNREACHABLE ->
+                    throw Exception("Serveur inaccessible.")
+                else -> { /* ONLINE (or liveness-only older backend) → proceed */ }
             }
 
             _syncStatus.value = _syncStatus.value.copy(
@@ -569,6 +655,9 @@ class FleetRepository(
             if (!bootstrapRes.isSuccessful || bootstrapRes.body() == null) {
                 val errorBody = bootstrapRes.errorBody()?.string() ?: ""
                 Log.e("SYNC", "[SYNC] BOOTSTRAP FAILED HTTP ${bootstrapRes.code()}: $errorBody")
+                if (bootstrapRes.code() == 503) {
+                    throw DbUnavailableException("Base de données du serveur indisponible (HTTP 503).")
+                }
                 throw Exception("Échec du téléchargement du snapshot serveur : HTTP ${bootstrapRes.code()}")
             }
 
@@ -606,11 +695,10 @@ class FleetRepository(
         } catch (e: Exception) {
             val errMsg = e.localizedMessage ?: "Synchronisation échouée"
             Log.e("SYNC", "SYNC FAILED\ntype=NETWORK\nendpoint=/api/v1/sync/bootstrap\nstatus=0\nmessage=$errMsg", e)
-            _syncStatus.value = _syncStatus.value.copy(
-                state = SyncStatusState.SYNC_ERROR,
-                message = "Synchronisation échouée",
-                errorMessage = errMsg
-            )
+            // Publish the failure WITHOUT touching Room — the previous complete
+            // snapshot (if any) stays on screen; the UI shows an offline banner,
+            // not a fatal error, whenever cached rows exist.
+            publishSyncFailure(e)
             Result.failure(e)
         }
     }
@@ -833,18 +921,19 @@ class FleetRepository(
                 message = "Synchronisation terminée",
                 lastSyncTime = syncTime,
                 isBootstrapped = true,
-                errorMessage = null
+                errorMessage = null,
+                reachability = ServerReachability.ONLINE
             )
             Log.i("SYNC", "[SYNC] refreshAll SUCCESS (versioned full-sync, rev=${localRevision()})")
             Result.success(Unit)
         } else {
-            val errMsg = result.exceptionOrNull()?.message ?: "Erreur de synchronisation"
+            val cause = result.exceptionOrNull()
+            val errMsg = cause?.message ?: "Erreur de synchronisation"
             Log.e("SYNC", "SYNC FAILED\ntype=NETWORK\nendpoint=/api/v1/sync/bootstrap\nstatus=0\nmessage=$errMsg")
-            _syncStatus.value = _syncStatus.value.copy(
-                state = SyncStatusState.SYNC_ERROR,
-                message = "Synchronisation échouée",
-                errorMessage = errMsg
-            )
+            // The prior complete snapshot is untouched (fullSync applies
+            // atomically only on success). Publish a non-fatal offline status
+            // and let the screens fall back to the cached rows.
+            publishSyncFailure(cause)
             Result.failure(Exception(errMsg))
         }
     }

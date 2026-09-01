@@ -73,6 +73,12 @@ fun DashboardScreen(
             onProfileClick = { viewModel.selectTab(BottomNavTab.PROFILE) }
         )
 
+        OfflineBanner(
+            syncStatus = syncStatus,
+            hasCachedData = vehicles.isNotEmpty() || metrics != null,
+            onRetry = { viewModel.retrySync() },
+        )
+
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -255,11 +261,20 @@ fun DashboardScreen(
             Spacer(modifier = Modifier.height(8.dp))
 
             if (vehicles.isEmpty()) {
-                val isError = syncStatus.state == com.example.data.model.SyncStatusState.SYNC_ERROR || syncStatus.state == com.example.data.model.SyncStatusState.DISCONNECTED
+                val dbDown = syncStatus.isServerDatabaseDown
+                val isError = syncStatus.isShowingStaleData
                 EmptyStateView(
-                    title = if (isError) "Connexion au serveur impossible" else "Aucun véhicule disponible",
-                    description = if (isError) "Veuillez vérifier votre connexion au serveur." else "La liste des véhicules est vide.",
-                    onAction = { viewModel.refreshAll() },
+                    title = when {
+                        dbDown -> "Base de données du serveur indisponible"
+                        isError -> "Connexion au serveur impossible"
+                        else -> "Aucun véhicule disponible"
+                    },
+                    description = when {
+                        dbDown -> "Le serveur est accessible mais sa base de données ne répond pas. Réessayez dans un instant."
+                        isError -> "Veuillez vérifier votre connexion au serveur."
+                        else -> "La liste des véhicules est vide."
+                    },
+                    onAction = { viewModel.retrySync() },
                     actionLabel = "Actualiser les données"
                 )
             } else {

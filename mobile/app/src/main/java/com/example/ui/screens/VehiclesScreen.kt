@@ -75,6 +75,12 @@ fun VehiclesScreen(
             }
         )
 
+        OfflineBanner(
+            syncStatus = syncStatus,
+            hasCachedData = vehicles.isNotEmpty(),
+            onRetry = { viewModel.retrySync() },
+        )
+
         // Search Bar matching screenshot 6
         Box(modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)) {
             ExecutiveSearchBar(
@@ -107,12 +113,24 @@ fun VehiclesScreen(
 
         // Vehicle List
         if (filteredVehicles.isEmpty()) {
-            val isError = syncStatus.state == com.example.data.model.SyncStatusState.SYNC_ERROR || syncStatus.state == com.example.data.model.SyncStatusState.DISCONNECTED
+            val hasCache = vehicles.isNotEmpty()
+            val dbDown = syncStatus.isServerDatabaseDown && !hasCache
+            val isError = syncStatus.isShowingStaleData && !hasCache
 
             EmptyStateView(
-                title = if (isError) "Connexion au serveur impossible" else if (searchQuery.isNotBlank()) "Aucun résultat" else "Aucun véhicule disponible",
-                description = if (isError) "Veuillez vérifier votre connexion au serveur." else if (searchQuery.isNotBlank()) "Aucun véhicule ne correspond à \"$searchQuery\"." else "La liste des véhicules est vide.",
-                onAction = { viewModel.refreshAll() },
+                title = when {
+                    dbDown -> "Base de données du serveur indisponible"
+                    isError -> "Connexion au serveur impossible"
+                    searchQuery.isNotBlank() -> "Aucun résultat"
+                    else -> "Aucun véhicule disponible"
+                },
+                description = when {
+                    dbDown -> "Le serveur est accessible mais sa base de données ne répond pas. Réessayez dans un instant."
+                    isError -> "Veuillez vérifier votre connexion au serveur."
+                    searchQuery.isNotBlank() -> "Aucun véhicule ne correspond à \"$searchQuery\"."
+                    else -> "La liste des véhicules est vide."
+                },
+                onAction = { viewModel.retrySync() },
                 actionLabel = "Actualiser"
             )
         } else {
