@@ -4,16 +4,28 @@ enum class VehicleStatus(val label: String, val apiValue: String) {
     DISPONIBLE("Disponible", "AVAILABLE"),
     EN_LOCATION("En location", "RENTED"),
     RESERVEE("Réservé", "RESERVED"),
-    MAINTENANCE("Maintenance", "MAINTENANCE");
+    MAINTENANCE("Maintenance", "MAINTENANCE"),
+    VENDU("Vendu", "SOLD"),
+    INACTIF("Inactif", "INACTIVE");
 
     companion object {
+        /**
+         * Canonical backend/shared status token -> UI enum. STRUCTURAL states
+         * (SOLD / INACTIVE) must NOT collapse to DISPONIBLE — that let a sold
+         * or retired vehicle read as bookable (forensic P2). An absent value
+         * follows the backend default (AVAILABLE); an unrecognised token is
+         * treated as INACTIF so it can never silently present as available.
+         */
         fun fromApi(value: String?): VehicleStatus {
-            return when (value?.uppercase()) {
+            return when (value?.trim()?.uppercase()) {
                 "AVAILABLE", "DISPONIBLE" -> DISPONIBLE
                 "RENTED", "EN_LOCATION", "ACTIVE" -> EN_LOCATION
                 "RESERVED", "RESERVEE" -> RESERVEE
                 "MAINTENANCE" -> MAINTENANCE
-                else -> DISPONIBLE
+                "SOLD", "VENDU" -> VENDU
+                "INACTIVE", "INACTIF" -> INACTIF
+                null, "" -> DISPONIBLE
+                else -> INACTIF
             }
         }
     }
@@ -91,7 +103,11 @@ data class Reservation(
     val lastUpdated: String = "À l'instant",
     val pickupLocation: String = "",
     val returnLocation: String = "",
-    val notes: String = ""
+    val notes: String = "",
+    // Raw ISO-8601 UTC interval edges (machine-parseable; `startDate`/`endDate`
+    // are the localized display strings).
+    val startIso: String = "",
+    val endIso: String = ""
 )
 
 enum class MaintenanceStep(val label: String, val order: Int) {
@@ -158,7 +174,9 @@ data class MaintenanceTicket(
     val status: String = "ACTIVE",
     val priority: String = "Haute",
     val notes: String = "",
-    val parts: List<MaintenancePart> = emptyList()
+    val parts: List<MaintenancePart> = emptyList(),
+    // Raw ISO-8601 UTC start (machine-parseable; `scheduledDate` is display).
+    val startIso: String? = null
 )
 
 data class PerformanceMetrics(

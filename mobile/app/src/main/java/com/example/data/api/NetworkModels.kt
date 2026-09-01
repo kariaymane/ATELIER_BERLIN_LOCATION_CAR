@@ -65,6 +65,10 @@ data class VehicleDto(
     @Json(name = "current_mileage") val currentMileage: Int = 0,
     @Json(name = "daily_rental_price") val dailyRentalPrice: Double = 0.0,
     @Json(name = "status") val status: String = "AVAILABLE",
+    // Structural status is `status`. `effectiveStatus` is the DERIVED right-now
+    // state the backend computes (MAINTENANCE > RENTED > RESERVED > AVAILABLE) —
+    // the value the Fleet screen must show so it matches the Dashboard.
+    @Json(name = "effective_status") val effectiveStatus: String? = null,
     @Json(name = "notes") val notes: String? = null,
     @Json(name = "image_url") val imageUrl: String? = null,
     @Json(name = "images") val images: List<VehicleImageDto>? = null,
@@ -256,6 +260,10 @@ data class SyncHealthResponseDto(
 @JsonClass(generateAdapter = true)
 data class SyncBootstrapResponseDto(
     @Json(name = "sync_version") val syncVersion: Int = 1,
+    // Monotonic authoritative revision (latest updated_at epoch-ms UTC across
+    // every vehicle/reservation/maintenance row in this snapshot; 0 == empty
+    // fleet). Applying this snapshot atomically ⇒ "complete through `revision`".
+    @Json(name = "revision") val revision: Long = 0L,
     @Json(name = "server_time") val serverTime: String,
     @Json(name = "server_id") val serverId: String = "car-rental-server-v1",
     @Json(name = "api_version") val apiVersion: String = "1.0.0",

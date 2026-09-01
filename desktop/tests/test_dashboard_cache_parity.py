@@ -52,7 +52,7 @@ def seeded():
     rows = [
         # (start_local, days, total, status)
         (tznow.replace(hour=8), 2, 600.0, "COMPLETED"),    # today -> counted
-        (tznow.replace(hour=9), 1, 250.0, "ACTIVE"),       # today -> counted
+        (tznow.replace(hour=0, minute=0, second=0), 1, 250.0, "ACTIVE"), # today -> counted & currently active
         (tznow - timedelta(days=3), 4, 999.0, "CANCELLED"),# excluded
         (tznow - timedelta(days=10), 3, 750.0, "COMPLETED"),# this month only
     ]
@@ -74,12 +74,16 @@ def test_local_overview_matches_backend_rule(seeded):
     from app.sync.dashboard_cache import compute_local_overview
     o = compute_local_overview()
 
-    # Vehicle status counts (fixture has 1 AVAILABLE + 1 RENTED, none in
-    # MAINTENANCE vehicle-status; the ACTIVE maintenance TICKET is separate)
+    # Canonical effective status: d-veh-1 has an ACTIVE, open-ended maintenance
+    # ticket that has started -> it occupies the vehicle (MAINTENANCE) until
+    # closed. d-veh-2 has an ACTIVE reservation covering now -> RENTED.
+    # The dashboard shows ONE maintenance number.
     assert o["total_vehicles"] == 2
-    assert o["available"] == 1 and o["rented"] == 1
-    assert o["reserved"] == 0 and o["maintenance"] == 0
-    assert o["active_maintenances"] == 1
+    assert o["available"] == 0 and o["rented"] == 1
+    assert o["reserved"] == 0 and o["maintenance"] == 1
+    assert o["active_maintenances"] == o["maintenance"] == 1
+    assert (o["available"] + o["rented"] + o["reserved"] + o["maintenance"]
+            == o["total_vehicles"])
 
     # Today: COMPLETED(600) + ACTIVE(250) count; CANCELLED excluded
     assert o["today_rentals"] == 2

@@ -12,6 +12,7 @@ wine cmd /c "venv_wine\\Scripts\\pyinstaller.exe --noconfirm --noconsole --name 
     --hidden-import=PySide6.QtCore \
     --hidden-import=PySide6.QtGui \
     --hidden-import=PySide6.QtWidgets \
+    --hidden-import=tzdata \
     --clean \
     ..\\..\\desktop\\app\\main.py"
 

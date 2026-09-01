@@ -43,6 +43,11 @@ class Reservation(Base, TimestampMixin, VersionMixin):
     deposit = Column(Numeric(10, 2), nullable=False, default=0)
     payment_status = Column(String(20), nullable=False, default="PENDING")
     status = Column(String(20), nullable=False, default="RESERVED")
+    # Machine-readable cause when status == 'CANCELLED'. Canonical values:
+    # 'MAINTENANCE' (auto-cancelled because an active maintenance period
+    # overlapped this reservation). NULL for manual/other cancellations.
+    # The human-facing translation lives in the UI i18n layer, never here.
+    cancellation_reason = Column(String(50), nullable=True)
     notes = Column(Text, nullable=True)
     created_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
 

@@ -179,6 +179,45 @@ class TestSyncLifecycle:
         )
         assert get_res.status_code == 404
 
+    async def test_bootstrap_revision_is_monotonic_and_advances_on_mutation(
+        self, client: AsyncClient, admin_token: str
+    ):
+        """Increment 5: /sync/bootstrap exposes a monotonic `revision` (latest
+        updated_at epoch-ms across vehicles/reservations/maintenance) so a
+        mobile client can tell 'complete through revision N' from a stale cache
+        and reject applying an older snapshot over a newer one."""
+        hdr = {"Authorization": f"Bearer {admin_token}"}
+
+        boot1 = (await client.get("/api/v1/sync/bootstrap", headers=hdr)).json()
+        assert "revision" in boot1
+        rev1 = boot1["revision"]
+        assert isinstance(rev1, int) and rev1 >= 0
+
+        # a write advances the authoritative state -> revision must not go back
+        v_id = str(uuid4())
+        payload = {"items": [{
+            "idempotency_key": f"idem-{uuid4()}", "entity_type": "vehicle",
+            "entity_id": v_id, "operation": "CREATE",
+            "payload": {
+                "id": v_id, "registration": f"REV-{uuid4().hex[:6].upper()}",
+                "vin": f"VNREV{uuid4().hex[:12].upper()}", "brand": "T", "model": "C",
+                "year": 2024, "fuel_type": "GASOLINE", "transmission": "AUTOMATIC",
+                "daily_rental_price": 100.0, "status": "AVAILABLE",
+            },
+            "version": 1, "device_id": "test-device",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }]}
+        res = await client.post("/api/v1/sync/push", json=payload, headers=hdr)
+        assert res.status_code == 200 and res.json()["results"][0]["status"] == "ok"
+
+        boot2 = (await client.get("/api/v1/sync/bootstrap", headers=hdr)).json()
+        assert boot2["revision"] >= rev1
+        assert boot2["revision"] > 0
+
+        # idempotent: no further write -> revision stable
+        boot3 = (await client.get("/api/v1/sync/bootstrap", headers=hdr)).json()
+        assert boot3["revision"] == boot2["revision"]
+
     async def test_sync_unauthorized(self, client: AsyncClient):
         """Verify anonymous requests to sync endpoints are rejected with 401."""
         res_push = await client.post("/api/v1/sync/push", json={"items": []})

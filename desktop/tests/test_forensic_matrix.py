@@ -317,10 +317,16 @@ def test_server_blocked_rejects(qapp, env):
     assert not created and len(warnings) == 1, "SERVER BLOCKED must reject"
 
 
-@pytest.mark.parametrize("http_error", ["NETWORK", 500, 401, 403, "malformed"])
-def test_technical_errors_never_report_conflict(qapp, env, http_error):
-    """NETWORK / 5xx / 401 / 403 / malformed -> technical handling,
-    NEVER the business-conflict message, NEVER a silent creation."""
+@pytest.mark.parametrize("http_error,expected_key", [
+    ("NETWORK", "sync.server_unavailable"),
+    (500, "reservations.err_server_error"),
+    (401, "clients.session_expired"),
+    (403, "common.permission_denied"),
+    ("malformed", "reservations.err_server_error"),
+])
+def test_technical_errors_never_report_conflict(qapp, env, http_error, expected_key):
+    """NETWORK / 5xx / 401 / 403 / malformed -> the CATEGORY-SPECIFIC technical
+    message, NEVER the business-conflict message, NEVER a silent creation."""
     from app.ui.reservations.reservation_list import ReservationWidget
     api = FakeApi()
     if http_error == "malformed":
@@ -333,11 +339,9 @@ def test_technical_errors_never_report_conflict(qapp, env, http_error):
         "start_datetime": _iso(21), "end_datetime": _iso(22)})
     assert not created, "technical error must not silently create"
     from app.i18n import t
-    technical = t("sync.server_unavailable")
-    conflict = t("reservations.double_booking")
-    assert any(technical in str(w) for w in warnings), \
-        f"must show the TECHNICAL message, got: {warnings}"
-    assert not any(conflict in str(w) for w in warnings), \
+    assert any(t(expected_key) in str(w) for w in warnings), \
+        f"must show {expected_key!r}, got: {warnings}"
+    assert not any(t("reservations.double_booking") in str(w) for w in warnings), \
         "technical error must NEVER be reported as already-reserved"
 
 

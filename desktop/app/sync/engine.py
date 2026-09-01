@@ -180,6 +180,8 @@ class SyncEngine:
                                         lr.updated_at = datetime.now(timezone.utc).isoformat()
                                         lr.version += 1
                                         session.commit()
+                                        from app.services.event_bus import get_event_bus
+                                        get_event_bus().data_refreshed.emit()
                                         logger.warning(
                                             "SYNC CONFLICT: reservation %s rejected by server (%s) — reverted locally",
                                             pending[i].entity_id, result.get("message"),
@@ -336,6 +338,7 @@ class SyncEngine:
                         r.total_price = payload.get("total_price", getattr(r, 'total_price', 0.0))
                         r.deposit = payload.get("deposit", getattr(r, 'deposit', 0.0))
                         r.status = payload.get("status", getattr(r, 'status', "RESERVED"))
+                        r.cancellation_reason = payload.get("cancellation_reason", getattr(r, 'cancellation_reason', None))
                         r.payment_status = payload.get("payment_status", getattr(r, 'payment_status', "PENDING"))
                         r.version = ver
                         r.updated_at = now_iso
@@ -359,7 +362,9 @@ class SyncEngine:
                         c.license_number = payload.get("license_number", getattr(c, 'license_number', None))
                         c.photo_url = payload.get("photo_url", getattr(c, 'photo_url', None))
                         c.identity_card_image = payload.get("identity_card_image", getattr(c, 'identity_card_image', None))
+                        c.identity_card_image_back = payload.get("identity_card_image_back", getattr(c, 'identity_card_image_back', None))
                         c.driving_license_image = payload.get("driving_license_image", getattr(c, 'driving_license_image', None))
+                        c.driving_license_image_back = payload.get("driving_license_image_back", getattr(c, 'driving_license_image_back', None))
                         c.notes = payload.get("notes", getattr(c, 'notes', None))
                         c.status = payload.get("status", getattr(c, 'status', "ACTIVE"))
                         c.version = ver

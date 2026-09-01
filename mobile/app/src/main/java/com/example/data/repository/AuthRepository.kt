@@ -2,6 +2,7 @@ package com.example.data.repository
 
 import android.util.Log
 import com.example.data.api.ApiClient
+import com.example.data.api.JwtUtils
 import com.example.data.api.LoginRequestDto
 import com.example.data.api.RefreshRequestDto
 import com.example.data.api.TokenManager
@@ -15,14 +16,21 @@ import kotlinx.coroutines.withContext
 /**
  * Authentication repository.
  *
- * Security contract (single source of truth = backend):
- *  - A stored token is NEVER treated as authentication by itself.
- *  - Session restore validates against the server (refresh-token flow,
- *    falling back to an authenticated probe when no refresh token exists).
+ * Security / session contract:
+ *  - The backend is the single source of truth. Whenever the network is
+ *    reachable, session restore validates against the server (refresh-token
+ *    flow, falling back to an authenticated probe).
+ *  - The session is treated as dead ONLY when the server explicitly rejects it
+ *    (HTTP 401/403 on refresh or probe) or the user logs out. A network failure,
+ *    timeout, or 5xx is NOT a rejection.
+ *  - Offline / server-unreachable start: if a locally-persisted session exists
+ *    and its stored token is not already provably expired, the app opens with
+ *    that cached session and re-validates in the background on the next
+ *    reachable call. "Log in once, stay logged in until logout."
  *  - User identity comes only from server responses or identity previously
  *    persisted from a server response. No fabricated defaults.
- *  - Logout clears tokens and identity; the next start requires email +
- *    password again.
+ *  - Logout clears tokens and identity (keeps the configured base URL); the
+ *    next start requires email + password again.
  */
 class AuthRepository(
     private val apiClient: ApiClient,
@@ -47,6 +55,16 @@ class AuthRepository(
                 clearLocalSession()
                 return
             }
+
+            // A cached session we could fall back to if the server is
+            // unreachable: identity must be present, and at least one stored
+            // token must not already be provably expired.
+            val offlineSession: UserSession? =
+                buildSessionFromStoredIdentity(token = access ?: refresh ?: "")
+                    ?.takeIf {
+                        !JwtUtils.isDefinitelyExpired(refresh) ||
+                            !JwtUtils.isDefinitelyExpired(access)
+                    }
 
             // Preferred path: the server verifies the refresh token.
             if (!refresh.isNullOrBlank()) {
@@ -73,13 +91,21 @@ class AuthRepository(
                     clearLocalSession()
                     return
                 }
-                // Refresh explicitly rejected (401/invalid) -> session dead.
-                if (refreshed != null) {
+                // Server was reached and explicitly rejected the refresh token
+                // (401/403) -> the session is genuinely dead.
+                if (refreshed != null && refreshed.code() in intArrayOf(401, 403)) {
                     clearLocalSession()
                     return
                 }
-                // Network unreachable: do NOT silently authenticate. A stored
-                // session may only unlock the app when the server confirms it.
+                // Server unreachable, timed out, or returned a transient error
+                // (5xx / rate limit). Do NOT destroy the session over a network
+                // condition: open with the cached session if we have one and it
+                // is not already expired; the next reachable call re-validates.
+                if (offlineSession != null) {
+                    Log.i("AUTH", "server unreachable on restore -> entering with cached session")
+                    _currentUserSession.value = offlineSession
+                    return
+                }
                 clearLocalSession()
                 return
             }
@@ -100,6 +126,17 @@ class AuthRepository(
                     _currentUserSession.value = session
                     return
                 }
+                clearLocalSession()
+                return
+            }
+            if (probe != null && probe.code() in intArrayOf(401, 403)) {
+                clearLocalSession()
+                return
+            }
+            if (offlineSession != null) {
+                Log.i("AUTH", "server unreachable on restore -> entering with cached session")
+                _currentUserSession.value = offlineSession
+                return
             }
             clearLocalSession()
         } finally {
@@ -152,7 +189,9 @@ class AuthRepository(
                     )
                 }
                 tokenManager.saveToken(body.accessToken)
-                tokenManager.saveRefreshToken(body.refreshToken ?: "")
+                body.refreshToken?.takeIf { it.isNotBlank() }?.let {
+                    tokenManager.saveRefreshToken(it)
+                }
                 val userEmail = body.user?.email ?: email.trim()
                 val fullName = body.fullName?.takeIf { it.isNotBlank() }
                     ?: userEmail.substringBefore("@").replaceFirstChar { it.uppercase() }
@@ -225,7 +264,7 @@ class AuthRepository(
     }
 
     private fun clearLocalSession() {
-        tokenManager.clearAll()
+        tokenManager.clearSession()
         _currentUserSession.value = null
     }
 

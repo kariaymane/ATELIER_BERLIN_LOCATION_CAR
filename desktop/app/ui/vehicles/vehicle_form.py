@@ -204,14 +204,22 @@ class VehicleFormDialog(QDialog):
         self._purchase_price.setMinimumHeight(38)
         form.addRow(t("vehicles.form_purchase_price"), self._purchase_price)
 
-        # 13. Status
+        # 13. Status — ONLY structural states are editable here. RENTED /
+        # RESERVED / MAINTENANCE are DERIVED from reservation & maintenance
+        # records (see Phase 4 canonical rule) and must never be set as a raw
+        # column from this form — use the Reservations / Maintenance modules.
         self._status = QComboBox()
-        for st in ["AVAILABLE", "RENTED", "RESERVED", "MAINTENANCE"]:
+        for st in ["AVAILABLE", "SOLD", "INACTIVE"]:
             self._status.addItem(t(f"status.{st}"), st)
-        if "status" in self._data:
-            idx = self._status.findData(self._data["status"])
+        current_status = (self._data.get("status") or "AVAILABLE").upper()
+        if current_status in ("SOLD", "INACTIVE"):
+            idx = self._status.findData(current_status)
             if idx >= 0:
                 self._status.setCurrentIndex(idx)
+        else:
+            # A derived/transient value (AVAILABLE/RENTED/RESERVED/MAINTENANCE)
+            # collapses to the only structural default the user can pick here.
+            self._status.setCurrentIndex(self._status.findData("AVAILABLE"))
         self._status.setMinimumHeight(38)
         form.addRow(t("vehicles.form_status"), self._status)
 

@@ -133,6 +133,7 @@
     "col_status": "الحالة",
     "col_actions": "الإجراءات",
     "no_data": "لا توجد حجوزات مسجلة.",
+    "action_activate": "تفعيل",
     "action_complete": "إتمام",
     "action_cancel": "إلغاء",
     "dialog_title": "حجز جديد - {name}",
@@ -152,7 +153,10 @@
     "new_client": "— عميل جديد —",
     "double_booking": "هذه السيارة محجوزة بالفعل خلال هذه الفترة.",
     "in_maintenance": "هذه السيارة في الصيانة ولا يمكن حجزها.",
-    "rejected_by_server": "تم رفض الحجز من قبل الخادم: الفترة محجوزة بالفعل."
+    "cancelled_due_to_maintenance": "أُلغيت بسبب الصيانة",
+    "rejected_by_server": "تم رفض الحجز من قبل الخادم: الفترة محجوزة بالفعل.",
+    "err_invalid_data": "بيانات الحجز غير صالحة. تحقق من التواريخ والمعلومات المدخلة.",
+    "err_server_error": "خطأ في الخادم. يرجى المحاولة مرة أخرى بعد قليل."
   },
   "maintenance": {
     "title": "الصيانة",
@@ -185,7 +189,8 @@
     "type_entretien": "صيانة دورية",
     "type_mecanique": "ميكانيك",
     "type_carrosserie": "هيكل",
-    "type_autre": "أخرى"
+    "type_autre": "أخرى",
+    "reservation_cancelled_toast": "تم إلغاء {n} حجز/حجوزات — المركبة في الصيانة"
   },
   "status": {
     "AVAILABLE": "جاهزة للكراء",
@@ -234,7 +239,8 @@
     "error": "خطأ",
     "error_connection": "خطأ في الاتصال",
     "success": "نجاح",
-    "profile_msg": "متصل بحساب {name} ({email})"
+    "profile_msg": "متصل بحساب {name} ({email})",
+    "permission_denied": "ليس لديك إذن للقيام بهذا الإجراء."
   },
   "sync": {
     "online": "متصل — متزامن",
@@ -275,6 +281,11 @@
     "docs_cin": "بطاقة التعريف",
     "docs_license": "رخصة السياقة",
     "doc_missing": "المستند غير متوفر",
+    "identity_section": "الهوية / البطاقة الوطنية",
+    "docs_cin_recto": "البطاقة الوطنية — الوجه",
+    "docs_cin_verso": "البطاقة الوطنية — الظهر",
+    "docs_license_recto": "رخصة السياقة — الوجه",
+    "docs_license_verso": "رخصة السياقة — الظهر",
     "open_details": "التفاصيل",
     "offline_data": "بيانات محلية (غير متصل)",
     "live_data": "بيانات الخادم المباشرة",

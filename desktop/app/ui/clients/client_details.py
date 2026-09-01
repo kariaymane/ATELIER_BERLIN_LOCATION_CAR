@@ -12,53 +12,66 @@ Displayed rules come from the backend canonical report:
   - amounts are server-computed totals (Numeric-backed)
 """
 import logging
+from datetime import datetime, timezone
 
 from PySide6.QtCore import Qt, QThread, Signal, QSize
 from PySide6.QtGui import QFont, QPixmap
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QTableWidget,
     QTableWidgetItem, QHeaderView, QPushButton, QFrame, QMessageBox,
-    QSizePolicy,
+    QSizePolicy, QGridLayout,
 )
 
 from app.i18n import t, is_rtl
 from app.services.image_cache import get_image_cache
+from app.utils.datetime_utils import parse_datetime_utc
 
 logger = logging.getLogger(__name__)
 
 
 
 class HoverableImageLabel(QLabel):
+    """Displays a document image centered by the layout, aspect ratio always
+    preserved, never stretched or clipped. Large / portrait / landscape scans
+    all fit. Hovering shows an enlarged preview.
+    """
+
     def __init__(self, placeholder_text, parent=None):
         super().__init__(placeholder_text, parent)
         self.setMouseTracking(True)
         self.full_pixmap = None
         self._hover_popup = None
+        self._rescaling = False  # re-entrancy guard for setPixmap/resizeEvent
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.setMinimumSize(240, 160)
+        self.setMinimumSize(260, 170)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
     def setPixmap(self, pixmap):
-        if not hasattr(self, '_setting_pixmap'):
-            self.full_pixmap = pixmap
-            self._update_pixmap_scale()
+        # External callers pass the FULL-resolution pixmap; we keep it and
+        # render a scaled copy. Our own internal rescale sets _rescaling so the
+        # scaled copy reaches QLabel unchanged.
+        if self._rescaling:
+            super().setPixmap(pixmap)
             return
-        super().setPixmap(pixmap)
-        
+        self.full_pixmap = pixmap
+        self._update_pixmap_scale()
+
     def _update_pixmap_scale(self):
-        if self.full_pixmap and not self.full_pixmap.isNull():
-            self._setting_pixmap = True
-            sz = self.size()
-            if sz.isEmpty():
-                sz = self.minimumSize()
-                if sz.isEmpty():
-                    sz = QSize(240, 160)
-            scaled = self.full_pixmap.scaled(
-                sz, Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.SmoothTransformation)
+        if not self.full_pixmap or self.full_pixmap.isNull():
+            return
+        sz = self.size()
+        if sz.isEmpty() or sz.width() <= 1 or sz.height() <= 1:
+            sz = self.minimumSize()
+        scaled = self.full_pixmap.scaled(
+            sz,
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        )
+        self._rescaling = True
+        try:
             super().setPixmap(scaled)
-            if hasattr(self, '_setting_pixmap'):
-                del self._setting_pixmap
+        finally:
+            self._rescaling = False
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -146,7 +159,9 @@ class ClientDetailsDialog(QDialog):
                     "email": local.email,
                     "cin_number": local.cin_number,
                     "identity_card_image": local.identity_card_image,
+                    "identity_card_image_back": getattr(local, "identity_card_image_back", None),
                     "driving_license_image": local.driving_license_image,
+                    "driving_license_image_back": getattr(local, "driving_license_image_back", None),
                     "photo_url": getattr(local, "photo_url", None),
                     "notes": local.notes,
                     "status": local.status,
@@ -210,25 +225,62 @@ class ClientDetailsDialog(QDialog):
             self._info_labels[key] = val
             info_layout.addLayout(box)
         info_layout.addStretch()
+        layout.addWidget(info)
 
-        # Documents
-        docs_box = QVBoxLayout()
-        docs_box.setSpacing(6)
+        # ── Identity / CIN document section ───────────────────────────
+        # Four slots (CIN recto/verso, licence recto/verso) laid out in a
+        # 2x2 grid. Each cell gets equal stretch so the image is centered by
+        # the LAYOUT (no hardcoded margins). Column order is fixed (recto
+        # left, verso right) and is NOT mirrored under RTL — a document's
+        # front stays its front.
+        id_frame = QFrame()
+        id_frame.setObjectName("clientIdentity")
+        id_frame.setStyleSheet("#clientIdentity { background: #F7FAF5; border-radius: 10px; }")
+        id_outer = QVBoxLayout(id_frame)
+        id_outer.setContentsMargins(16, 12, 16, 12)
+        id_outer.setSpacing(8)
+
+        self._identity_title = QLabel(t("clients.identity_section"))
+        self._identity_title.setFont(QFont("Hanken Grotesk", 12, QFont.Weight.Bold))
+        self._identity_title.setStyleSheet("color: #1E4D38;")
+        id_outer.addWidget(self._identity_title)
+
+        # Grid lives in its own LTR container so the recto/verso column order
+        # is never mirrored by an RTL parent — a document's front stays on the
+        # logical left, its back on the right, in both languages.
+        grid_host = QFrame()
+        grid_host.setLayoutDirection(Qt.LayoutDirection.LeftToRight)
+        grid = QGridLayout(grid_host)
+        grid.setContentsMargins(0, 0, 0, 0)
+        grid.setSpacing(12)
         self._doc_thumbs = {}
-        for key, label_key in (("identity_card_image", "docs_cin"),
-                               ("driving_license_image", "docs_license")):
+        self._doc_captions = {}
+        doc_slots = (
+            ("identity_card_image", "docs_cin_recto", 0, 0),
+            ("identity_card_image_back", "docs_cin_verso", 0, 1),
+            ("driving_license_image", "docs_license_recto", 1, 0),
+            ("driving_license_image_back", "docs_license_verso", 1, 1),
+        )
+        for key, label_key, row, col in doc_slots:
+            cell = QVBoxLayout()
+            cell.setSpacing(4)
             cap = QLabel(t(f"clients.{label_key}"))
-            cap.setStyleSheet("color: #6B7264; font-size: 11px;")
+            cap.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            cap.setStyleSheet("color: #6B7264; font-size: 11px; font-weight: 600;")
             thumb = HoverableImageLabel(t("clients.doc_missing"))
-            
-            thumb.setAlignment(Qt.AlignmentFlag.AlignCenter)
             thumb.setStyleSheet(
                 "background: #FFFFFF; border: 1px solid #D5DDD3; border-radius: 8px; color: #9CA3AF; font-size: 10px;")
             self._doc_thumbs[key] = thumb
-            docs_box.addWidget(cap)
-            docs_box.addWidget(thumb)
-        info_layout.addLayout(docs_box)
-        layout.addWidget(info)
+            self._doc_captions[key] = cap
+            cell.addWidget(cap)
+            cell.addWidget(thumb, 1)
+            grid.addLayout(cell, row, col)
+        grid.setColumnStretch(0, 1)
+        grid.setColumnStretch(1, 1)
+        grid.setRowStretch(0, 1)
+        grid.setRowStretch(1, 1)
+        id_outer.addWidget(grid_host, 1)
+        layout.addWidget(id_frame)
 
         # KPI cards row
         kpis = QHBoxLayout()
@@ -377,7 +429,16 @@ class ClientDetailsDialog(QDialog):
                     amount = float(r.total_price or 0)
                     summary["total_days"] += days
                     summary["total_amount"] += amount
-                    if r.status == "ACTIVE":
+                    # "active_rentals" (En cours) is TIME-DERIVED — start <=
+                    # now < end — exactly like the fleet "en location" rule
+                    # (app/utils/fleet_status.py), so this KPI never
+                    # contradicts the vehicle's own RENTED badge. A RESERVED
+                    # reservation covering now counts; an ACTIVE one whose
+                    # window already ended does not.
+                    r_start = parse_datetime_utc(r.start_datetime)
+                    r_end = parse_datetime_utc(r.end_datetime)
+                    now = datetime.now(timezone.utc)
+                    if r.status != "COMPLETED" and r_start and r_end and r_start <= now < r_end:
                         summary["active_rentals"] += 1
                     elif r.status == "COMPLETED":
                         summary["completed_rentals"] += 1

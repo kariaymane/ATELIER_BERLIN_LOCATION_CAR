@@ -318,19 +318,25 @@ def replace_marker_in_entities(session: Session, marker: str, remote_url: str):
             if r.driving_license_image == marker:
                 r.driving_license_image = remote_url
 
-        # Clients: photo + documents
+        # Clients: photo + two-sided documents (recto + verso)
         clients = session.query(LocalClient).filter(
             (LocalClient.photo_url == marker)
             | (LocalClient.identity_card_image == marker)
+            | (LocalClient.identity_card_image_back == marker)
             | (LocalClient.driving_license_image == marker)
+            | (LocalClient.driving_license_image_back == marker)
         ).all()
         for c in clients:
             if getattr(c, "photo_url", None) == marker:
                 c.photo_url = remote_url
             if getattr(c, "identity_card_image", None) == marker:
                 c.identity_card_image = remote_url
+            if getattr(c, "identity_card_image_back", None) == marker:
+                c.identity_card_image_back = remote_url
             if getattr(c, "driving_license_image", None) == marker:
                 c.driving_license_image = remote_url
+            if getattr(c, "driving_license_image_back", None) == marker:
+                c.driving_license_image_back = remote_url
 
         # SyncQueue: replace in JSON payloads
         queue_items = session.query(SyncQueueItem).filter(
@@ -341,6 +347,13 @@ def replace_marker_in_entities(session: Session, marker: str, remote_url: str):
 
 
         session.commit()
+        
+        # Invalidate stale image cache and notify UI to refresh
+        from app.services.image_cache import get_image_cache
+        get_image_cache().invalidate(marker)
+        get_image_cache().invalidate(remote_url)
+        from app.services.event_bus import get_event_bus
+        get_event_bus().data_refreshed.emit()
     except Exception as e:
         session.rollback()
         logger.error("Failed to reconcile marker %s -> %s: %s", marker, remote_url, e)

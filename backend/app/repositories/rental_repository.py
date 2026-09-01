@@ -30,11 +30,21 @@ class RentalRepository(BaseRepository[Reservation]):
         exclude_id: Optional[UUID] = None,
     ) -> tuple[bool, Optional[str]]:
         """Check if a vehicle is available for the given date range.
-        Checks both reservations and maintenance schedules.
+        Checks base vehicle status, reservations, and maintenance schedules.
         Returns a tuple: (is_available, blocking_entity_type)"""
         from app.models.maintenance import Maintenance
         from sqlalchemy import func, or_, text
         
+        # 0. Check structural Vehicle status only. MAINTENANCE is NOT checked
+        # here — it is a transient, schedule-derived hold enforced by step 2
+        # below. Treating a persisted MAINTENANCE flag as a hard block risks a
+        # stale flag making the vehicle permanently unbookable.
+        v_status = await self._session.scalar(
+            select(Vehicle.status).where(Vehicle.id == vehicle_id)
+        )
+        if v_status in ["SOLD", "INACTIVE"]:
+            return False, v_status
+
         # 1. Check Reservations
         query_res = (
             select(func.count(Reservation.id))
@@ -52,15 +62,23 @@ class RentalRepository(BaseRepository[Reservation]):
         if count_res and count_res > 0:
             return False, "RESERVATION"
 
-        # 2. Check Maintenances
-        # We need to coalesce expected_end_datetime, actual_end_datetime, or start_datetime
+        # 2. Check Maintenances.
+        # CANONICAL: an active maintenance ticket occupies its vehicle from
+        # start_datetime until it is closed. No explicit end => open-ended:
+        # effective_end = COALESCE(actual_end, expected_end, +infinity).
+        from app.services.fleet_status import FAR_FUTURE
+        from sqlalchemy import literal
         query_maint = (
             select(func.count(Maintenance.id))
             .where(
                 Maintenance.vehicle_id == vehicle_id,
                 Maintenance.status.notin_(["CANCELLED", "COMPLETED"]),
                 Maintenance.start_datetime < end_dt,
-                func.coalesce(Maintenance.expected_end_datetime, Maintenance.actual_end_datetime, Maintenance.start_datetime) > start_dt
+                func.coalesce(
+                    Maintenance.actual_end_datetime,
+                    Maintenance.expected_end_datetime,
+                    literal(FAR_FUTURE),
+                ) > start_dt,
             )
         )
         count_maint = await self._session.scalar(query_maint)
@@ -69,6 +87,65 @@ class RentalRepository(BaseRepository[Reservation]):
             return False, "MAINTENANCE"
             
         return True, None
+
+    async def cancel_overlapping_reservations(
+        self,
+        vehicle_id: UUID,
+        maint_start: datetime,
+        maint_end: Optional[datetime],
+        reason: str = "MAINTENANCE",
+    ) -> list[Reservation]:
+        """Cancel every blocking reservation that overlaps a maintenance period.
+
+        Canonical rule: maintenance wins. A reservation whose status is
+        RESERVED or ACTIVE and whose interval overlaps ``[maint_start,
+        maint_end)`` for the same vehicle is moved to CANCELLED with
+        ``cancellation_reason = reason``. COMPLETED / already-CANCELLED
+        reservations are never touched.
+
+        Overlap predicate is the project canonical half-open rule
+        (``start < end`` boundary does NOT overlap), identical to
+        :meth:`check_availability`. Rows are locked FOR UPDATE so concurrent
+        maintenance writers serialise on them.
+
+        Returns the list of reservations that were cancelled (empty if none).
+        Caller is responsible for audit entries / event broadcasts / commit.
+        """
+        # CANONICAL: an active maintenance with no explicit end is open-ended —
+        # it occupies the vehicle until closed. Callers pass maint_end=None for
+        # that case; treat it as the far future.
+        from app.services.fleet_status import FAR_FUTURE
+        if maint_end is None:
+            maint_end = FAR_FUTURE
+        if maint_end <= maint_start:
+            return []
+
+        query = (
+            select(Reservation)
+            .where(
+                Reservation.vehicle_id == vehicle_id,
+                Reservation.status.in_(["RESERVED", "ACTIVE"]),
+                Reservation.start_datetime < maint_end,
+                Reservation.end_datetime > maint_start,
+            )
+        )
+        # SQLite (tests) does not support SELECT ... FOR UPDATE.
+        try:
+            dialect_name = self._session.get_bind().dialect.name
+        except Exception:
+            dialect_name = ""
+        if dialect_name == "postgresql":
+            query = query.with_for_update()
+
+        result = await self._session.execute(query)
+        affected = list(result.scalars().all())
+        for res in affected:
+            res.status = "CANCELLED"
+            res.cancellation_reason = reason
+            res.version += 1
+        if affected:
+            await self._session.flush()
+        return affected
 
     async def get_by_vehicle(
         self,
@@ -117,7 +194,10 @@ class RentalRepository(BaseRepository[Reservation]):
         return list(result.scalars().all())
 
     async def get_today_returns(self) -> list[Reservation]:
-        """Get rentals ending today."""
+        """Get rentals ending today. Canonical rule: any non-cancelled
+        reservation counts as a real physical rental (RESERVED-covering-now
+        is "en location" exactly like ACTIVE — see fleet_status.py), so a
+        return due today is any non-CANCELLED reservation ending today."""
         today_start = datetime.now(ZoneInfo('Africa/Casablanca')).replace(hour=0, minute=0, second=0, microsecond=0)
         today_end = today_start.replace(hour=23, minute=59, second=59)
         result = await self._session.execute(
@@ -125,7 +205,7 @@ class RentalRepository(BaseRepository[Reservation]):
             .where(
                 Reservation.end_datetime >= today_start,
                 Reservation.end_datetime <= today_end,
-                Reservation.status.in_(["ACTIVE", "COMPLETED"]),
+                Reservation.status != "CANCELLED",
             )
             .order_by(Reservation.end_datetime)
         )
@@ -140,13 +220,24 @@ class RentalRepository(BaseRepository[Reservation]):
         return dict(result.all())
 
     async def get_revenue_between(
-        self, start_dt: datetime, end_dt: datetime
+        self, start_dt: datetime, end_dt: datetime, now: Optional[datetime] = None
     ) -> float:
-        """Sum total_price for completed/active rentals in a period."""
+        """Sum total_price for every non-cancelled rental that has STARTED,
+        whose start_datetime falls in [start_dt, end_dt).
+
+        Revenue is recognised when a rental starts (start_datetime <= now):
+        a car whose reservation window contains `now` is RENTED and its
+        revenue counts, whether its stored status is RESERVED, ACTIVE or
+        COMPLETED. Only CANCELLED rentals are excluded. See
+        backend/tests/test_revenue_consistency.py for the pinned semantics.
+        """
+        if now is None:
+            now = datetime.now(ZoneInfo('Africa/Casablanca'))
         result = await self._session.execute(
             select(func.coalesce(func.sum(Reservation.total_price), 0))
             .where(
-                Reservation.status.in_(["ACTIVE", "COMPLETED"]),
+                Reservation.status != "CANCELLED",
+                Reservation.start_datetime <= now,
                 Reservation.start_datetime >= start_dt,
                 Reservation.start_datetime < end_dt,
             )
@@ -181,8 +272,13 @@ class RentalRepository(BaseRepository[Reservation]):
         )
         return int(result.scalar())
 
-    async def get_vehicle_stats(self) -> list[dict]:
-        """Get per-vehicle performance stats."""
+    async def get_vehicle_stats(self, now: Optional[datetime] = None) -> list[dict]:
+        """Get per-vehicle performance stats. Same eligibility rule as
+        revenue: any non-cancelled reservation that has started (see
+        get_revenue_between) — a RESERVED reservation covering `now` already
+        represents a real rental, not just a booking."""
+        if now is None:
+            now = datetime.now(ZoneInfo('Africa/Casablanca'))
         result = await self._session.execute(
             select(
                 Reservation.vehicle_id,
@@ -191,7 +287,10 @@ class RentalRepository(BaseRepository[Reservation]):
                 func.coalesce(func.sum(Reservation.total_price), 0).label("total_revenue"),
                 func.max(Reservation.start_datetime).label("last_rental"),
             )
-            .where(Reservation.status.in_(["ACTIVE", "COMPLETED"]))
+            .where(
+                Reservation.status != "CANCELLED",
+                Reservation.start_datetime <= now,
+            )
             .group_by(Reservation.vehicle_id)
             .order_by(func.sum(Reservation.total_price).desc())
         )

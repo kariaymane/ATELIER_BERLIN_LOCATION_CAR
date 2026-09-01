@@ -88,6 +88,25 @@ class TokenManager(context: Context) {
     fun getStoredUserName(): String = prefs.getString(KEY_USER_NAME, "") ?: ""
     fun getStoredUserRole(): String? = prefs.getString(KEY_USER_ROLE, null)
 
+    /**
+     * Clear the authenticated session (tokens + user identity) while KEEPING
+     * non-credential device configuration such as the API base URL. This is the
+     * correct reset for logout and for a server-confirmed dead session — wiping
+     * the base URL on every session drop was a bug (it silently reverted the
+     * server the operator had configured).
+     */
+    fun clearSession() {
+        prefs.edit()
+            .remove(KEY_TOKEN)
+            .remove(KEY_REFRESH_TOKEN)
+            .remove(KEY_USER_ID)
+            .remove(KEY_USER_EMAIL)
+            .remove(KEY_USER_NAME)
+            .remove(KEY_USER_ROLE)
+            .commit()
+        _tokenFlow.value = null
+    }
+
     fun clearAll() {
         prefs.edit().clear().commit()
         _tokenFlow.value = null

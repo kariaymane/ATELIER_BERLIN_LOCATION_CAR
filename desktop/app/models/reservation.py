@@ -24,6 +24,9 @@ class LocalReservation(LocalBase):
     deposit = Column(Float, nullable=False, default=0.0)
     payment_status = Column(String(20), nullable=False, default="PENDING")
     status = Column(String(20), nullable=False, default="RESERVED")
+    # Machine-readable cause when status == 'CANCELLED' (e.g. 'MAINTENANCE').
+    # The human translation lives in the i18n layer, never here.
+    cancellation_reason = Column(String(50), nullable=True)
     notes = Column(Text, nullable=True)
 
     created_at = Column(String(30), nullable=False)

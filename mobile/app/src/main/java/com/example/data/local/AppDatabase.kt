@@ -15,7 +15,7 @@ import androidx.room.RoomDatabase
         NotificationEntity::class,
         SyncMetadataEntity::class
     ],
-    version = 7,
+    version = 8,   // +ReservationEntity.startDatetimeIso/endDatetimeIso, +MaintenanceEntity.startDatetimeIso
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {

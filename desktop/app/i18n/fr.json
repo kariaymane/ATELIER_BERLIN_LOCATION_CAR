@@ -133,6 +133,7 @@
     "col_status": "Statut",
     "col_actions": "Actions",
     "no_data": "Aucune réservation enregistrée.",
+    "action_activate": "Activer",
     "action_complete": "Terminer",
     "action_cancel": "Annuler",
     "dialog_title": "Nouvelle Réservation - {name}",
@@ -152,7 +153,10 @@
     "new_client": "— Nouveau client —",
     "double_booking": "Ce véhicule est déjà réservé pendant cette période.",
     "in_maintenance": "Ce véhicule est en maintenance et ne peut pas être réservé.",
-    "rejected_by_server": "Réservation refusée par le serveur : la période est déjà réservée."
+    "cancelled_due_to_maintenance": "Annulée à cause de maintenance",
+    "rejected_by_server": "Réservation refusée par le serveur : la période est déjà réservée.",
+    "err_invalid_data": "Données de réservation invalides. Vérifiez les dates et les informations saisies.",
+    "err_server_error": "Erreur du serveur. Veuillez réessayer dans un instant."
   },
   "maintenance": {
     "title": "Maintenance",
@@ -185,7 +189,8 @@
     "type_entretien": "Entretien",
     "type_mecanique": "Mécanique",
     "type_carrosserie": "Carrosserie",
-    "type_autre": "Autre"
+    "type_autre": "Autre",
+    "reservation_cancelled_toast": "{n} réservation(s) annulée(s) — véhicule en maintenance"
   },
   "status": {
     "AVAILABLE": "Prêt à louer",
@@ -234,7 +239,8 @@
     "error": "Erreur",
     "error_connection": "Erreur de connexion",
     "success": "Succès",
-    "profile_msg": "Connecté en tant que {name} ({email})"
+    "profile_msg": "Connecté en tant que {name} ({email})",
+    "permission_denied": "Vous n'avez pas la permission d'effectuer cette action."
   },
   "sync": {
     "online": "Connecté — Synchronisé",
@@ -275,6 +281,11 @@
     "docs_cin": "CIN / Pièce d'identité",
     "docs_license": "Permis de conduire",
     "doc_missing": "Document non disponible",
+    "identity_section": "Identité / CIN",
+    "docs_cin_recto": "CIN — Recto",
+    "docs_cin_verso": "CIN — Verso",
+    "docs_license_recto": "Permis — Recto",
+    "docs_license_verso": "Permis — Verso",
     "open_details": "Détails",
     "offline_data": "Données locales (hors ligne)",
     "live_data": "Données serveur en direct",

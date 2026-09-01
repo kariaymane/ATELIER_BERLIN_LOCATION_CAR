@@ -29,15 +29,31 @@ def init_local_db():
     db_path = SQLITE_URL.replace('sqlite:///', '')
     if reset_mode:
         try:
-            if os.path.exists(db_path):
-                os.remove(db_path)
-                logger.info("[RESET] SQLite database reset because CAR_RENTAL_DB_RESET=1.")
+            for ext in ('', '-wal', '-shm'):
+                target = db_path + ext
+                if os.path.exists(target):
+                    os.remove(target)
+            logger.info("[RESET] SQLite database reset because CAR_RENTAL_DB_RESET=1.")
         except Exception as e:
             logger.warning("Failed to remove existing SQLite file %s: %s", db_path, e)
     else:
         logger.info("[PRESERVE] Existing SQLite database preserved.")
     # Create engine (will create file if missing)
-    _engine = create_engine(SQLITE_URL, echo=False)
+    _engine = create_engine(
+        SQLITE_URL,
+        echo=False,
+        # Allow multi-threading and add timeout
+        connect_args={'check_same_thread': False, 'timeout': 15}
+    )
+    from sqlalchemy import event
+    @event.listens_for(_engine, "connect")
+    def set_sqlite_pragma(dbapi_connection, connection_record):
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA journal_mode=WAL")
+        cursor.execute("PRAGMA synchronous=NORMAL")
+        cursor.execute("PRAGMA busy_timeout=15000")
+        cursor.close()
+
     _session_factory = sessionmaker(bind=_engine)
     # Import all models to ensure they are registered with LocalBase
     import app.models.user
@@ -76,9 +92,22 @@ def init_local_db():
                 conn.execute(text("ALTER TABLE reservations ADD COLUMN identity_card_image TEXT"))
             if "driving_license_image" not in col_names:
                 conn.execute(text("ALTER TABLE reservations ADD COLUMN driving_license_image TEXT"))
+            if "cancellation_reason" not in col_names:
+                conn.execute(text("ALTER TABLE reservations ADD COLUMN cancellation_reason VARCHAR(50)"))
             conn.commit()
         except Exception as e:
             logger.warning("Auto-migration check notice (reservations): %s", e)
+
+        try:
+            result = conn.execute(text("PRAGMA table_info(clients)")).fetchall()
+            col_names = [row[1] for row in result]
+            if "identity_card_image_back" not in col_names:
+                conn.execute(text("ALTER TABLE clients ADD COLUMN identity_card_image_back TEXT"))
+            if "driving_license_image_back" not in col_names:
+                conn.execute(text("ALTER TABLE clients ADD COLUMN driving_license_image_back TEXT"))
+            conn.commit()
+        except Exception as e:
+            logger.warning("Auto-migration check notice (clients): %s", e)
 
 
     logger.info("Local SQLite database initialized at %s", SQLITE_URL)

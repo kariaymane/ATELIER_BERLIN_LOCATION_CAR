@@ -162,34 +162,50 @@ class DashboardWidget(QWidget):
         filter_layout.addWidget(self._period_combo)
         layout.addLayout(filter_layout)
 
-        perf_grid = QGridLayout()
-        perf_grid.setSpacing(14)
+        from app.ui.widgets.flow_layout import FlowLayout
+        
+        perf_layout = FlowLayout()
+        perf_layout.setContentsMargins(0, 0, 0, 0)
+        perf_layout.m_hSpace = 14
+        perf_layout.m_vSpace = 14
 
         self._card_revenue = OperationalStatCard(t("dashboard.revenue"), "0 DH")
         self._card_day = OperationalStatCard(t("dashboard.week_reservations"), "0")
         self._card_maintenance = OperationalStatCard(t("dashboard.active_maintenances"), "0")
 
-        perf_grid.addWidget(self._card_revenue, 0, 0)
-        perf_grid.addWidget(self._card_day, 0, 1)
-        perf_grid.addWidget(self._card_maintenance, 0, 2)
-        layout.addLayout(perf_grid)
+        # Let the cards expand a bit if needed
+        self._card_revenue.setMinimumWidth(250)
+        self._card_day.setMinimumWidth(250)
+        self._card_maintenance.setMinimumWidth(250)
+
+        perf_layout.addWidget(self._card_revenue)
+        perf_layout.addWidget(self._card_day)
+        perf_layout.addWidget(self._card_maintenance)
+        layout.addLayout(perf_layout)
 
         # ─────────────────────────────────────────────────────────────
         # 2. Fleet Status Row
         # ─────────────────────────────────────────────────────────────
-        fleet_grid = QGridLayout()
-        fleet_grid.setSpacing(14)
+        fleet_layout = FlowLayout()
+        fleet_layout.setContentsMargins(0, 0, 0, 0)
+        fleet_layout.m_hSpace = 14
+        fleet_layout.m_vSpace = 14
 
         self._card_available = ExecutiveFleetCard(t("dashboard.available_fleet"), "0")
         self._card_rented = ExecutiveFleetCard(t("dashboard.rented_fleet"), "0", has_progress=True)
         self._card_reserved = ExecutiveFleetCard(t("dashboard.reserved_fleet"), "0")
         self._card_fleet_maintenance = ExecutiveFleetCard(t("dashboard.maintenance_fleet"), "0")
 
-        fleet_grid.addWidget(self._card_available, 0, 0)
-        fleet_grid.addWidget(self._card_rented, 0, 1)
-        fleet_grid.addWidget(self._card_reserved, 0, 2)
-        fleet_grid.addWidget(self._card_fleet_maintenance, 0, 3)
-        layout.addLayout(fleet_grid)
+        self._card_available.setMinimumWidth(200)
+        self._card_rented.setMinimumWidth(200)
+        self._card_reserved.setMinimumWidth(200)
+        self._card_fleet_maintenance.setMinimumWidth(200)
+
+        fleet_layout.addWidget(self._card_available)
+        fleet_layout.addWidget(self._card_rented)
+        fleet_layout.addWidget(self._card_reserved)
+        fleet_layout.addWidget(self._card_fleet_maintenance)
+        layout.addLayout(fleet_layout)
 
         # ─────────────────────────────────────────────────────────────
         # 3. Top 5 Véhicules les plus loués

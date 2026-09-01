@@ -178,8 +178,12 @@ async def list_vehicles(
         search=search,
         price=price,
     )
+    from app.services.fleet_status import compute_effective_statuses
+    eff = await compute_effective_statuses(
+        db, vehicle_ids=[v.id for v in result["vehicles"]]
+    )
     return VehicleListResponse(
-        vehicles=[_vehicle_response(v) for v in result["vehicles"]],
+        vehicles=[_vehicle_response(v, eff.get(str(v.id))) for v in result["vehicles"]],
         total=result["total"],
         page=result["page"],
         page_size=result["page_size"],
@@ -259,7 +263,9 @@ async def get_vehicle(
             detail=result["error"],
         )
 
-    return _vehicle_response(result["vehicle"])
+    from app.services.fleet_status import compute_effective_statuses
+    eff = await compute_effective_statuses(db, vehicle_ids=[vehicle_id])
+    return _vehicle_response(result["vehicle"], eff.get(str(vehicle_id)))
 
 
 @router.put("/{vehicle_id}", response_model=VehicleResponse)
@@ -427,9 +433,10 @@ async def delete_vehicle(
     )
 
 
-def _vehicle_response(v) -> VehicleResponse:
+def _vehicle_response(v, effective_status: str = None) -> VehicleResponse:
     """Convert a Vehicle model to a VehicleResponse."""
     return VehicleResponse(
+        effective_status=effective_status or v.status,
         id=str(v.id),
         registration=v.registration,
         vin=v.vin,

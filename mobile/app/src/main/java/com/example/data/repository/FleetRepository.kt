@@ -8,10 +8,13 @@ import com.example.data.api.ClientDto
 import com.example.data.api.MaintenanceDto
 import com.example.data.api.NotificationDto
 import com.example.data.api.RentalDto
+import com.example.data.api.SyncBootstrapResponseDto
 import com.example.data.api.VehicleDto
 import com.example.data.api.WebSocketEventDto
 import com.example.data.local.*
 import com.example.data.model.*
+import com.example.data.fleet.BoundaryTicker
+import com.example.data.fleet.FleetStatus
 import com.example.util.ImageUrlResolver
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -19,6 +22,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
@@ -27,14 +31,96 @@ import java.util.*
 class FleetRepository(
     private val apiClient: ApiClient,
     private val database: AppDatabase,
-    private val context: android.content.Context
+    private val context: android.content.Context,
+    /** Injectable clock — the same one the BoundaryTicker uses. Tests pass a
+     *  virtual clock; production uses the wall clock. */
+    private val nowMillis: () -> Long = { System.currentTimeMillis() },
+    /** Injectable delay for deterministic virtual-time tests. */
+    tickerDelay: suspend (Long) -> Unit = { ms -> kotlinx.coroutines.delay(ms) },
 ) {
-    val vehiclesFlow: Flow<List<Vehicle>> = database.vehicleDao().getAllVehicles().map { list ->
-        list.map { it.toDomain() }
-    }
+    // Raw interval rows (machine-parseable ISO), reactive to every Room write.
+    private val intervalRowsFlow: Flow<Pair<List<FleetStatus.ReservationRow>, List<FleetStatus.MaintenanceRow>>> =
+        combine(
+            database.reservationDao().getAllReservations(),
+            database.maintenanceDao().getAllTickets(),
+        ) { res, maint ->
+            res.map {
+                FleetStatus.ReservationRow(
+                    it.vehicleId, it.status, it.startDatetimeIso, it.endDatetimeIso,
+                    it.totalAmount.toDouble(),
+                )
+            } to maint.map {
+                FleetStatus.MaintenanceRow(
+                    it.vehicleId, it.status, it.startDatetimeIso,
+                    it.expected_end_datetime, it.actual_end_datetime,
+                )
+            }
+        }
+
+    // The ONE mobile temporal mechanism — ticks at each interval / midnight edge.
+    private val boundaryTicker = BoundaryTicker(
+        nowMillis = nowMillis, delayFn = tickerDelay, includeMidnight = true,
+    )
+    private val boundaryTicks: Flow<Long> = boundaryTicker.ticks(intervalRowsFlow)
+
+    /**
+     * The Fleet screen's vehicles, with the CANONICAL effective status
+     * re-derived locally from the reservation / maintenance intervals against
+     * `now` — so a reservation ending at 18:00 flips the vehicle to
+     * `DISPONIBLE` at 18:00 with no API call, no Room write, no user action.
+     * The re-derivation is the shared normative spec (FleetStatus), identical
+     * to Desktop and Backend (proven by FleetStatusParityTest).
+     */
+    val vehiclesFlow: Flow<List<Vehicle>> = combine(
+        database.vehicleDao().getAllVehicles(),
+        intervalRowsFlow,
+        boundaryTicks,
+    ) { vEntities, intervals, _tick ->
+        deriveEffectiveVehicles(vEntities, intervals.first, intervals.second, nowMillis())
+    }.distinctUntilChanged()
 
     val reservationsFlow: Flow<List<Reservation>> = database.reservationDao().getAllReservations().map { list ->
         list.map { it.toDomain() }
+    }
+
+    companion object {
+        // sync_metadata keys
+        const val META_IS_BOOTSTRAPPED = "is_bootstrapped"
+        const val META_CACHE_COMPLETE = "cache_snapshot_complete"
+        const val META_SYNCED_THROUGH_REVISION = "synced_through_revision"
+
+        /**
+         * PURE — re-derive the canonical effective status of each vehicle from
+         * the local interval rows against `now`. Same normative semantics as
+         * Desktop / Backend (FleetStatus). A vehicle with no local interval
+         * rows keeps the server-provided status.
+         *
+         * This per-vehicle fallback is only SOUND when the temporal cache is
+         * COMPLETE (see `cacheCompleteFlow` / the Increment-5 completeness
+         * invariant): a complete snapshot guarantees that "no local interval
+         * row for this vehicle" genuinely means "no interval affects it", so
+         * keeping the server status is correct. When the cache is not proven
+         * complete, `refreshAll()` forces a full bootstrap instead of trusting
+         * this path.
+         */
+        fun deriveEffectiveVehicles(
+            vEntities: List<VehicleEntity>,
+            resRows: List<FleetStatus.ReservationRow>,
+            maintRows: List<FleetStatus.MaintenanceRow>,
+            now: Long,
+        ): List<Vehicle> {
+            val effective = FleetStatus.effectiveStatuses(
+                vEntities.map { FleetStatus.VehicleRow(it.id, it.status) },
+                resRows, maintRows, now,
+            )
+            return vEntities.map { e ->
+                val domain = e.toDomain()
+                val hasIntervals = resRows.any { it.vehicleId == e.id } ||
+                    maintRows.any { it.vehicleId == e.id }
+                if (hasIntervals) domain.copy(status = VehicleStatus.fromApi(effective[e.id]))
+                else domain
+            }
+        }
     }
 
     val maintenanceFlow: Flow<List<MaintenanceTicket>> = database.maintenanceDao().getAllTickets().map { list ->
@@ -45,10 +131,66 @@ class FleetRepository(
     val notificationsFlow: StateFlow<List<NotificationItem>> = _notifications.asStateFlow()
 
     private val _liveMetrics = MutableStateFlow<PerformanceMetrics?>(null)
-    val performanceMetricsFlow: Flow<PerformanceMetrics?> = _liveMetrics.asStateFlow()
+
+    /**
+     * Dashboard metrics recomputed LOCALLY from Room against `now` + the
+     * boundary ticker — so the fleet cards AND the period (today/week/month)
+     * revenue cards roll over at local midnight with no API call, no user
+     * action. Same period formula as `backend/.../dashboard_service` and
+     * `desktop/.../dashboard_cache`. Null until vehicles are cached.
+     */
+    private val localMetricsFlow: Flow<PerformanceMetrics?> = combine(
+        database.vehicleDao().getAllVehicles(),
+        intervalRowsFlow,
+        boundaryTicks,
+    ) { vEntities, intervals, _tick ->
+        if (vEntities.isEmpty()) return@combine null
+        val ov = FleetStatus.dashboardOverview(
+            vEntities.map { FleetStatus.VehicleRow(it.id, it.status) },
+            intervals.first, intervals.second, nowMillis(),
+        )
+        PerformanceMetrics(
+            todayBookings = ov.todayBookings, weekBookings = ov.weekBookings,
+            monthBookings = ov.monthBookings,
+            todayRevenue = ov.todayRevenue, weekRevenue = ov.weekRevenue,
+            monthRevenue = ov.monthRevenue,
+            readyVehicles = ov.available, rentedVehicles = ov.rented,
+            reservedVehicles = ov.reserved, maintenanceVehicles = ov.maintenance,
+        )
+    }.distinctUntilChanged()
+
+    // Local canonical metrics are authoritative & time-live; the API result is
+    // the warm fallback before the first local computation (mirrors Desktop).
+    val performanceMetricsFlow: Flow<PerformanceMetrics?> =
+        combine(localMetricsFlow, _liveMetrics) { local, api -> local ?: api }
 
     private val _syncStatus = MutableStateFlow(SyncStatus())
     val syncStatusFlow: StateFlow<SyncStatus> = _syncStatus.asStateFlow()
+
+    /**
+     * TEMPORAL-CACHE COMPLETENESS INVARIANT (Increment 5).
+     *
+     * `true` once an authoritative full snapshot has been applied atomically
+     * (`bootstrapAndReset` / `fullSync`) — Room then holds EVERY reservation
+     * and maintenance interval the backend has, so the local canonical
+     * derivation (`FleetStatus`) and the `BoundaryTicker` can evaluate every
+     * future temporal boundary exactly like Desktop / Backend.
+     *
+     * `false` for a fresh install, or a cache written by a pre-Increment-5
+     * build whose incremental refresh was page-capped and could silently drop
+     * interval rows. While `false`, `refreshAll()` forces a full bootstrap
+     * rather than presenting a possibly-sparse cache as a complete snapshot.
+     */
+    val cacheCompleteFlow: Flow<Boolean> =
+        database.syncMetadataDao().observeValue(META_CACHE_COMPLETE)
+            .map { it == "true" }
+            .distinctUntilChanged()
+
+    /** Revision watermark: "this device holds complete state through revision
+     *  N" (backend `SyncBootstrapResponse.revision`). -1 ⇒ never fully synced. */
+    suspend fun localRevision(): Long = withContext(Dispatchers.IO) {
+        database.syncMetadataDao().getValue(META_SYNCED_THROUGH_REVISION)?.toLongOrNull() ?: -1L
+    }
 
     private fun getCurrentTimeString(): String {
         val sdf = SimpleDateFormat("HH:mm", Locale.getDefault())
@@ -58,7 +200,10 @@ class FleetRepository(
 
 
     private fun mapVehicleDtoToDomain(dto: VehicleDto): Vehicle {
-        val domainStatus = VehicleStatus.fromApi(dto.status)
+        // CANONICAL: render the backend-derived effective status so the Fleet
+        // screen agrees with the Dashboard. Fall back to raw status only when
+        // the server did not send one (older backend).
+        val domainStatus = VehicleStatus.fromApi(dto.effectiveStatus ?: dto.status)
 
         val rootUrl = apiClient.getRootUrl()
         val imgUrl = ImageUrlResolver.resolve(dto.imageUrl, rootUrl, dto.version)
@@ -132,6 +277,8 @@ class FleetRepository(
             vehicleImageUrl = "",
             startDate = startFormatted,
             endDate = endFormatted,
+            startIso = dto.startDatetime,
+            endIso = dto.endDatetime,
             status = domainStatus,
             totalAmount = dto.totalPrice.toInt(),
             dailyPrice = dto.dailyPrice.toInt(),
@@ -164,6 +311,7 @@ class FleetRepository(
             step = MaintenanceStep.fromApi(dto.step),
             status = dto.status,
             scheduledDate = formatIsoDate(dto.startDatetime),
+            startIso = dto.startDatetime,
             expected_end_datetime = dto.expectedEndDatetime,
             actual_end_datetime = dto.actualEndDatetime,
             mileage = dto.mileage,
@@ -273,6 +421,115 @@ class FleetRepository(
         _liveMetrics.value = null
     }
 
+    private fun collectVehicleImageEntities(vehicles: List<VehicleDto>): List<VehicleImageEntity> {
+        val out = mutableListOf<VehicleImageEntity>()
+        vehicles.forEach { v ->
+            v.images?.forEach { img ->
+                out.add(VehicleImageEntity(
+                    id = img.id ?: java.util.UUID.randomUUID().toString(),
+                    vehicleId = v.id,
+                    imageUrl = img.imageUrl ?: "",
+                    sortOrder = img.sortOrder ?: 0,
+                ))
+            }
+            if (v.images == null && !v.imageUrl.isNullOrBlank()) {
+                v.imageUrl.split(",").map { it.trim() }.filter { it.isNotBlank() }
+                    .forEachIndexed { index, url ->
+                        out.add(VehicleImageEntity(vehicleId = v.id, imageUrl = url, sortOrder = index))
+                    }
+            }
+        }
+        return out
+    }
+
+    /**
+     * Atomically replace the ENTIRE local temporal projection with an
+     * authoritative backend snapshot, in ONE Room transaction — an observer
+     * moves from the old complete snapshot straight to the new one and can
+     * never see `vehicles = new, reservations = old/empty` in between.
+     *
+     * Revision safety (reuses the backend `SyncBootstrapResponse.revision`):
+     *   - a snapshot OLDER than the revision we already hold is rejected (stale)
+     *   - an equal revision is applied idempotently (same rows back in)
+     *   - the completeness flag + revision watermark are written INSIDE the
+     *     same transaction, so "cache complete through revision N" is atomic
+     *     with the data it describes.
+     *
+     * @return true when applied, false when rejected as stale.
+     */
+    internal suspend fun applyAuthoritativeSnapshot(data: SyncBootstrapResponseDto): Boolean =
+        withContext(Dispatchers.IO) {
+            val localRev = database.syncMetadataDao()
+                .getValue(META_SYNCED_THROUGH_REVISION)?.toLongOrNull() ?: -1L
+            if (data.revision in 1 until localRev) {
+                Log.w("SYNC", "[SYNC] Rejecting STALE snapshot revision=${data.revision} < local=$localRev")
+                return@withContext false
+            }
+
+            val vehiclesDomain = data.vehicles.map { mapVehicleDtoToDomain(it) }
+            val rentalsDomain = data.rentals.map { mapRentalDtoToDomain(it) }
+            val maintenanceDomain = data.maintenance.map { mapMaintenanceDtoToDomain(it) }
+            val notifsDomain = data.notifications.map { mapNotificationDtoToDomain(it) }
+
+            val vehicleEntities = vehiclesDomain.map { VehicleEntity.fromDomain(it) }
+            val rentalEntities = rentalsDomain.map { ReservationEntity.fromDomain(it) }
+            val maintenanceEntities = maintenanceDomain.map { MaintenanceEntity.fromDomain(it) }
+            val notifEntities = notifsDomain.map { NotificationEntity.fromDomain(it) }
+            val allImages = collectVehicleImageEntities(data.vehicles)
+            val syncTime = getCurrentTimeString()
+            val effectiveRevision = maxOf(data.revision, if (localRev < 0L) 0L else localRev)
+
+            database.withTransaction {
+                database.vehicleDao().clearAll()
+                database.reservationDao().clearAll()
+                database.maintenanceDao().clearAll()
+                database.notificationDao().clearAll()
+
+                database.vehicleDao().insertVehicles(vehicleEntities)
+                if (allImages.isNotEmpty()) database.vehicleDao().insertVehicleImages(allImages)
+                database.reservationDao().insertReservations(rentalEntities)
+                database.maintenanceDao().insertTickets(maintenanceEntities)
+                database.notificationDao().insertNotifications(notifEntities)
+
+                database.syncMetadataDao().setValue(SyncMetadataEntity(META_IS_BOOTSTRAPPED, "true"))
+                database.syncMetadataDao().setValue(SyncMetadataEntity(META_CACHE_COMPLETE, "true"))
+                database.syncMetadataDao().setValue(
+                    SyncMetadataEntity(META_SYNCED_THROUGH_REVISION, effectiveRevision.toString())
+                )
+                database.syncMetadataDao().setValue(SyncMetadataEntity("last_sync_at", syncTime))
+                database.syncMetadataDao().setValue(SyncMetadataEntity("server_id", data.serverId))
+                database.syncMetadataDao().setValue(SyncMetadataEntity("sync_version", data.syncVersion.toString()))
+            }
+            _notifications.value = notifsDomain
+            Log.i("SYNC", "[SYNC] snapshot applied — complete through revision $effectiveRevision " +
+                "(${vehicleEntities.size} vehicles, ${rentalEntities.size} reservations, " +
+                "${maintenanceEntities.size} maintenance)")
+            true
+        }
+
+    /**
+     * Versioned full-sync — the mobile "incremental" path. It pulls the
+     * authoritative snapshot from `/sync/bootstrap` and applies it atomically,
+     * so unlike a page-capped per-list refresh it is STRUCTURALLY incapable of
+     * leaving a sparse temporal cache. Revision-guarded against stale apply.
+     * On any failure the previous complete snapshot is left intact.
+     */
+    suspend fun fullSync(): Result<Unit> = withContext(Dispatchers.IO) {
+        try {
+            val res = apiClient.getService().getBootstrap()
+            if (!res.isSuccessful || res.body() == null) {
+                return@withContext Result.failure(
+                    Exception("Snapshot serveur indisponible : HTTP ${res.code()}")
+                )
+            }
+            applyAuthoritativeSnapshot(res.body()!!)
+            refreshDashboard()
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
     /**
      * Complete CONNECT -> RESET -> INITIAL BOOTSTRAP workflow.
      * Atomically purges stale cache and populates Room DB with authoritative server snapshot.
@@ -321,63 +578,16 @@ class FleetRepository(
             Log.i("SYNC", "[SYNC] RESERVATIONS RECEIVED = ${data.rentals.size}")
             Log.i("SYNC", "[SYNC] MAINTENANCE RECEIVED = ${data.maintenance.size}")
             Log.i("SYNC", "[SYNC] NOTIFICATIONS RECEIVED = ${data.notifications.size}")
-
-            val vehiclesDomain = data.vehicles.map { mapVehicleDtoToDomain(it) }
-            val rentalsDomain = data.rentals.map { mapRentalDtoToDomain(it) }
-            val maintenanceDomain = data.maintenance.map { mapMaintenanceDtoToDomain(it) }
-            val notifsDomain = data.notifications.map { mapNotificationDtoToDomain(it) }
-
-            val vehicleEntities = vehiclesDomain.map { VehicleEntity.fromDomain(it) }
-            val rentalEntities = rentalsDomain.map { ReservationEntity.fromDomain(it) }
-            val maintenanceEntities = maintenanceDomain.map { MaintenanceEntity.fromDomain(it) }
-            val notifEntities = notifsDomain.map { NotificationEntity.fromDomain(it) }
+            Log.i("SYNC", "[SYNC] SNAPSHOT REVISION = ${data.revision}")
 
             val syncTime = getCurrentTimeString()
 
-            // Step 3: Atomic Room Transaction
+            // Step 3: Atomic authoritative apply — one Room transaction,
+            // complete temporal projection, completeness flag + revision
+            // watermark written inside the same transaction.
             Log.i("SYNC", "[SYNC] WRITING ROOM")
-            database.withTransaction {
-                database.vehicleDao().clearAll()
-                database.reservationDao().clearAll()
-                database.maintenanceDao().clearAll()
-                database.notificationDao().clearAll()
-
-                database.vehicleDao().insertVehicles(vehicleEntities)
-                val allImages = mutableListOf<VehicleImageEntity>()
-                data.vehicles.forEach { v ->
-                    v.images?.forEach { img ->
-                        allImages.add(VehicleImageEntity(
-                            id = img.id ?: java.util.UUID.randomUUID().toString(),
-                            vehicleId = v.id,
-                            imageUrl = img.imageUrl ?: "",
-                            sortOrder = img.sortOrder ?: 0
-                        ))
-                    }
-                    if (v.images == null && !v.imageUrl.isNullOrBlank()) {
-                        v.imageUrl.split(",").map { it.trim() }.filter { it.isNotBlank() }.forEachIndexed { index, url ->
-                            allImages.add(VehicleImageEntity(
-                                vehicleId = v.id,
-                                imageUrl = url,
-                                sortOrder = index
-                            ))
-                        }
-                    }
-                }
-                if (allImages.isNotEmpty()) {
-                    database.vehicleDao().insertVehicleImages(allImages)
-                }
-                database.reservationDao().insertReservations(rentalEntities)
-                database.maintenanceDao().insertTickets(maintenanceEntities)
-                database.notificationDao().insertNotifications(notifEntities)
-
-                database.syncMetadataDao().setValue(SyncMetadataEntity("is_bootstrapped", "true"))
-                database.syncMetadataDao().setValue(SyncMetadataEntity("last_sync_at", syncTime))
-                database.syncMetadataDao().setValue(SyncMetadataEntity("server_id", data.serverId))
-                database.syncMetadataDao().setValue(SyncMetadataEntity("sync_version", data.syncVersion.toString()))
-            }
+            applyAuthoritativeSnapshot(data)
             Log.i("SYNC", "[SYNC] ROOM COMMIT SUCCESS")
-
-            _notifications.value = notifsDomain
 
             // Also refresh live dashboard stats
             refreshDashboard()
@@ -405,44 +615,79 @@ class FleetRepository(
         }
     }
 
+    // ── page-complete fetchers ───────────────────────────────────────────
+    // The backend list endpoints are paginated (vehicles ≤ 500/page,
+    // rentals ≤ 100/page, maintenance ≤ 100/page). Fetching only page 1
+    // silently truncated the cache for any fleet larger than one page — the
+    // sparse-cache root cause. These loop every page so a per-entity refresh
+    // is also a COMPLETE rebuild.
+    private val MAX_PAGES = 500
+
+    private suspend fun fetchAllVehicleDtos(): List<VehicleDto> {
+        val out = ArrayList<VehicleDto>()
+        var page = 1
+        while (page <= MAX_PAGES) {
+            val resp = apiClient.getService().getVehicles(page = page, pageSize = 500)
+            // Any page failure aborts the whole fetch — a partial list must
+            // NEVER be written (that is the sparse-cache failure mode).
+            if (!resp.isSuccessful || resp.body() == null) {
+                throw Exception("Erreur serveur véhicules (page $page): ${resp.code()}")
+            }
+            val body = resp.body()!!
+            out.addAll(body.vehicles)
+            if (body.vehicles.isEmpty() || body.vehicles.size < 500 || out.size >= body.total) break
+            page++
+        }
+        return out
+    }
+
+    private suspend fun fetchAllRentalDtos(): List<RentalDto> {
+        val out = ArrayList<RentalDto>()
+        var page = 1
+        while (page <= MAX_PAGES) {
+            val resp = apiClient.getService().getRentals(page = page, pageSize = 100)
+            if (!resp.isSuccessful || resp.body() == null) {
+                throw Exception("Erreur serveur réservations (page $page): ${resp.code()}")
+            }
+            val body = resp.body()!!
+            out.addAll(body.rentals)
+            if (body.rentals.isEmpty() || body.rentals.size < 100 || out.size >= body.total) break
+            page++
+        }
+        return out
+    }
+
+    private suspend fun fetchAllMaintenanceDtos(): List<MaintenanceDto> {
+        val out = ArrayList<MaintenanceDto>()
+        var page = 1
+        while (page <= MAX_PAGES) {
+            val resp = apiClient.getService().getMaintenances(page = page, size = 100)
+            if (!resp.isSuccessful || resp.body() == null) {
+                throw Exception("Erreur serveur maintenance (page $page): ${resp.code()}")
+            }
+            val body = resp.body()!!
+            out.addAll(body.items)
+            if (body.items.isEmpty() || body.items.size < 100 || out.size >= body.total) break
+            page++
+        }
+        return out
+    }
+
     suspend fun refreshVehicles(): Result<List<Vehicle>> = withContext(Dispatchers.IO) {
         try {
-            val response = apiClient.getService().getVehicles(page = 1, pageSize = 100)
-            if (response.isSuccessful && response.body() != null) {
-                val list = response.body()!!.vehicles.map { mapVehicleDtoToDomain(it) }
-                val entities = list.map { VehicleEntity.fromDomain(it) }
-                database.withTransaction {
-                    database.vehicleDao().clearAll()
-                    database.vehicleDao().insertVehicles(entities)
-                    val allImages = mutableListOf<VehicleImageEntity>()
-                    response.body()!!.vehicles.forEach { v ->
-                        database.vehicleDao().deleteImagesForVehicle(v.id)
-                        v.images?.forEach { img ->
-                            allImages.add(VehicleImageEntity(
-                                id = img.id ?: java.util.UUID.randomUUID().toString(),
-                                vehicleId = v.id,
-                                imageUrl = img.imageUrl ?: "",
-                                sortOrder = img.sortOrder ?: 0
-                            ))
-                        }
-                        if (v.images == null && !v.imageUrl.isNullOrBlank()) {
-                            v.imageUrl.split(",").map { it.trim() }.filter { it.isNotBlank() }.forEachIndexed { index, url ->
-                                allImages.add(VehicleImageEntity(
-                                    vehicleId = v.id,
-                                    imageUrl = url,
-                                    sortOrder = index
-                                ))
-                            }
-                        }
-                    }
-                    if (allImages.isNotEmpty()) {
-                        database.vehicleDao().insertVehicleImages(allImages)
-                    }
+            val dtos = fetchAllVehicleDtos()
+            val list = dtos.map { mapVehicleDtoToDomain(it) }
+            val entities = list.map { VehicleEntity.fromDomain(it) }
+            val allImages = collectVehicleImageEntities(dtos)
+            database.withTransaction {
+                database.vehicleDao().clearAll()
+                database.vehicleDao().insertVehicles(entities)
+                dtos.forEach { database.vehicleDao().deleteImagesForVehicle(it.id) }
+                if (allImages.isNotEmpty()) {
+                    database.vehicleDao().insertVehicleImages(allImages)
                 }
-                Result.success(list)
-            } else {
-                Result.failure(Exception("Erreur serveur véhicules: ${response.code()}"))
             }
+            Result.success(list)
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -450,18 +695,13 @@ class FleetRepository(
 
     suspend fun refreshRentals(): Result<List<Reservation>> = withContext(Dispatchers.IO) {
         try {
-            val response = apiClient.getService().getRentals(page = 1, pageSize = 100)
-            if (response.isSuccessful && response.body() != null) {
-                val list = response.body()!!.rentals.map { mapRentalDtoToDomain(it) }
-                val entities = list.map { ReservationEntity.fromDomain(it) }
-                database.withTransaction {
-                    database.reservationDao().clearAll()
-                    database.reservationDao().insertReservations(entities)
-                }
-                Result.success(list)
-            } else {
-                Result.failure(Exception("Erreur serveur réservations: ${response.code()}"))
+            val list = fetchAllRentalDtos().map { mapRentalDtoToDomain(it) }
+            val entities = list.map { ReservationEntity.fromDomain(it) }
+            database.withTransaction {
+                database.reservationDao().clearAll()
+                database.reservationDao().insertReservations(entities)
             }
+            Result.success(list)
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -469,18 +709,13 @@ class FleetRepository(
 
     suspend fun refreshMaintenances(): Result<List<MaintenanceTicket>> = withContext(Dispatchers.IO) {
         try {
-            val response = apiClient.getService().getMaintenances(page = 1, size = 100)
-            if (response.isSuccessful && response.body() != null) {
-                val list = response.body()!!.items.map { mapMaintenanceDtoToDomain(it) }
-                val entities = list.map { MaintenanceEntity.fromDomain(it) }
-                database.withTransaction {
-                    database.maintenanceDao().clearAll()
-                    database.maintenanceDao().insertTickets(entities)
-                }
-                Result.success(list)
-            } else {
-                Result.failure(Exception("Erreur serveur maintenance: ${response.code()}"))
+            val list = fetchAllMaintenanceDtos().map { mapMaintenanceDtoToDomain(it) }
+            val entities = list.map { MaintenanceEntity.fromDomain(it) }
+            database.withTransaction {
+                database.maintenanceDao().clearAll()
+                database.maintenanceDao().insertTickets(entities)
             }
+            Result.success(list)
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -565,12 +800,23 @@ class FleetRepository(
     }
 
     /**
-     * Refreshes all entities. If never bootstrapped, executes initial bootstrap.
+     * Refreshes all entities.
+     *
+     * Increment 5: a partial cache is NEVER continued as if complete.
+     *  - never bootstrapped, OR the completeness flag is not set (fresh install
+     *    / cache from a pre-Increment-5 page-capped build) ⇒ full bootstrap.
+     *  - otherwise ⇒ versioned full-sync (`fullSync`): a complete atomic
+     *    rebuild from `/sync/bootstrap`, revision-guarded, that cannot leave a
+     *    sparse temporal cache. On failure the previous complete snapshot is
+     *    left untouched (atomic apply).
      */
     suspend fun refreshAll(): Result<Unit> = withContext(Dispatchers.IO) {
-        val isBootstrapped = database.syncMetadataDao().getValue("is_bootstrapped") == "true"
-        Log.i("SYNC", "[SYNC] refreshAll START (isBootstrapped=$isBootstrapped)")
-        if (!isBootstrapped) {
+        val isBootstrapped = database.syncMetadataDao().getValue(META_IS_BOOTSTRAPPED) == "true"
+        val cacheComplete = database.syncMetadataDao().getValue(META_CACHE_COMPLETE) == "true"
+        Log.i("SYNC", "[SYNC] refreshAll START (isBootstrapped=$isBootstrapped, cacheComplete=$cacheComplete)")
+
+        if (!isBootstrapped || !cacheComplete) {
+            Log.i("SYNC", "[SYNC] cache not proven complete → forcing full bootstrap recovery")
             return@withContext bootstrapAndReset()
         }
 
@@ -579,15 +825,9 @@ class FleetRepository(
             message = "Synchronisation des données..."
         )
 
-        val rVehicles = refreshVehicles()
-        val rRentals = refreshRentals()
-        val rMaint = refreshMaintenances()
-        val rDash = refreshDashboard()
-        val rNotifs = refreshNotifications()
-
-        if (rVehicles.isSuccess || rRentals.isSuccess || rMaint.isSuccess) {
+        val result = fullSync()
+        if (result.isSuccess) {
             val syncTime = getCurrentTimeString()
-            database.syncMetadataDao().setValue(SyncMetadataEntity("last_sync_at", syncTime))
             _syncStatus.value = SyncStatus(
                 state = SyncStatusState.SYNCED,
                 message = "Synchronisation terminée",
@@ -595,12 +835,11 @@ class FleetRepository(
                 isBootstrapped = true,
                 errorMessage = null
             )
-            Log.i("SYNC", "[SYNC] refreshAll SUCCESS")
+            Log.i("SYNC", "[SYNC] refreshAll SUCCESS (versioned full-sync, rev=${localRevision()})")
             Result.success(Unit)
         } else {
-            val errMsg = rVehicles.exceptionOrNull()?.message ?: "Erreur de synchronisation"
-            val ex = rVehicles.exceptionOrNull() ?: Exception("Unknown error")
-            Log.e("SYNC", "SYNC FAILED\ntype=NETWORK\nendpoint=/api/v1/*\nstatus=0\nmessage=$errMsg", ex)
+            val errMsg = result.exceptionOrNull()?.message ?: "Erreur de synchronisation"
+            Log.e("SYNC", "SYNC FAILED\ntype=NETWORK\nendpoint=/api/v1/sync/bootstrap\nstatus=0\nmessage=$errMsg")
             _syncStatus.value = _syncStatus.value.copy(
                 state = SyncStatusState.SYNC_ERROR,
                 message = "Synchronisation échouée",

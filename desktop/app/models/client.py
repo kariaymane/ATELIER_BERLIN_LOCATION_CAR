@@ -13,9 +13,13 @@ class LocalClient(LocalBase):
     email = Column(String(255), nullable=True)
     phone = Column(String(20), nullable=True)
     cin_number = Column(String(50), nullable=True)
+    # Identity documents are two-sided: the legacy columns are the RECTO
+    # (front); *_back holds the VERSO (back), NULL for historical clients.
     identity_card_image = Column(Text, nullable=True)
+    identity_card_image_back = Column(Text, nullable=True)
     license_number = Column(String(50), nullable=True)
     driving_license_image = Column(Text, nullable=True)
+    driving_license_image_back = Column(Text, nullable=True)
     photo_url = Column(Text, nullable=True)
     notes = Column(Text, nullable=True)
     status = Column(String(20), nullable=False, default="ACTIVE")

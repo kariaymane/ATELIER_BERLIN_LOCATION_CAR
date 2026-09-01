@@ -91,7 +91,13 @@ class TestClientRentalsReport:
         assert s["total_rentals"] == 3
         assert s["total_days"] == 10
         assert s["total_amount"] == pytest.approx(1000.0)
-        assert s["active_rentals"] == 1
+        # active_rentals is TIME-DERIVED (start <= now < end), not merely
+        # "stored status == ACTIVE": every row in this fixture is dated in
+        # 2026-06/07, long before "now" — none is currently ongoing, even
+        # the one still carrying an ACTIVE status. See
+        # test_active_rentals_is_time_derived_not_status_derived below for
+        # the dedicated proof of the rule itself.
+        assert s["active_rentals"] == 0
         assert s["completed_rentals"] == 2
         assert s["cancelled_rentals"] == 1
         assert s["vehicles_rented"] == 2
@@ -160,6 +166,60 @@ class TestClientRentalsReport:
             headers={"Authorization": f"Bearer {admin_token}"},
         )
         assert resp.status_code == 404
+
+    async def test_active_rentals_is_time_derived_not_status_derived(
+        self, client: AsyncClient, admin_token, db_session
+    ):
+        """A client's 'active_rentals' (En cours) count must never contradict
+        the vehicle's own RENTED badge elsewhere in the app: it is time-derived
+        (start <= now < end), exactly like fleet_status.py — not merely
+        `status == 'ACTIVE'`.
+        """
+        c = Client(first_name="Time", last_name="Derived", phone="+212600000099")
+        va = Vehicle(
+            registration="TD-1-A-1", vin="1M8GDM9AXKP042791", brand="Kia",
+            model="Picanto", year=2024, color="Bleu", fuel_type="GASOLINE",
+            transmission="MANUAL", current_mileage=100,
+            daily_rental_price=150.0, status="AVAILABLE",
+        )
+        vb = Vehicle(
+            registration="TD-2-B-2", vin="1M8GDM9AXKP042792", brand="Kia",
+            model="Rio", year=2024, color="Noir", fuel_type="GASOLINE",
+            transmission="MANUAL", current_mileage=200,
+            daily_rental_price=150.0, status="AVAILABLE",
+        )
+        db_session.add_all([c, va, vb])
+        await db_session.commit()
+        for o in (c, va, vb):
+            await db_session.refresh(o)
+
+        now = datetime.now()
+        db_session.add_all([
+            # RESERVED status, but window covers now -> counts as active (en cours)
+            Reservation(
+                vehicle_id=va.id, customer_id=c.id, customer_name="Time Derived",
+                start_datetime=now - timedelta(hours=1), end_datetime=now + timedelta(days=2),
+                daily_price=150.0, num_days=2, total_price=300.0,
+                deposit=0, status="RESERVED", payment_status="PENDING",
+            ),
+            # ACTIVE status, but window already ended -> does NOT count as active
+            Reservation(
+                vehicle_id=vb.id, customer_id=c.id, customer_name="Time Derived",
+                start_datetime=now - timedelta(days=10), end_datetime=now - timedelta(days=8),
+                daily_price=150.0, num_days=2, total_price=300.0,
+                deposit=0, status="ACTIVE", payment_status="PAID",
+            ),
+        ])
+        await db_session.commit()
+
+        resp = await client.get(
+            f"/api/v1/clients/{c.id}/rentals",
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        s = resp.json()["summary"]
+        assert s["total_rentals"] == 2
+        assert s["active_rentals"] == 1       # only the RESERVED-covering-now one
+        assert s["completed_rentals"] == 0    # the ended ACTIVE one was never completed
 
     async def test_unauthorized_rejected(self, client: AsyncClient):
         resp = await client.get(f"/api/v1/clients/{uuid4()}/rentals")

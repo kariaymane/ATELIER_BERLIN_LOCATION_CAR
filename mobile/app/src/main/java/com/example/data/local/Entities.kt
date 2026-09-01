@@ -55,10 +55,15 @@ data class ReservationEntity(
     val lastUpdated: String,
     val pickupLocation: String,
     val returnLocation: String,
-    val notes: String
+    val notes: String,
+    // Raw ISO-8601 UTC interval edges — the machine-parseable source for the
+    // BoundaryTicker / local effective-status derivation. `startDate`/`endDate`
+    // above remain the localized display strings the screens render.
+    val startDatetimeIso: String = "",
+    val endDatetimeIso: String = ""
 ) {
-    fun toDomain() = Reservation(id, clientName, clientPhone, clientEmail, identityCardImage, drivingLicenseImage, vehicleId, vehicleName, vehiclePlate, vehicleImageUrl, startDate, endDate, ReservationStatus.fromApi(status), totalAmount, dailyPrice, numDays, deposit, paymentStatus, lastUpdated, pickupLocation, returnLocation, notes)
-    companion object { fun fromDomain(r: Reservation) = ReservationEntity(r.id, r.clientName, r.clientPhone, r.clientEmail, r.identityCardImage, r.drivingLicenseImage, r.vehicleId, r.vehicleName, r.vehiclePlate, r.vehicleImageUrl, r.startDate, r.endDate, r.status.apiValue, r.totalAmount, r.dailyPrice, r.numDays, r.deposit, r.paymentStatus, r.lastUpdated, r.pickupLocation, r.returnLocation, r.notes) }
+    fun toDomain() = Reservation(id, clientName, clientPhone, clientEmail, identityCardImage, drivingLicenseImage, vehicleId, vehicleName, vehiclePlate, vehicleImageUrl, startDate, endDate, ReservationStatus.fromApi(status), totalAmount, dailyPrice, numDays, deposit, paymentStatus, lastUpdated, pickupLocation, returnLocation, notes, startDatetimeIso, endDatetimeIso)
+    companion object { fun fromDomain(r: Reservation) = ReservationEntity(r.id, r.clientName, r.clientPhone, r.clientEmail, r.identityCardImage, r.drivingLicenseImage, r.vehicleId, r.vehicleName, r.vehiclePlate, r.vehicleImageUrl, r.startDate, r.endDate, r.status.apiValue, r.totalAmount, r.dailyPrice, r.numDays, r.deposit, r.paymentStatus, r.lastUpdated, r.pickupLocation, r.returnLocation, r.notes, r.startIso, r.endIso) }
 }
 
 @Entity(tableName = "maintenance")
@@ -96,10 +101,13 @@ data class MaintenanceEntity(
     val step: String,
     val status: String,
     val priority: String,
-    val notes: String
+    val notes: String,
+    // Raw ISO-8601 UTC start — machine-parseable source for the BoundaryTicker.
+    // `scheduledDate` above stays the localized display string.
+    val startDatetimeIso: String? = null
 ) {
-    fun toDomain() = MaintenanceTicket(id, vehicleId, vehicleName, vehiclePlate, serviceItem, title, description, diagnosis, repair_description, scheduledDate, expected_end_datetime, actual_end_datetime, mileage, location, technician, invoice_number, oil_brand, oil_viscosity, oil_quantity, oil_filter_changed, air_filter_changed, fuel_filter_changed, cabin_filter_changed, estimatedCost, parts_cost, labor_cost, other_cost, actual_cost, next_maintenance_date, next_maintenance_mileage, MaintenanceStep.fromApi(step), status, priority, notes)
-    companion object { fun fromDomain(m: MaintenanceTicket) = MaintenanceEntity(m.id, m.vehicleId, m.vehicleName, m.vehiclePlate, m.serviceItem, m.title, m.description, m.diagnosis, m.repair_description, m.scheduledDate, m.expected_end_datetime, m.actual_end_datetime, m.mileage, m.location, m.technician, m.invoice_number, m.oil_brand, m.oil_viscosity, m.oil_quantity, m.oil_filter_changed, m.air_filter_changed, m.fuel_filter_changed, m.cabin_filter_changed, m.estimatedCost, m.parts_cost, m.labor_cost, m.other_cost, m.actual_cost, m.next_maintenance_date, m.next_maintenance_mileage, m.step.label, m.status, m.priority, m.notes) }
+    fun toDomain() = MaintenanceTicket(id, vehicleId, vehicleName, vehiclePlate, serviceItem, title, description, diagnosis, repair_description, scheduledDate, expected_end_datetime, actual_end_datetime, mileage, location, technician, invoice_number, oil_brand, oil_viscosity, oil_quantity, oil_filter_changed, air_filter_changed, fuel_filter_changed, cabin_filter_changed, estimatedCost, parts_cost, labor_cost, other_cost, actual_cost, next_maintenance_date, next_maintenance_mileage, MaintenanceStep.fromApi(step), status, priority, notes, startIso = startDatetimeIso)
+    companion object { fun fromDomain(m: MaintenanceTicket) = MaintenanceEntity(m.id, m.vehicleId, m.vehicleName, m.vehiclePlate, m.serviceItem, m.title, m.description, m.diagnosis, m.repair_description, m.scheduledDate, m.expected_end_datetime, m.actual_end_datetime, m.mileage, m.location, m.technician, m.invoice_number, m.oil_brand, m.oil_viscosity, m.oil_quantity, m.oil_filter_changed, m.air_filter_changed, m.fuel_filter_changed, m.cabin_filter_changed, m.estimatedCost, m.parts_cost, m.labor_cost, m.other_cost, m.actual_cost, m.next_maintenance_date, m.next_maintenance_mileage, m.step.label, m.status, m.priority, m.notes, m.startIso) }
 }
 
 @Entity(

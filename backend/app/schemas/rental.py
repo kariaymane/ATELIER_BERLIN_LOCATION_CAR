@@ -47,6 +47,7 @@ class RentalResponse(BaseModel):
     deposit: float
     payment_status: str
     status: str
+    cancellation_reason: Optional[str] = None
     notes: Optional[str] = None
     created_at: datetime
     updated_at: datetime

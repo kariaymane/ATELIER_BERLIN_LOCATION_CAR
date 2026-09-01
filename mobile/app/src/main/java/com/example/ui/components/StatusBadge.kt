@@ -84,6 +84,13 @@ fun VehicleStatusBadge(status: VehicleStatus, modifier: Modifier = Modifier) {
             dotColor = StatusRedDot,
             modifier = modifier
         )
+        VehicleStatus.VENDU, VehicleStatus.INACTIF -> StatusBadge(
+            text = status.label,
+            backgroundColor = StatusGrayBg,
+            textColor = StatusGrayText,
+            dotColor = StatusGrayDot,
+            modifier = modifier
+        )
     }
 }
 
