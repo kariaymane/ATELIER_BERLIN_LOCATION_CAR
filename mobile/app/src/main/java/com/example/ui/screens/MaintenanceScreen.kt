@@ -27,6 +27,7 @@ fun MaintenanceScreen(
     val maintenances by viewModel.maintenances.collectAsState()
     val statusFilter by viewModel.maintenanceStatusFilter.collectAsState()
     val userSession by viewModel.userSession.collectAsState()
+    val syncStatus by viewModel.syncStatus.collectAsState()
 
     val filterScrollState = rememberScrollState()
 
@@ -68,6 +69,12 @@ fun MaintenanceScreen(
                 }
             )
 
+            OfflineBanner(
+                syncStatus = syncStatus,
+                hasCachedData = maintenances.isNotEmpty(),
+                onRetry = { viewModel.retrySync() },
+            )
+
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -87,9 +94,20 @@ fun MaintenanceScreen(
             Spacer(modifier = Modifier.height(8.dp))
 
             if (filteredTickets.isEmpty()) {
+                val hasCache = maintenances.isNotEmpty()
+                val dbDown = syncStatus.isServerDatabaseDown && !hasCache
+                val isError = syncStatus.isShowingStaleData && !hasCache
                 EmptyStateView(
-                    title = "Aucune maintenance",
-                    description = "Tous les véhicules sont opérationnels."
+                    title = when {
+                        dbDown -> "Base de données du serveur indisponible"
+                        isError -> "Connexion au serveur impossible"
+                        else -> "Aucune maintenance"
+                    },
+                    description = when {
+                        dbDown -> "Le serveur est accessible mais sa base de données ne répond pas. Réessayez dans un instant."
+                        isError -> "Veuillez vérifier votre connexion au serveur."
+                        else -> "Tous les véhicules sont opérationnels."
+                    }
                 )
             } else {
                 LazyColumn(

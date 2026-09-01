@@ -5,7 +5,8 @@ Styled after Stitch Design with full French & Arabic localization support.
 from datetime import datetime
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
-    QLabel, QFrame, QGroupBox, QPushButton, QProgressBar, QComboBox
+    QLabel, QFrame, QGroupBox, QPushButton, QProgressBar, QComboBox,
+    QScrollArea
 )
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont
@@ -121,7 +122,24 @@ class DashboardWidget(QWidget):
     def _setup_ui(self):
         self.setLayoutDirection(Qt.LayoutDirection.RightToLeft if is_rtl() else Qt.LayoutDirection.LeftToRight)
 
-        layout = QVBoxLayout(self)
+        # The dashboard content (KPI rows, fleet cards, Top-5 list) can be taller
+        # than a small / short window. Host it in a vertically-scrolling area so
+        # nothing is clipped when the window is resized down. The FlowLayout rows
+        # already reflow horizontally, so only vertical scroll is needed.
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+
+        self._scroll = QScrollArea()
+        self._scroll.setWidgetResizable(True)
+        self._scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        outer.addWidget(self._scroll)
+
+        content = QWidget()
+        self._scroll.setWidget(content)
+
+        layout = QVBoxLayout(content)
         layout.setContentsMargins(20, 20, 20, 20)
         layout.setSpacing(18)
 
@@ -223,6 +241,7 @@ class DashboardWidget(QWidget):
         top_layout.addStretch()
 
         layout.addWidget(self._top_box)
+        layout.addStretch()
 
     def retranslate_ui(self):
         """Live update all strings when application language changes."""
