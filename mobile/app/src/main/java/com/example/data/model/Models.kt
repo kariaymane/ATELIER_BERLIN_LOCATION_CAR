@@ -223,7 +223,27 @@ enum class SyncStatusState(val label: String) {
     SYNCING("Synchronisation des données..."),
     SYNCED("Synchronisation terminée"),
     REALTIME_ACTIVE("En direct (Temps réel)"),
-    SYNC_ERROR("Erreur de synchronisation")
+    SYNC_ERROR("Erreur de synchronisation"),
+
+    /** Server was reached, but its database is temporarily unavailable
+     *  (readiness probe returned 503). Cached data is still shown; this is a
+     *  transient backend condition, NOT a dead session and NOT "unreachable". */
+    SERVER_DB_UNAVAILABLE("Base de données du serveur indisponible")
+}
+
+/**
+ * How the last sync attempt classified backend availability. Lets the UI tell
+ * "app is offline" apart from "server up but its DB is down" apart from "live".
+ */
+enum class ServerReachability {
+    /** Not probed yet this session. */
+    UNKNOWN,
+    /** Reachable AND its database answered `SELECT 1`. */
+    ONLINE,
+    /** Reachable but the database is unavailable (readiness 503). */
+    DATABASE_DOWN,
+    /** Could not be reached at all (DNS / connect / timeout). */
+    UNREACHABLE
 }
 
 data class SyncStatus(
@@ -233,5 +253,21 @@ data class SyncStatus(
     val serverId: String? = null,
     val isBootstrapped: Boolean = false,
     val isRealtimeConnected: Boolean = false,
-    val errorMessage: String? = null
-)
+    val errorMessage: String? = null,
+    val reachability: ServerReachability = ServerReachability.UNKNOWN
+) {
+    /**
+     * True when the screen is showing LOCAL (Room) data that is not being kept
+     * live right now — a full-screen fatal error must not be used in this
+     * state if any cached rows exist; show an offline banner instead.
+     */
+    val isShowingStaleData: Boolean
+        get() = state == SyncStatusState.SYNC_ERROR ||
+            state == SyncStatusState.SERVER_DB_UNAVAILABLE ||
+            state == SyncStatusState.DISCONNECTED
+
+    /** The server is up but its database is down (distinct from unreachable). */
+    val isServerDatabaseDown: Boolean
+        get() = state == SyncStatusState.SERVER_DB_UNAVAILABLE ||
+            reachability == ServerReachability.DATABASE_DOWN
+}

@@ -24,7 +24,9 @@ router = APIRouter(prefix="/sync", tags=["Synchronization"])
 @router.get("/health", response_model=SyncHealthResponse)
 async def sync_health():
     """
-    Lightweight health check endpoint for mobile and desktop connection verification.
+    LIVENESS probe (versioned path) — the API process is up and routing.
+    Does NOT touch the database. A client must not treat a 200 here as
+    "the database is usable"; call ``/api/v1/sync/ready`` for that.
     """
     return SyncHealthResponse(
         status="healthy",
@@ -32,6 +34,32 @@ async def sync_health():
         api_version="1.0.0",
         server_id="car-rental-server-v1",
     )
+
+
+@router.get("/ready")
+async def sync_ready():
+    """
+    READINESS probe (versioned path) — runs ``SELECT 1``.
+    200 when PostgreSQL answers, 503 when it does not. The failure body carries
+    only an exception class name (``error_category``); never a DSN, host, or
+    credential.
+    """
+    from fastapi.responses import JSONResponse
+    from app.database import check_database_connection, get_pool_status
+
+    ok, err = await check_database_connection()
+    body = {
+        "status": "ready" if ok else "not_ready",
+        "database": "connected" if ok else "unavailable",
+        "version": "1.0.0",
+        "api_version": "1.0.0",
+        "server_id": "car-rental-server-v1",
+        "pool": get_pool_status(),
+    }
+    if not ok:
+        body["error_category"] = err
+        return JSONResponse(status_code=503, content=body)
+    return body
 
 
 @router.get("/bootstrap", response_model=SyncBootstrapResponse)

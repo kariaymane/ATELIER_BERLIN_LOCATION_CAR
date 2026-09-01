@@ -131,11 +131,24 @@ async def client(test_engine) -> AsyncGenerator[AsyncClient, None]:
                 raise
 
     app.dependency_overrides[get_db] = override_get_db
+
+    # The readiness probe (/health/ready, /api/v1/sync/ready) runs `SELECT 1`
+    # through app.database's module-level engine — the httpx ASGITransport does
+    # not run the lifespan that would normally initialise it, so point it at the
+    # test engine for the duration of the fixture.
+    import app.database as _database_module
+    _saved_engine = _database_module._engine
+    _saved_factory = _database_module._async_session_factory
+    _database_module._engine = test_engine
+    _database_module._async_session_factory = session_factory
+
     transport = ASGITransport(app=app)
 
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         yield ac
 
+    _database_module._engine = _saved_engine
+    _database_module._async_session_factory = _saved_factory
     app.dependency_overrides.clear()
 
 

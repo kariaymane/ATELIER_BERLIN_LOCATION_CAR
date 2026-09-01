@@ -8,6 +8,10 @@ interface ApiService {
     @GET("/health")
     suspend fun getHealth(): Response<SyncHealthResponseDto>
 
+    /** Readiness probe — runs `SELECT 1` server-side. 200 ready / 503 DB down. */
+    @GET("/health/ready")
+    suspend fun getReadiness(): Response<ReadinessResponseDto>
+
     @GET("sync/bootstrap")
     suspend fun getBootstrap(): Response<SyncBootstrapResponseDto>
 
