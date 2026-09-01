@@ -13,9 +13,14 @@ class Client(Base, TimestampMixin, VersionMixin):
     email = Column(String(255), nullable=True, index=True)
     phone = Column(String(20), nullable=True, index=True)
     cin_number = Column(String(50), nullable=True, index=True)
+    # Identity documents are two-sided (recto/verso). The legacy single-image
+    # columns are the RECTO/front; the *_back columns hold the VERSO/back and
+    # stay NULL for historical clients until a back scan is uploaded.
     identity_card_image = Column(Text, nullable=True)
+    identity_card_image_back = Column(Text, nullable=True)
     license_number = Column(String(50), nullable=True)
     driving_license_image = Column(Text, nullable=True)
+    driving_license_image_back = Column(Text, nullable=True)
     photo_url = Column(Text, nullable=True)
     notes = Column(Text, nullable=True)
     status = Column(String(20), nullable=False, default="ACTIVE")

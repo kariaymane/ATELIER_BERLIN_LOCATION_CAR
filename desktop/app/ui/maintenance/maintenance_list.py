@@ -3,6 +3,7 @@ Maintenance list and creation view.
 Fully localized for French and Arabic with RTL layout support.
 """
 
+import logging
 import uuid
 import json
 from PySide6.QtWidgets import (
@@ -20,6 +21,9 @@ from app.models.vehicle import LocalVehicle
 from app.models.maintenance import LocalMaintenance
 from datetime import datetime, timezone
 from app.sync.queue import SyncQueue
+from app.state.domain_store import get_domain_store
+
+logger = logging.getLogger(__name__)
 
 
 class MaintenanceFormDialog(QDialog):
@@ -47,15 +51,36 @@ class MaintenanceFormDialog(QDialog):
             layout.addWidget(info_lbl)
         else:
             self._vehicle_combo = QComboBox()
-            from app.database import get_local_session
-            from app.models.vehicle import LocalVehicle
-            session = get_local_session()
-            try:
-                vehicles = session.query(LocalVehicle).filter(LocalVehicle.status != "MAINTENANCE").all()
-                for v in vehicles:
-                    self._vehicle_combo.addItem(f"{v.brand} {v.model} ({v.registration})", v.id)
-            finally:
-                session.close()
+            # Eligibility is the CANONICAL effective status from the DomainStore
+            # snapshot — never the raw ``LocalVehicle.status`` column (which the
+            # backend can set to MAINTENANCE ahead of the maintenance window and
+            # which would contradict the Vehicles list / Dashboard).
+            from app.state.domain_store import get_domain_store
+            snap = get_domain_store().snapshot
+            rows = list(snap.vehicles)
+            if rows:
+                for v in rows:
+                    if (v.get("status") or "").upper() in ("MAINTENANCE", "SOLD", "INACTIVE"):
+                        continue
+                    self._vehicle_combo.addItem(
+                        f"{v.get('brand', '')} {v.get('model', '')} ({v.get('registration', '')})",
+                        v.get("id"),
+                    )
+            else:
+                # Snapshot not primed (early startup / isolated dialog): fall
+                # back to SQLite but exclude ONLY structural states, not a raw
+                # MAINTENANCE hint.
+                from app.database import get_local_session
+                from app.models.vehicle import LocalVehicle
+                session = get_local_session()
+                try:
+                    vehicles = session.query(LocalVehicle).filter(
+                        ~LocalVehicle.status.in_(["SOLD", "INACTIVE"])
+                    ).all()
+                    for v in vehicles:
+                        self._vehicle_combo.addItem(f"{v.brand} {v.model} ({v.registration})", v.id)
+                finally:
+                    session.close()
             form.addRow(t("maintenance.col_vehicle"), self._vehicle_combo)
 
         self._type = QComboBox()
@@ -119,12 +144,17 @@ class MaintenanceFormDialog(QDialog):
             QMessageBox.warning(self, t("common.error"), t("maintenance.col_vehicle") + " ?")
             return
 
+        # The QDateTimeEdit holds Africa/Casablanca LOCAL wall time. It must be
+        # CONVERTED to the equivalent UTC instant (``.astimezone``), never
+        # relabelled (``.replace(tzinfo=...)`` would keep 18:00 and just call it
+        # UTC, shifting every maintenance ~1 h into the future). This mirrors the
+        # already-correct reservation form (reservation_list.py `_on_save`).
         self.saved.emit({
             "vehicle_id": v_id,
             "type": self._type.currentData() or self._type.currentText(),
             "description": self._desc.toPlainText(),
-            "start_datetime": start.toPython().replace(tzinfo=timezone.utc).isoformat(),
-            "expected_end_datetime": end.toPython().replace(tzinfo=timezone.utc).isoformat(),
+            "start_datetime": start.toPython().astimezone(timezone.utc).isoformat(),
+            "expected_end_datetime": end.toPython().astimezone(timezone.utc).isoformat(),
             "estimated_cost": self._cost.value(),
             "step": "DIAGNOSTIC",
             "status": "ACTIVE",
@@ -143,6 +173,10 @@ class MaintenanceWidget(QWidget):
         self._device_id = device_id
         self._user_id = user_id
         self._user_role = user_role
+        # Canonical read model. This widget renders EXCLUSIVELY from the
+        # DomainStore snapshot; it never queries SQLite for display state.
+        self._store = get_domain_store()
+        self._rendered_rev = None
         self._setup_ui()
 
     def _setup_ui(self):
@@ -187,7 +221,10 @@ class MaintenanceWidget(QWidget):
         self._status_filter.addItem(t("maintenance.filter_completed"), "completed")
         self._status_filter.addItem(t("maintenance.filter_all"), "all")
         self._status_filter.setFont(QFont("Hanken Grotesk", 10))
-        self._status_filter.currentIndexChanged.connect(self.refresh_data)
+        # The status filter is pure VIEW state — re-project the current
+        # snapshot, no store reload needed.
+        self._status_filter.currentIndexChanged.connect(
+            lambda *_: self._render_from_snapshot(self._store.snapshot))
         self._status_filter.setMinimumWidth(180)
         self._status_filter.setFixedHeight(34)
         filter_bar.addWidget(self._status_filter)
@@ -276,107 +313,131 @@ class MaintenanceWidget(QWidget):
         dialog.exec()
 
     def refresh_data(self):
-        session = get_local_session()
+        """Public entrypoint. As a direct call (tab visit, language switch,
+        tests) it asks the DomainStore to publish a fresh revision, then
+        renders from that snapshot. When reached from the store fan-out
+        (``MainWindow._on_domain_changed``) the reload is a re-entrant no-op
+        and we render the already-published snapshot. Either way the table is
+        a pure projection of ``store.snapshot`` — no SQLite read here.
+        """
+        store = self._store
+        rev_before = store.revision
         try:
-            filter_mode = self._status_filter.currentData() or "active"
-            query = session.query(LocalMaintenance)
-            if filter_mode == "active":
-                query = query.filter(LocalMaintenance.status == "ACTIVE")
-            elif filter_mode == "completed":
-                query = query.filter(LocalMaintenance.status == "COMPLETED")
+            store.reload()
+        except Exception as e:
+            logger.error("Maintenance snapshot reload failed: %s", e, exc_info=True)
+        if store.revision != rev_before and self._rendered_rev == store.revision:
+            return  # a re-entrant fan-out call already rendered this revision
+        self._render_from_snapshot(store.snapshot)
+        self._rendered_rev = store.revision
 
-            maintenances = query.order_by(LocalMaintenance.created_at.desc()).all()
-            self._table.setRowCount(len(maintenances))
-            self._last_refresh_lbl.setText(t("maintenance.last_refresh", time=datetime.now().strftime('%H:%M')))
+    def _render_from_snapshot(self, snap):
+        """Render the maintenance table from the canonical DomainStore snapshot."""
+        from app.utils.datetime_utils import parse_datetime_utc
 
-            if len(maintenances) == 0:
-                self._empty_lbl.show()
-                self._table.hide()
+        vehicles_by_id = {str(v.get("id")): v for v in snap.vehicles}
+
+        filter_mode = self._status_filter.currentData() or "active"
+        rows = list(snap.maintenances)
+        if filter_mode == "active":
+            rows = [m for m in rows if (m.get("status") or "") == "ACTIVE"]
+        elif filter_mode == "completed":
+            rows = [m for m in rows if (m.get("status") or "") == "COMPLETED"]
+        # Preserve the previous ordering (most recently created first).
+        rows.sort(key=lambda m: m.get("created_at") or "", reverse=True)
+
+        self._table.setRowCount(len(rows))
+        self._last_refresh_lbl.setText(t("maintenance.last_refresh", time=datetime.now().strftime('%H:%M')))
+
+        if len(rows) == 0:
+            self._empty_lbl.show()
+            self._table.hide()
+        else:
+            self._empty_lbl.hide()
+            self._table.show()
+
+        for i, m in enumerate(rows):
+            v = vehicles_by_id.get(str(m.get("vehicle_id")))
+            v_name = (
+                f"{v.get('brand', '')} {v.get('model', '')} ({v.get('registration', '')})"
+                if v else (m.get("vehicle_id") or "—")
+            )
+
+            # 0. Véhicule
+            self._table.setItem(i, 0, QTableWidgetItem(v_name))
+
+            # 1. Type
+            m_type = m.get("type") or ""
+            type_key = f"maintenance.type_{m_type.lower()}" if m_type else ""
+            translated_type = t(type_key) if type_key else (m_type or "—")
+            self._table.setItem(i, 1, QTableWidgetItem(translated_type))
+
+            # 2. Description
+            self._table.setItem(i, 2, QTableWidgetItem(m.get("description") or "—"))
+
+            # 3. Retour Prévu
+            return_date = "—"
+            if m.get("expected_end_datetime"):
+                try:
+                    dt = parse_datetime_utc(m.get("expected_end_datetime"))
+                    return_date = dt.astimezone().strftime("%Y-%m-%d")
+                except Exception:
+                    return_date = str(m.get("expected_end_datetime"))[:10]
+            self._table.setItem(i, 3, QTableWidgetItem(return_date))
+
+            # 4. Étape (Badge)
+            step = m.get("step") or "DIAGNOSTIC"
+            step_display = t(f"maintenance_steps.{step}")
+
+            badge_widget = QWidget()
+            bw_layout = QHBoxLayout(badge_widget)
+            bw_layout.setContentsMargins(4, 2, 4, 2)
+            badge_lbl = QLabel(step_display)
+            badge_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            badge_lbl.setFont(QFont("Hanken Grotesk", 9, QFont.Weight.Bold))
+
+            if step in ("EN ATTENTE", "DIAGNOSTIC"):
+                badge_lbl.setProperty("class", "badge_warning")
+            elif step in ("REPARATION", "CONTROLE"):
+                badge_lbl.setProperty("class", "badge_info")
             else:
-                self._empty_lbl.hide()
-                self._table.show()
+                badge_lbl.setProperty("class", "badge_success")
 
-            for i, m in enumerate(maintenances):
-                v = session.query(LocalVehicle).filter_by(id=m.vehicle_id).first()
-                v_name = f"{v.brand} {v.model} ({v.registration})" if v else (m.vehicle_id or "—")
+            bw_layout.addWidget(badge_lbl)
+            self._table.setCellWidget(i, 4, badge_widget)
 
-                # 0. Véhicule
-                self._table.setItem(i, 0, QTableWidgetItem(v_name))
+            # 5. Actions (Étape suivante / Terminer)
+            if m.get("status") == "ACTIVE" and self._user_role in ("ADMIN", "MANAGER"):
+                act_widget = QWidget()
+                act_layout = QHBoxLayout(act_widget)
+                act_layout.setContentsMargins(4, 4, 4, 4)
+                act_layout.setSpacing(6)
 
-                # 1. Type
-                type_key = f"maintenance.type_{m.type.lower()}" if m.type else ""
-                translated_type = t(type_key) if type_key else (m.type or "—")
-                self._table.setItem(i, 1, QTableWidgetItem(translated_type))
+                if step != "TERMINE":
+                    next_btn = QPushButton(t("maintenance.action_next_step"))
+                    next_btn.setFont(QFont("Hanken Grotesk", 9, QFont.Weight.Bold))
+                    next_btn.setStyleSheet("background-color: #F0F4EF; color: #2D5233; border: 1px solid #D5DFD3; border-radius: 4px; padding: 4px 8px;")
+                    next_btn.clicked.connect(lambda _, mid=m.get("id"), cur_s=step: self._advance_step(mid, cur_s))
+                    act_layout.addWidget(next_btn)
 
-                # 2. Description
-                self._table.setItem(i, 2, QTableWidgetItem(m.description or "—"))
+                finish_btn = QPushButton(t("maintenance.action_finish"))
+                finish_btn.setFont(QFont("Hanken Grotesk", 9, QFont.Weight.Bold))
+                finish_btn.setStyleSheet("background-color: #E8F3E6; color: #235821; border: 1px solid #C4DFC0; border-radius: 4px; padding: 4px 8px;")
+                finish_btn.clicked.connect(lambda _, mid=m.get("id"): self._finish_maintenance(mid))
+                act_layout.addWidget(finish_btn)
 
-                # 3. Retour Prévu
-                return_date = "—"
-                if m.expected_end_datetime:
-                    try:
-                        
-                        from app.utils.datetime_utils import parse_datetime_utc
-                        dt = parse_datetime_utc(m.expected_end_datetime)
-                        return_date = dt.astimezone().strftime("%Y-%m-%d")
-                    except Exception:
-                        return_date = str(m.expected_end_datetime)[:10]
-                self._table.setItem(i, 3, QTableWidgetItem(return_date))
-
-                # 4. Étape (Badge)
-                step = m.step or "DIAGNOSTIC"
-                step_display = t(f"maintenance_steps.{step}")
-
-                badge_widget = QWidget()
-                bw_layout = QHBoxLayout(badge_widget)
-                bw_layout.setContentsMargins(4, 2, 4, 2)
-                badge_lbl = QLabel(step_display)
-                badge_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-                badge_lbl.setFont(QFont("Hanken Grotesk", 9, QFont.Weight.Bold))
-
-                if step in ("EN ATTENTE", "DIAGNOSTIC"):
-                    badge_lbl.setProperty("class", "badge_warning")
-                elif step in ("REPARATION", "CONTROLE"):
-                    badge_lbl.setProperty("class", "badge_info")
-                else:
-                    badge_lbl.setProperty("class", "badge_success")
-
-                bw_layout.addWidget(badge_lbl)
-                self._table.setCellWidget(i, 4, badge_widget)
-
-                # 5. Actions (Étape suivante / Terminer)
-                if m.status == "ACTIVE" and self._user_role in ("ADMIN", "MANAGER"):
-                    act_widget = QWidget()
-                    act_layout = QHBoxLayout(act_widget)
-                    act_layout.setContentsMargins(4, 4, 4, 4)
-                    act_layout.setSpacing(6)
-
-                    if step != "TERMINE":
-                        next_btn = QPushButton(t("maintenance.action_next_step"))
-                        next_btn.setFont(QFont("Hanken Grotesk", 9, QFont.Weight.Bold))
-                        next_btn.setStyleSheet("background-color: #F0F4EF; color: #2D5233; border: 1px solid #D5DFD3; border-radius: 4px; padding: 4px 8px;")
-                        next_btn.clicked.connect(lambda _, mid=m.id, cur_s=step: self._advance_step(mid, cur_s))
-                        act_layout.addWidget(next_btn)
-
-                    finish_btn = QPushButton(t("maintenance.action_finish"))
-                    finish_btn.setFont(QFont("Hanken Grotesk", 9, QFont.Weight.Bold))
-                    finish_btn.setStyleSheet("background-color: #E8F3E6; color: #235821; border: 1px solid #C4DFC0; border-radius: 4px; padding: 4px 8px;")
-                    finish_btn.clicked.connect(lambda _, mid=m.id: self._finish_maintenance(mid))
-                    act_layout.addWidget(finish_btn)
-
-                    self._table.setCellWidget(i, 5, act_widget)
-                else:
-                    self._table.setCellWidget(i, 5, QWidget())
-
-        finally:
-            session.close()
+                self._table.setCellWidget(i, 5, act_widget)
+            else:
+                self._table.setCellWidget(i, 5, QWidget())
 
     def _advance_step(self, maint_id: str, current_step: str = None):
-        session = get_local_session()
         if current_step is None:
-            m = session.query(LocalMaintenance).filter_by(id=maint_id).first()
-            current_step = m.step if m else "DIAGNOSTIC"
-        session.close()
+            rs = get_local_session()
+            try:
+                m = rs.query(LocalMaintenance).filter_by(id=maint_id).first()
+                current_step = m.step if m else "DIAGNOSTIC"
+            finally:
+                rs.close()
 
         steps = ["EN ATTENTE", "DIAGNOSTIC", "REPARATION", "CONTROLE", "TERMINE"]
         try:
@@ -385,50 +446,47 @@ class MaintenanceWidget(QWidget):
         except ValueError:
             next_step = "REPARATION"
 
-        session = get_local_session()
-        try:
+        def _apply(session):
             m = session.query(LocalMaintenance).filter_by(id=maint_id).first()
-            if m:
-                now_iso = datetime.now(timezone.utc).isoformat()
-                m.step = next_step
-                m.updated_at = now_iso
-                m.version += 1
+            if not m:
+                return
+            now_iso = datetime.now(timezone.utc).isoformat()
+            m.step = next_step
+            m.updated_at = now_iso
+            m.version += 1
+            SyncQueue(session, self._device_id, self._user_id).enqueue(
+                "maintenance", m.id, "UPDATE", {"id": m.id, "step": next_step})
 
-                queue = SyncQueue(session, self._device_id, self._user_id)
-                queue.enqueue("maintenance", m.id, "UPDATE", {"id": m.id, "step": next_step})
-                session.commit()
-
-            self.refresh_data()
-            self.maintenance_updated.emit()
-        finally:
-            session.close()
+        # Canonical write path: one transaction; on commit the store reloads
+        # and every view converges; on failure it rolls back and publishes
+        # NOTHING (no false 'state changed').
+        try:
+            self._store.mutate(_apply)
+        except Exception as e:
+            logger.error("Failed to advance maintenance step: %s", e, exc_info=True)
+            QMessageBox.critical(self, t("common.error"), t("common.error"))
+            return
+        self.maintenance_updated.emit()  # -> MainWindow triggers a background sync
 
     def _finish_maintenance(self, maint_id: str):
-        session = get_local_session()
-        try:
+        def _apply(session):
             m = session.query(LocalMaintenance).filter_by(id=maint_id).first()
-            if m:
-                now_iso = datetime.now(timezone.utc).isoformat()
-                m.status = "COMPLETED"
-                m.step = "TERMINE"
-                m.actual_end_datetime = now_iso
-                m.updated_at = now_iso
-                m.version += 1
+            if not m:
+                return
+            now_iso = datetime.now(timezone.utc).isoformat()
+            m.status = "COMPLETED"
+            m.step = "TERMINE"
+            m.actual_end_datetime = now_iso
+            m.updated_at = now_iso
+            m.version += 1
+            SyncQueue(session, self._device_id, self._user_id).enqueue(
+                "maintenance", m.id, "UPDATE",
+                {"id": m.id, "status": "COMPLETED", "step": "TERMINE"})
 
-                vehicle = session.query(LocalVehicle).filter_by(id=m.vehicle_id).first()
-                if vehicle and vehicle.status == "MAINTENANCE":
-                    vehicle.status = "AVAILABLE"
-                    vehicle.updated_at = now_iso
-                    vehicle.version += 1
-
-                queue = SyncQueue(session, self._device_id, self._user_id)
-                queue.enqueue("maintenance", m.id, "UPDATE", {"id": m.id, "status": "COMPLETED", "step": "TERMINE"})
-                if vehicle:
-                    queue.enqueue("vehicle", vehicle.id, "UPDATE", {"id": vehicle.id, "status": "AVAILABLE"})
-
-                session.commit()
-
-            self.refresh_data()
-            self.maintenance_updated.emit()
-        finally:
-            session.close()
+        try:
+            self._store.mutate(_apply)
+        except Exception as e:
+            logger.error("Failed to finish maintenance: %s", e, exc_info=True)
+            QMessageBox.critical(self, t("common.error"), t("common.error"))
+            return
+        self.maintenance_updated.emit()  # -> MainWindow triggers a background sync

@@ -22,7 +22,7 @@ def clean_db():
 def qapp():
     return QApplication.instance() or QApplication(sys.argv)
 
-def test_create_maintenance_record_triggers_refresh_and_sync(qapp, monkeypatch):
+def test_create_maintenance_record_triggers_refresh_and_sync(qapp, monkeypatch, request):
     """Test that creating a maintenance record updates views and enqueues sync."""
     db_session = get_local_session()
     v = LocalVehicle(
@@ -43,8 +43,9 @@ def test_create_maintenance_record_triggers_refresh_and_sync(qapp, monkeypatch):
     db_session.commit()
 
     main_window = MainWindow(user_data={"user_id": "u-1", "access_token": "dummy", "offline": True})
+    request.addfinalizer(lambda: (main_window.close(), main_window.deleteLater(), qapp.processEvents()))
     qapp.processEvents()
-    
+
     # Mock methods to track if they were called
     refreshed_dashboard = False
     refreshed_maintenance = False
@@ -80,7 +81,7 @@ def test_create_maintenance_record_triggers_refresh_and_sync(qapp, monkeypatch):
     
     # Assert DB state
     v_updated = db_session.query(LocalVehicle).filter_by(id="v-test-maint-create").first()
-    assert v_updated.status == "MAINTENANCE"
+    assert v_updated.status == "AVAILABLE"  # Structural status does not mutate!
     
     m_record = db_session.query(LocalMaintenance).filter_by(vehicle_id="v-test-maint-create").first()
     assert m_record is not None
@@ -88,7 +89,5 @@ def test_create_maintenance_record_triggers_refresh_and_sync(qapp, monkeypatch):
     
     # Assert SyncQueue state
     sync_items = db_session.query(SyncQueueItem).all()
-    assert len(sync_items) == 2
-    types = {item.entity_type for item in sync_items}
-    assert "maintenance" in types
-    assert "vehicle" in types
+    assert len(sync_items) == 1
+    assert sync_items[0].entity_type == "maintenance"

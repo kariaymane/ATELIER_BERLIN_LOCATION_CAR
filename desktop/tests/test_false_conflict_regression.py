@@ -76,14 +76,17 @@ def test_D_api_timeout(widget, monkeypatch):
 def test_E_api_http_500(widget, monkeypatch):
     monkeypatch.setattr(widget._api, "check_availability", lambda v, s, e: {"http_error": 500})
     monkeypatch.setattr(widget._api, "_access_token", "fake-token")
-    
+
     warns = []
     monkeypatch.setattr(QMessageBox, "warning", lambda parent, title, text: warns.append(text))
-    
+
     data = {"vehicle_id": "v1", "start_datetime": _future(1), "end_datetime": _future(3)}
     widget._create_reservation_record(data)
     assert len(warns) == 1
-    assert "Serveur injoignable" in warns[0]
+    # 5xx is its own category — a server error, never a conflict, never a silent create.
+    from app.i18n import t
+    assert t("reservations.err_server_error") in warns[0]
+    assert t("reservations.double_booking") not in warns[0]
 
 def test_F_stale_sqlite_reservation_with_server_available(widget, monkeypatch):
     # Server says available!

@@ -66,6 +66,13 @@ class SyncHealthResponse(BaseModel):
 
 class SyncBootstrapResponse(BaseModel):
     sync_version: int = 1
+    # Monotonic authoritative revision of the temporal projection: the latest
+    # `updated_at` (epoch-milliseconds UTC) across every vehicle / reservation /
+    # maintenance row in this snapshot, or 0 for an empty fleet. A client that
+    # has applied this snapshot atomically holds "complete state through
+    # `revision`"; it MUST reject applying a snapshot whose revision is older
+    # than the one it already holds (see mobile FleetRepository).
+    revision: int = 0
     server_time: datetime
     server_id: str = "car-rental-server-v1"
     api_version: str = "1.0.0"

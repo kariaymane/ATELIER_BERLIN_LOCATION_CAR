@@ -110,6 +110,39 @@ class FleetDataTest {
     }
 
     @Test
+    fun testEffectiveStatusMappingAndFallback() {
+        // The Fleet screen renders the backend-derived effective status so it
+        // matches the Dashboard. fromApi must recognise every canonical value.
+        assertEquals(VehicleStatus.DISPONIBLE, VehicleStatus.fromApi("AVAILABLE"))
+        assertEquals(VehicleStatus.RESERVEE, VehicleStatus.fromApi("RESERVED"))
+        assertEquals(VehicleStatus.EN_LOCATION, VehicleStatus.fromApi("RENTED"))
+        assertEquals(VehicleStatus.MAINTENANCE, VehicleStatus.fromApi("MAINTENANCE"))
+
+        // Mapper contract: effective_status wins; raw status is the fallback
+        // only when the server did not send one.
+        fun resolve(effective: String?, raw: String) =
+            VehicleStatus.fromApi(effective ?: raw)
+        assertEquals(VehicleStatus.MAINTENANCE, resolve("MAINTENANCE", "AVAILABLE"))
+        assertEquals(VehicleStatus.RESERVEE, resolve("RESERVED", "AVAILABLE"))
+        assertEquals(VehicleStatus.DISPONIBLE, resolve(null, "AVAILABLE"))
+    }
+
+    @Test
+    fun testStructuralAndUnknownStatusesNeverCollapseToAvailable() {
+        // FORENSIC P2: SOLD / INACTIVE previously collapsed to DISPONIBLE, so a
+        // sold or retired vehicle read as bookable on the phone.
+        assertEquals(VehicleStatus.VENDU, VehicleStatus.fromApi("SOLD"))
+        assertEquals(VehicleStatus.INACTIF, VehicleStatus.fromApi("INACTIVE"))
+        assertEquals(VehicleStatus.VENDU, VehicleStatus.fromApi("sold"))
+        // An unrecognised / unsupported token must never silently become
+        // AVAILABLE — it is treated as not-bookable.
+        assertFalse(VehicleStatus.fromApi("SOME_NEW_STATE") == VehicleStatus.DISPONIBLE)
+        assertEquals(VehicleStatus.INACTIF, VehicleStatus.fromApi("SOME_NEW_STATE"))
+        // An absent status still follows the backend default.
+        assertEquals(VehicleStatus.DISPONIBLE, VehicleStatus.fromApi(null))
+    }
+
+    @Test
     fun testStatusLabels() {
         assertEquals("Disponible", VehicleStatus.DISPONIBLE.label)
         assertEquals("En location", VehicleStatus.EN_LOCATION.label)

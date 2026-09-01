@@ -7,7 +7,7 @@ per-vehicle breakdown aggregated.
 """
 import os
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ["CAR_RENTAL_DB_RESET"] = "1"
@@ -45,18 +45,20 @@ def seeded_db():
         created_at=now, updated_at=now, version=1,
     ))
     rows = [
-        # start, days, total, status
+        # start, days, total, status  (all windows are historical -> none is
+        # "en cours"/active right now, whatever the stored status)
         ("2026-06-01T10:00:00+00:00", 3, 300.0, "COMPLETED"),
         ("2026-07-01T10:00:00+00:00", 5, 500.0, "ACTIVE"),
         ("2026-08-01T10:00:00+00:00", 2, 200.0, "COMPLETED"),
         ("2026-09-01T10:00:00+00:00", 4, 400.0, "CANCELLED"),
     ]
     for i, (start, days, total, status) in enumerate(rows):
+        start_dt = datetime.fromisoformat(start)
         session.merge(LocalReservation(
             id=f"res-ui-{i}", vehicle_id="veh-a",
             customer_name="Karim Idrissi", customer_phone="+212611223344",
             start_datetime=start,
-            end_datetime=f"2026-06-{10 + i}T10:00:00+00:00" if False else start,
+            end_datetime=(start_dt + timedelta(days=days)).isoformat(),
             daily_price=100.0, num_days=days, total_price=total,
             deposit=0, status=status, payment_status="PENDING",
             created_at=now, updated_at=now, version=1,
@@ -98,7 +100,10 @@ def test_client_details_offline_matches_canonical_rule(qapp, seeded_db):
     assert val("total_rentals") == "3"
     assert val("total_days") == "10"
     assert val("total_amount").startswith("1000.00")
-    assert val("active_rentals") == "1"
+    # active_rentals (En cours) is time-derived (start <= now < end): every
+    # window in this fixture is historical, so none is currently ongoing —
+    # not even the row still carrying an ACTIVE status.
+    assert val("active_rentals") == "0"
     assert val("completed_rentals") == "2"
     assert val("cancelled_rentals") == "1"
     assert val("vehicles_rented") == "1"

@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from typing import Optional
 from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -22,8 +23,10 @@ class ClientService:
             phone=data.phone.strip() if data.phone else None,
             cin_number=data.cin_number.strip() if data.cin_number else None,
             identity_card_image=data.identity_card_image,
+            identity_card_image_back=data.identity_card_image_back,
             license_number=data.license_number.strip() if data.license_number else None,
             driving_license_image=data.driving_license_image,
+            driving_license_image_back=data.driving_license_image_back,
             photo_url=data.photo_url,
             notes=data.notes,
             status="ACTIVE",
@@ -129,7 +132,14 @@ class ClientService:
                                same-day rentals count as 1)
           - total_amount     = SUM(total_price) over eligible (Numeric-backed,
                                returned as float for JSON)
-          - active/completed/cancelled counts from real statuses
+          - active_rentals   = eligible reservations CURRENTLY covering `now`
+                               (start <= now < end) — time-derived, matching
+                               the fleet "en location" rule in fleet_status.py:
+                               a RESERVED reservation whose window contains
+                               now counts exactly like ACTIVE, so this number
+                               never contradicts the vehicle's own RENTED
+                               badge elsewhere in the app.
+          - completed/cancelled counts from real statuses
           - vehicles rented  = COUNT(DISTINCT vehicle_id) with per-vehicle
                                rentals/days/amount breakdown.
         """
@@ -140,6 +150,15 @@ class ClientService:
         rentals = await self._repo.get_client_rentals(
             client_id, client_name=full_name, client_phone=client.phone
         )
+
+        now = datetime.now(timezone.utc)
+
+        def _parse(v):
+            if not v:
+                return None
+            s = str(v).replace("Z", "+00:00")
+            dt = datetime.fromisoformat(s)
+            return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
         ELIGIBLE = ("RESERVED", "ACTIVE", "COMPLETED")
         summary = {
@@ -165,7 +184,9 @@ class ClientService:
             summary["total_rentals"] += 1
             summary["total_days"] += days
             summary["total_amount"] += amount
-            if status == "ACTIVE":
+            start = _parse(r.get("start_datetime"))
+            end = _parse(r.get("end_datetime"))
+            if status != "COMPLETED" and start is not None and end is not None and start <= now < end:
                 summary["active_rentals"] += 1
             elif status == "COMPLETED":
                 summary["completed_rentals"] += 1

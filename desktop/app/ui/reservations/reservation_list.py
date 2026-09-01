@@ -73,19 +73,27 @@ class ReservationFormDialog(QDialog):
         self._customer_cin = QLineEdit()
         self._selected_client_id = None
         self._id_card_path = ""
+        self._id_card_back_path = ""
         self._license_path = ""
-        
+        self._license_back_path = ""
+
         self._id_card_btn = QPushButton(t("reservations.choose_image"))
         self._id_card_btn.clicked.connect(self._choose_id_card)
+        self._id_card_back_btn = QPushButton(t("reservations.choose_image"))
+        self._id_card_back_btn.clicked.connect(self._choose_id_card_back)
         self._license_btn = QPushButton(t("reservations.choose_image"))
         self._license_btn.clicked.connect(self._choose_license)
-        
+        self._license_back_btn = QPushButton(t("reservations.choose_image"))
+        self._license_back_btn.clicked.connect(self._choose_license_back)
+
         form.addRow(t("reservations.client_name"), self._customer_name)
         form.addRow(t("reservations.client_phone"), self._customer_phone)
         form.addRow(t("reservations.email_client"), self._customer_email)
         form.addRow(t("clients.col_cin") if t("clients.col_cin") != "clients.col_cin" else "CIN", self._customer_cin)
-        form.addRow(t("reservations.id_card"), self._id_card_btn)
-        form.addRow(t("reservations.license"), self._license_btn)
+        form.addRow(t("clients.docs_cin_recto"), self._id_card_btn)
+        form.addRow(t("clients.docs_cin_verso"), self._id_card_back_btn)
+        form.addRow(t("clients.docs_license_recto"), self._license_btn)
+        form.addRow(t("clients.docs_license_verso"), self._license_back_btn)
 
         # Dates
         from PySide6.QtCore import QTime
@@ -150,6 +158,7 @@ class ReservationFormDialog(QDialog):
                     "last_name": c.last_name or "",
                     "phone": c.phone or "",
                     "email": c.email or "",
+                    "cin_number": c.cin_number or "",
                 } for c in rows]
             finally:
                 session.close()
@@ -160,15 +169,33 @@ class ReservationFormDialog(QDialog):
     def _on_client_selected(self, index: int):
         client_id = self._client_combo.currentData()
         self._selected_client_id = client_id
+        # Snapshot of the loaded existing-client values, so `_on_save` can tell
+        # whether the user edited them (write-back) vs left them untouched.
+        self._loaded_client_fields = None
         if client_id:
             for c in self._clients_cache:
                 if c.get("id") == client_id:
-                    self._customer_name.setText(
-                        f"{c.get('first_name', '')} {c.get('last_name', '')}".strip())
-                    self._customer_phone.setText(c.get("phone", ""))
-                    self._customer_email.setText(c.get("email", ""))
-                    self._customer_cin.setText(c.get("cin_number", ""))
+                    name = f"{c.get('first_name', '')} {c.get('last_name', '')}".strip()
+                    phone = c.get("phone", "") or ""
+                    email = c.get("email", "") or ""
+                    cin = c.get("cin_number", "") or ""
+                    self._customer_name.setText(name)
+                    self._customer_phone.setText(phone)
+                    self._customer_email.setText(email)
+                    self._customer_cin.setText(cin)
+                    self._loaded_client_fields = {
+                        "name": name, "phone": phone, "email": email, "cin": cin,
+                    }
                     break
+        else:
+            # "Nouveau client" — no client identity may leak from a previous
+            # selection. Every field starts blank.
+            self._customer_name.clear()
+            self._customer_phone.clear()
+            self._customer_email.clear()
+            self._customer_cin.clear()
+            self._id_card_path = self._id_card_back_path = ""
+            self._license_path = self._license_back_path = ""
 
     def _recalculate(self):
         start = self._start_dt.dateTime()
@@ -184,9 +211,12 @@ class ReservationFormDialog(QDialog):
         self._calculated_days = days
         self._calculated_total = total
         
-        # Immediate local availability check
-        req_start = parse_datetime_utc(start.toPython())
-        req_end = parse_datetime_utc(end.toPython())
+        # Immediate local availability check. The QDateTimeEdit holds local
+        # wall time — CONVERT it to the UTC instant (same as `_on_save`), never
+        # let parse_datetime_utc relabel a naive local value as UTC (that skewed
+        # the pre-check ~1 h vs. what the reservation actually persists).
+        req_start = parse_datetime_utc(start.toPython().astimezone(timezone.utc))
+        req_end = parse_datetime_utc(end.toPython().astimezone(timezone.utc))
         
         if not req_start or not req_end or req_start >= req_end:
             self._avail_lbl.setText(t("reservations.err_date_order"))
@@ -238,19 +268,25 @@ class ReservationFormDialog(QDialog):
                 self.save_btn.setEnabled(True)
 
 
-    def _choose_id_card(self):
+    def _pick_document(self, attr: str, button, caption: str):
         from PySide6.QtWidgets import QFileDialog
-        path, _ = QFileDialog.getOpenFileName(self, "Choisir Carte d'identification", "", "Images (*.png *.jpg *.jpeg *.webp *.bmp)")
+        path, _ = QFileDialog.getOpenFileName(
+            self, caption, "", "Images (*.png *.jpg *.jpeg *.webp *.bmp)")
         if path:
-            self._id_card_path = path
-            self._id_card_btn.setText(path.split("/")[-1])
+            setattr(self, attr, path)
+            button.setText(path.split("/")[-1])
+
+    def _choose_id_card(self):
+        self._pick_document("_id_card_path", self._id_card_btn, t("clients.docs_cin_recto"))
+
+    def _choose_id_card_back(self):
+        self._pick_document("_id_card_back_path", self._id_card_back_btn, t("clients.docs_cin_verso"))
 
     def _choose_license(self):
-        from PySide6.QtWidgets import QFileDialog
-        path, _ = QFileDialog.getOpenFileName(self, "Choisir Permis de conduire", "", "Images (*.png *.jpg *.jpeg *.webp *.bmp)")
-        if path:
-            self._license_path = path
-            self._license_btn.setText(path.split("/")[-1])
+        self._pick_document("_license_path", self._license_btn, t("clients.docs_license_recto"))
+
+    def _choose_license_back(self):
+        self._pick_document("_license_back_path", self._license_back_btn, t("clients.docs_license_verso"))
             
     def _upload_file(self, local_path):
         """Upload a client document (ID card / license).
@@ -297,22 +333,41 @@ class ReservationFormDialog(QDialog):
             return
 
         id_url = self._upload_file(self._id_card_path)
+        id_back_url = self._upload_file(self._id_card_back_path)
         lic_url = self._upload_file(self._license_path)
-        
+        lic_back_url = self._upload_file(self._license_back_path)
+
         # _creation_succeeded is set by the slot connected to `saved`
         # (_create_reservation_record). The dialog must only close when
         # the reservation was actually persisted — otherwise the user
         # loses all input and has to re-enter everything.
+        # Write-back: when an existing client is selected and the user edited
+        # any of its fields in this form, propagate the change to the canonical
+        # Client record (not just this reservation's snapshot).
+        client_field_updates = None
+        if self._selected_client_id and getattr(self, "_loaded_client_fields", None):
+            current = {
+                "name": self._customer_name.text().strip(),
+                "phone": self._customer_phone.text().strip(),
+                "email": self._customer_email.text().strip(),
+                "cin": self._customer_cin.text().strip(),
+            }
+            if current != self._loaded_client_fields:
+                client_field_updates = current
+
         self._creation_succeeded = False
         self.saved.emit({
             "vehicle_id": self.vehicle.get("id"),
             "customer_id": self._selected_client_id,
+            "client_field_updates": client_field_updates,
             "customer_name": self.customer_name.text().strip(),
             "customer_phone": self._customer_phone.text().strip(),
             "customer_email": self._customer_email.text().strip(),
             "customer_cin": self._customer_cin.text().strip(),
             "identity_card_image": id_url,
+            "identity_card_image_back": id_back_url,
             "driving_license_image": lic_url,
+            "driving_license_image_back": lic_back_url,
             "start_datetime": start.toPython().astimezone(timezone.utc).isoformat(),
             "end_datetime": end.toPython().astimezone(timezone.utc).isoformat(),
             "daily_price": self.vehicle.get('daily_rental_price', 0),
@@ -337,6 +392,7 @@ class ReservationFormDialog(QDialog):
 # Canonical datetime/overlap helpers (single source of truth).
 from app.utils.datetime_utils import parse_datetime_utc, reservations_overlap, BLOCKING_RESERVATION_STATUSES
 from app.models.maintenance import LocalMaintenance
+from app.state.domain_store import get_domain_store
 
 
 class ReservationWidget(QWidget):
@@ -350,6 +406,11 @@ class ReservationWidget(QWidget):
         self._user_id = user_id
         self._user_role = user_role
         self._api = api_client
+        # Canonical read model. The reservations table AND the "available
+        # vehicles" grid are pure projections of the DomainStore snapshot;
+        # this widget never queries SQLite for display state.
+        self._store = get_domain_store()
+        self._rendered_rev = None
         self._setup_ui()
 
     def _setup_ui(self):
@@ -425,12 +486,14 @@ class ReservationWidget(QWidget):
         
         self._filter_start_dt = QDateTimeEdit(now)
         self._filter_start_dt.setCalendarPopup(True)
-        self._filter_start_dt.dateTimeChanged.connect(self._refresh_available_vehicles)
-        
+        # Filter dates are pure VIEW state — re-project the current snapshot,
+        # no store reload. (Drop the QDateTime the signal passes.)
+        self._filter_start_dt.dateTimeChanged.connect(lambda *_: self._refresh_available_vehicles())
+
         self._filter_end_dt = QDateTimeEdit(now.addDays(1))
         self._filter_end_dt.setCalendarPopup(True)
-        self._filter_end_dt.dateTimeChanged.connect(self._refresh_available_vehicles)
-        
+        self._filter_end_dt.dateTimeChanged.connect(lambda *_: self._refresh_available_vehicles())
+
         filter_layout.addWidget(QLabel(t("reservations.start_date")))
         filter_layout.addWidget(self._filter_start_dt)
         filter_layout.addSpacing(20)
@@ -499,179 +562,210 @@ class ReservationWidget(QWidget):
                 if item and text in item.text().lower():
                     match = True
             self._table.setRowHidden(row, not match)
-    def _refresh_available_vehicles(self):
-        """Update the vehicle grid to only show cars available for the selected dates."""
+    def _refresh_available_vehicles(self, snap=None):
+        """Re-project the "available vehicles for the selected dates" grid.
+
+        Pure function of (DomainStore snapshot, the two filter QDateTimeEdits).
+        Reads NO SQLite — the snapshot already carries every vehicle,
+        reservation and maintenance row plus each vehicle's canonical
+        effective status.
+        """
         if not hasattr(self, '_filter_start_dt') or not hasattr(self, '_filter_end_dt'):
             return
 
+        snap = snap if snap is not None else self._store.snapshot
+
         start_dt = self._filter_start_dt.dateTime()
         end_dt = self._filter_end_dt.dateTime()
-        
-        # Parse to canonical UTC
-        req_start = parse_datetime_utc(start_dt.toPython())
-        req_end = parse_datetime_utc(end_dt.toPython())
-        
+
+        # Parse to canonical UTC — CONVERT the local wall time, do not relabel it.
+        req_start = parse_datetime_utc(start_dt.toPython().astimezone(timezone.utc))
+        req_end = parse_datetime_utc(end_dt.toPython().astimezone(timezone.utc))
+
+        while self._grid.count():
+            item = self._grid.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
         if not req_start or not req_end or req_start >= req_end:
-            # Invalid interval, clear grid
-            while self._grid.count():
-                item = self._grid.takeAt(0)
-                if item.widget():
-                    item.widget().deleteLater()
-            return
+            return  # invalid interval — grid stays cleared
 
-        session = get_local_session()
-        try:
-            # Get operational vehicles
-            vehicles = session.query(LocalVehicle).filter(
-                ~LocalVehicle.status.in_(["MAINTENANCE", "SOLD", "INACTIVE"])
-            ).all()
-            
-            # Fetch blocking intervals for memory check (faster than querying per vehicle)
-            blocking_reservations = session.query(LocalReservation).filter(
-                LocalReservation.status.in_(BLOCKING_RESERVATION_STATUSES)
-            ).all()
-            
-            blocking_maintenances = session.query(LocalMaintenance).filter(
-                ~LocalMaintenance.status.in_(["CANCELLED", "COMPLETED"])
-            ).all()
+        # Exclude ONLY structural states — a raw ``MAINTENANCE`` flag is not
+        # authoritative for a given date window; the maintenance interval
+        # overlap check below is. Filtering it here would hide a vehicle that
+        # is actually free for the requested dates.
+        vehicles = [v for v in snap.vehicles
+                    if (v.get("raw_status") or "").upper() not in ("SOLD", "INACTIVE")]
+        blocking_reservations = [r for r in snap.reservations
+                                 if (r.get("status") or "") in BLOCKING_RESERVATION_STATUSES]
+        blocking_maintenances = [m for m in snap.maintenances
+                                 if (m.get("status") or "").upper() not in ("CANCELLED", "COMPLETED")]
 
-            available_vehicles = []
-            for v in vehicles:
-                blocked = False
-                # Check reservations
-                for r in blocking_reservations:
-                    if r.vehicle_id == v.id:
-                        r_start = parse_datetime_utc(r.start_datetime)
-                        r_end = parse_datetime_utc(r.end_datetime)
-                        if reservations_overlap(r_start, r_end, req_start, req_end):
+        available_vehicles = []
+        for v in vehicles:
+            vid = str(v.get("id"))
+            blocked = False
+            for r in blocking_reservations:
+                if str(r.get("vehicle_id")) == vid:
+                    r_start = parse_datetime_utc(r.get("start_datetime"))
+                    r_end = parse_datetime_utc(r.get("end_datetime"))
+                    if reservations_overlap(r_start, r_end, req_start, req_end):
+                        blocked = True
+                        break
+
+            if not blocked:
+                for m in blocking_maintenances:
+                    if str(m.get("vehicle_id")) == vid:
+                        m_start = parse_datetime_utc(m.get("start_datetime"))
+                        # Maintenance blocks until actual_end_datetime, else expected_end_datetime.
+                        m_end = (parse_datetime_utc(m.get("actual_end_datetime"))
+                                 if m.get("actual_end_datetime")
+                                 else parse_datetime_utc(m.get("expected_end_datetime")))
+                        # No end time (indefinite maintenance): blocks everything after start.
+                        if m_start and not m_end and req_end > m_start:
                             blocked = True
                             break
-                
-                # Check maintenances
-                if not blocked:
-                    for m in blocking_maintenances:
-                        if m.vehicle_id == v.id:
-                            m_start = parse_datetime_utc(m.start_datetime)
-                            # Maintenance blocks until actual_end_datetime, or expected_end_datetime
-                            m_end = parse_datetime_utc(m.actual_end_datetime) if m.actual_end_datetime else parse_datetime_utc(m.expected_end_datetime)
-                            # If no end time is specified (e.g., indefinite maintenance), it blocks everything after start
-                            if m_start and not m_end and req_end > m_start:
-                                blocked = True
-                                break
-                            if reservations_overlap(m_start, m_end, req_start, req_end):
-                                blocked = True
-                                break
+                        if reservations_overlap(m_start, m_end, req_start, req_end):
+                            blocked = True
+                            break
 
-                if not blocked:
-                    available_vehicles.append(v)
+            if not blocked:
+                available_vehicles.append(v)
 
-            while self._grid.count():
-                item = self._grid.takeAt(0)
-                if item.widget():
-                    item.widget().deleteLater()
+        row, col = 0, 0
+        for v in available_vehicles:
+            card = self._create_available_card(v)
+            self._grid.addWidget(card, row, col)
+            col += 1
+            if col >= 3:
+                col = 0
+                row += 1
 
-            row, col = 0, 0
-            for v in available_vehicles:
-                card = self._create_available_card(v)
-                self._grid.addWidget(card, row, col)
-                col += 1
-                if col >= 3:
-                    col = 0
-                    row += 1
-        finally:
-            session.close()
     def refresh_data(self):
-        """Fetch all real reservations and vehicles from SQLite local DB."""
-        session = get_local_session()
+        """Public entrypoint. As a direct call (tab switch, language switch,
+        tests) it asks the DomainStore to publish a fresh revision, then
+        renders from that snapshot. When reached from the store fan-out
+        (``MainWindow._on_domain_changed``) the reload is a re-entrant no-op
+        and we render the already-published snapshot. Either way the table
+        AND the availability grid are pure projections of ``store.snapshot``.
+        """
+        store = self._store
+        rev_before = store.revision
         try:
-            self._refresh_available_vehicles()
+            store.reload()
+        except Exception as e:
+            logger.error("Reservation snapshot reload failed: %s", e, exc_info=True)
+        if store.revision != rev_before and self._rendered_rev == store.revision:
+            return  # a re-entrant fan-out call already rendered this revision
+        self._render_from_snapshot(store.snapshot)
+        self._rendered_rev = store.revision
 
-            reservations = session.query(LocalReservation).order_by(LocalReservation.created_at.desc()).all()
-            self._table.setRowCount(len(reservations))
+    def _render_from_snapshot(self, snap):
+        """Render the reservations table + availability grid from the snapshot."""
+        self._refresh_available_vehicles(snap)
 
-            if len(reservations) == 0:
-                self._empty_res_lbl.show()
-                self._table.hide()
+        vehicles_by_id = {str(v.get("id")): v for v in snap.vehicles}
+        reservations = sorted(
+            snap.reservations, key=lambda r: r.get("created_at") or "", reverse=True)
+
+        self._table.setRowCount(len(reservations))
+        if len(reservations) == 0:
+            self._empty_res_lbl.show()
+            self._table.hide()
+        else:
+            self._empty_res_lbl.hide()
+            self._table.show()
+
+        for i, r in enumerate(reservations):
+            v = vehicles_by_id.get(str(r.get("vehicle_id")))
+            v_name = f"{v.get('brand', '')} {v.get('model', '')}".strip() if v else (r.get("vehicle_id") or "—")
+
+            # 0. Client
+            c_name = r.get("customer_name") or "—"
+            c_phone = f" ({r.get('customer_phone')})" if r.get("customer_phone") else ""
+            self._table.setItem(i, 0, QTableWidgetItem(f"{c_name}{c_phone}"))
+
+            # 1. Véhicule
+            self._table.setItem(i, 1, QTableWidgetItem(v_name))
+
+            # 2. Dates
+            start_dt_obj = self._parse_dt(r.get("start_datetime"))
+            end_dt_obj = self._parse_dt(r.get("end_datetime"))
+            start_local = start_dt_obj.astimezone().strftime("%Y-%m-%d") if start_dt_obj else ""
+            end_local = end_dt_obj.astimezone().strftime("%Y-%m-%d") if end_dt_obj else ""
+            dates_str = f"{start_local} - {end_local}" if (start_local or end_local) else "-"
+            self._table.setItem(i, 2, QTableWidgetItem(dates_str))
+
+            # 3. Prix Total
+            curr = "DH" if not is_rtl() else "د.م"
+            self._table.setItem(i, 3, QTableWidgetItem(f"{r.get('total_price') or 0:,.0f} {curr}"))
+
+            # 4. Statut Badge
+            status = r.get("status")
+            label_txt = t(f"status.{status}")
+            reason = (r.get("cancellation_reason") or "")
+            is_maint_cancel = status == "CANCELLED" and reason.upper() == "MAINTENANCE"
+            if is_maint_cancel:
+                label_txt = t("reservations.cancelled_due_to_maintenance")
+            badge_widget = QWidget()
+            bw_layout = QHBoxLayout(badge_widget)
+            bw_layout.setContentsMargins(4, 2, 4, 2)
+            badge_lbl = QLabel(label_txt)
+            badge_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            badge_lbl.setFont(QFont("Hanken Grotesk", 9, QFont.Weight.Bold))
+            if is_maint_cancel:
+                badge_lbl.setToolTip(t("reservations.cancelled_due_to_maintenance"))
+
+            if status == "ACTIVE":
+                badge_lbl.setProperty("class", "badge_success")
+            elif status == "RESERVED":
+                badge_lbl.setProperty("class", "badge_warning")
+            elif status == "CANCELLED":
+                badge_lbl.setProperty("class", "badge_danger")
             else:
-                self._empty_res_lbl.hide()
-                self._table.show()
+                badge_lbl.setProperty("class", "badge_info")
 
-            now_time = datetime.now(timezone.utc)
-            queue = SyncQueue(session, self._device_id, self._user_id)
+            bw_layout.addWidget(badge_lbl)
+            self._table.setCellWidget(i, 4, badge_widget)
 
-            for i, r in enumerate(reservations):
-                # Vehicle details
-                v = session.query(LocalVehicle).filter_by(id=r.vehicle_id).first()
-                v_name = f"{v.brand} {v.model}" if v else (r.vehicle_id or "—")
+            # 5. Action buttons
+            if status in ("ACTIVE", "RESERVED") and self._user_role in ("ADMIN", "MANAGER"):
+                act_widget = QWidget()
+                act_layout = QHBoxLayout(act_widget)
+                act_layout.setContentsMargins(4, 4, 4, 4)
+                act_layout.setSpacing(6)
 
-                # 0. Client
-                c_name = r.customer_name or "—"
-                c_phone = f" ({r.customer_phone})" if r.customer_phone else ""
-                self._table.setItem(i, 0, QTableWidgetItem(f"{c_name}{c_phone}"))
+                # "Activer" is an explicit RESERVED -> ACTIVE operational-status
+                # transition (e.g. staff confirming vehicle pickup at the
+                # counter). It does NOT gate the "en location" / revenue KPIs —
+                # those are time-derived (start <= now < end) and already count
+                # a RESERVED reservation covering now. Activer is bookkeeping,
+                # not a precondition for being "currently rented".
+                if status == "RESERVED":
+                    activate_btn = QPushButton(t("reservations.action_activate"))
+                    activate_btn.setFont(QFont("Hanken Grotesk", 9, QFont.Weight.Bold))
+                    activate_btn.setStyleSheet("background-color: #E7F0FE; color: #1D4ED8; border: 1px solid #BFDBFE; border-radius: 4px; padding: 4px 8px;")
+                    activate_btn.clicked.connect(lambda _, res_id=r.get("id"): self._activate_reservation(res_id))
+                    act_layout.addWidget(activate_btn)
 
-                # 1. Véhicule
-                self._table.setItem(i, 1, QTableWidgetItem(v_name))
+                complete_btn = QPushButton(t("reservations.action_complete"))
+                complete_btn.setFont(QFont("Hanken Grotesk", 9, QFont.Weight.Bold))
+                complete_btn.setStyleSheet("background-color: #E8F3E6; color: #235821; border: 1px solid #C4DFC0; border-radius: 4px; padding: 4px 8px;")
+                complete_btn.clicked.connect(lambda _, res_id=r.get("id"): self._complete_reservation(res_id))
 
-                # 2. Dates
-                start_dt_obj = self._parse_dt(r.start_datetime)
-                end_dt_obj = self._parse_dt(r.end_datetime)
-                start_local = start_dt_obj.astimezone().strftime("%Y-%m-%d") if start_dt_obj else ""
-                end_local = end_dt_obj.astimezone().strftime("%Y-%m-%d") if end_dt_obj else ""
-                dates_str = f"{start_local} - {end_local}" if (start_local or end_local) else "-"
-                self._table.setItem(i, 2, QTableWidgetItem(dates_str))
+                cancel_btn = QPushButton(t("reservations.action_cancel"))
+                cancel_btn.setFont(QFont("Hanken Grotesk", 9, QFont.Weight.Bold))
+                cancel_btn.setStyleSheet("background-color: #FEE2E2; color: #991B1B; border: 1px solid #FCA5A5; border-radius: 4px; padding: 4px 8px;")
+                cancel_btn.clicked.connect(lambda _, res_id=r.get("id"): self._cancel_reservation(res_id))
 
-                # 3. Prix Total
-                curr = "DH" if not is_rtl() else "د.م"
-                self._table.setItem(i, 3, QTableWidgetItem(f"{r.total_price or 0:,.0f} {curr}"))
+                act_layout.addWidget(complete_btn)
+                act_layout.addWidget(cancel_btn)
+                self._table.setCellWidget(i, 5, act_widget)
+            else:
+                self._table.setCellWidget(i, 5, QWidget())
 
-                # 4. Statut Badge
-                label_txt = t(f"status.{r.status}")
-                badge_widget = QWidget()
-                bw_layout = QHBoxLayout(badge_widget)
-                bw_layout.setContentsMargins(4, 2, 4, 2)
-                badge_lbl = QLabel(label_txt)
-                badge_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-                badge_lbl.setFont(QFont("Hanken Grotesk", 9, QFont.Weight.Bold))
-
-                if r.status == "ACTIVE":
-                    badge_lbl.setProperty("class", "badge_success")
-                elif r.status == "RESERVED":
-                    badge_lbl.setProperty("class", "badge_warning")
-                elif r.status == "CANCELLED":
-                    badge_lbl.setProperty("class", "badge_danger")
-                else:
-                    badge_lbl.setProperty("class", "badge_info")
-
-                bw_layout.addWidget(badge_lbl)
-                self._table.setCellWidget(i, 4, badge_widget)
-
-                # 5. Action buttons
-                if r.status in ("ACTIVE", "RESERVED") and self._user_role in ("ADMIN", "MANAGER"):
-                    act_widget = QWidget()
-                    act_layout = QHBoxLayout(act_widget)
-                    act_layout.setContentsMargins(4, 4, 4, 4)
-                    act_layout.setSpacing(6)
-
-                    complete_btn = QPushButton(t("reservations.action_complete"))
-                    complete_btn.setFont(QFont("Hanken Grotesk", 9, QFont.Weight.Bold))
-                    complete_btn.setStyleSheet("background-color: #E8F3E6; color: #235821; border: 1px solid #C4DFC0; border-radius: 4px; padding: 4px 8px;")
-                    complete_btn.clicked.connect(lambda _, res_id=r.id: self._complete_reservation(res_id))
-
-                    cancel_btn = QPushButton(t("reservations.action_cancel"))
-                    cancel_btn.setFont(QFont("Hanken Grotesk", 9, QFont.Weight.Bold))
-                    cancel_btn.setStyleSheet("background-color: #FEE2E2; color: #991B1B; border: 1px solid #FCA5A5; border-radius: 4px; padding: 4px 8px;")
-                    cancel_btn.clicked.connect(lambda _, res_id=r.id: self._cancel_reservation(res_id))
-
-                    act_layout.addWidget(complete_btn)
-                    act_layout.addWidget(cancel_btn)
-                    self._table.setCellWidget(i, 5, act_widget)
-                else:
-                    self._table.setCellWidget(i, 5, QWidget())
-
-        finally:
-            session.close()
-
-    def _create_available_card(self, vehicle: LocalVehicle) -> QFrame:
+    def _create_available_card(self, vehicle: dict) -> QFrame:
+        """``vehicle`` is a DomainStore snapshot row (dict), not an ORM object."""
         card = QFrame()
         card.setProperty("class", "surface")
         card.setStyleSheet("""
@@ -689,18 +783,18 @@ class ReservationWidget(QWidget):
         layout = QVBoxLayout(card)
         layout.setSpacing(8)
 
-        brand_lbl = QLabel(f"{vehicle.brand} {vehicle.model}")
+        brand_lbl = QLabel(f"{vehicle.get('brand', '')} {vehicle.get('model', '')}".strip())
         brand_lbl.setFont(QFont("Libre Caslon Text", 14, QFont.Weight.Bold))
         brand_lbl.setStyleSheet("color: #1E4D38;")
 
-        fuel_lbl = t(f"fuel.{vehicle.fuel_type}") if vehicle.fuel_type else ""
-        sub_info = f"{vehicle.registration} · {vehicle.year or ''} · {fuel_lbl}".strip(" · ")
+        fuel_lbl = t(f"fuel.{vehicle.get('fuel_type')}") if vehicle.get("fuel_type") else ""
+        sub_info = f"{vehicle.get('registration', '')} · {vehicle.get('year') or ''} · {fuel_lbl}".strip(" · ")
         sub_lbl = QLabel(sub_info)
         sub_lbl.setFont(QFont("Hanken Grotesk", 10))
         sub_lbl.setStyleSheet("color: #6B7264;")
 
         curr = "DH" if not is_rtl() else "د.م"
-        price_lbl = QLabel(f"{vehicle.daily_rental_price:.0f} {curr} {t('vehicles.per_day')}")
+        price_lbl = QLabel(f"{(vehicle.get('daily_rental_price') or 0):.0f} {curr} {t('vehicles.per_day')}")
         price_lbl.setFont(QFont("Hanken Grotesk", 12, QFont.Weight.Bold))
         price_lbl.setStyleSheet("color: #1E4D38;")
 
@@ -708,11 +802,11 @@ class ReservationWidget(QWidget):
         btn.setProperty("class", "primary")
         btn.setFont(QFont("Hanken Grotesk", 10, QFont.Weight.Bold))
         v_dict = {
-            "id": vehicle.id,
-            "brand": vehicle.brand,
-            "model": vehicle.model,
-            "registration": vehicle.registration,
-            "daily_rental_price": vehicle.daily_rental_price,
+            "id": vehicle.get("id"),
+            "brand": vehicle.get("brand"),
+            "model": vehicle.get("model"),
+            "registration": vehicle.get("registration"),
+            "daily_rental_price": vehicle.get("daily_rental_price"),
             "start_dt": self._filter_start_dt.dateTime() if hasattr(self, '_filter_start_dt') else None,
             "end_dt": self._filter_end_dt.dateTime() if hasattr(self, '_filter_end_dt') else None
         }
@@ -741,6 +835,8 @@ class ReservationWidget(QWidget):
 
     def _create_reservation_record(self, data: dict):
         session = get_local_session()
+        # Keep the client write-back payload out of the reservation sync body.
+        client_field_updates = data.pop("client_field_updates", None)
         try:
             v_id = data["vehicle_id"]
             new_start = parse_datetime_utc(data["start_datetime"])
@@ -750,7 +846,21 @@ class ReservationWidget(QWidget):
                 QMessageBox.warning(self, t("common.error"), t("reservations.err_date_order"))
                 return
 
-            # Check server availability first if online and authenticated
+            # Ask the server for the authoritative verdict when online, and
+            # PRESERVE THE ERROR CATEGORY — a business error must never be shown
+            # as "server unreachable" and vice-versa:
+            #   200 available:false      -> real conflict  (double-booking / maintenance)
+            #   409                      -> real conflict
+            #   401                      -> session expired
+            #   403                      -> permission denied
+            #   400 / 422                -> invalid reservation data
+            #   404                      -> vehicle not on the server yet
+            #                               (created offline) -> use local check
+            #   5xx / malformed          -> server error
+            #   transport (timeout after
+            #     retries / connect)     -> server unreachable
+            # Only a genuine transport failure or an outright server error
+            # blocks with a technical message; a definitive verdict is obeyed.
             server_checked = False
             if self._api and getattr(self._api, "_access_token", ""):
                 try:
@@ -759,49 +869,52 @@ class ReservationWidget(QWidget):
                         new_start.isoformat(),
                         new_end.isoformat()
                     )
-                    if avail_resp is None:
-                        logger.warning("RESERVATION_AVAILABILITY_CHECK: server connection failed (None) — treating as technical")
-                        QMessageBox.warning(self, t("common.error"), t("sync.server_unavailable"))
-                        return
-                    if isinstance(avail_resp, dict) and "http_error" in avail_resp:
-                        # TECHNICAL error (network/5xx/401): never report a
-                        # business conflict. Block creation with a technical
-                        # message and keep the reservation uncreated.
-                        logger.warning(
-                            "RESERVATION_AVAILABILITY_CHECK: server HTTP error %s — treating as technical, not conflict",
-                            avail_resp["http_error"])
-                        QMessageBox.warning(self, t("common.error"),
-                                            t("sync.server_unavailable"))
-                        return
-                    if isinstance(avail_resp, dict) and "available" not in avail_resp:
-                        # MALFORMED server response: technical error, never a
-                        # business conflict, never a silent local fallback.
-                        logger.warning(
-                            "RESERVATION_AVAILABILITY_CHECK: malformed server response %s — technical",
-                            avail_resp)
-                        QMessageBox.warning(self, t("common.error"),
-                                            t("sync.server_unavailable"))
-                        return
+                    code = avail_resp.get("http_error") if isinstance(avail_resp, dict) else None
+                    is_transport = avail_resp is None or (
+                        isinstance(avail_resp, dict) and (
+                            avail_resp.get("transport")
+                            or code in ("NETWORK", "timeout", "connect", "error")))
+
                     if isinstance(avail_resp, dict) and "available" in avail_resp:
                         server_checked = True
                         if not avail_resp["available"]:
-                            logger.info(
-                                "RESERVATION_AVAILABILITY_CHECK: vehicle_id=%s requested_start_utc=%s requested_end_utc=%s source=SERVER result=BLOCKED",
-                                v_id, new_start.isoformat(), new_end.isoformat()
-                            )
-                            reason = avail_resp.get("reason")
-                            if reason == "MAINTENANCE":
+                            logger.info("RESERVATION_AVAILABILITY_CHECK: SERVER BLOCKED reason=%s",
+                                        avail_resp.get("reason"))
+                            if avail_resp.get("reason") == "MAINTENANCE":
                                 QMessageBox.warning(self, t("common.error"), t("reservations.in_maintenance"))
                             else:
                                 QMessageBox.warning(self, t("common.error"), t("reservations.double_booking"))
                             return
-                        else:
-                            logger.info(
-                                "RESERVATION_AVAILABILITY_CHECK: vehicle_id=%s requested_start_utc=%s requested_end_utc=%s source=SERVER result=AVAILABLE",
-                                v_id, new_start.isoformat(), new_end.isoformat()
-                            )
+                        logger.info("RESERVATION_AVAILABILITY_CHECK: SERVER AVAILABLE")
+                    elif code == 409:
+                        QMessageBox.warning(self, t("common.error"), t("reservations.double_booking"))
+                        return
+                    elif code == 401:
+                        QMessageBox.warning(self, t("common.error"), t("clients.session_expired"))
+                        return
+                    elif code == 403:
+                        QMessageBox.warning(self, t("common.error"), t("common.permission_denied"))
+                        return
+                    elif code in (400, 422):
+                        QMessageBox.warning(self, t("common.error"), t("reservations.err_invalid_data"))
+                        return
+                    elif code == 404:
+                        # Vehicle exists locally but not yet on the server
+                        # (offline-first). Not an error — verify locally.
+                        logger.info("RESERVATION_AVAILABILITY_CHECK: 404 — vehicle not synced, using local check")
+                    elif is_transport:
+                        logger.warning("RESERVATION_AVAILABILITY_CHECK: transport failure (%s) — unreachable", code)
+                        QMessageBox.warning(self, t("common.error"), t("sync.server_unavailable"))
+                        return
+                    else:
+                        # 5xx or malformed response — a real server-side error.
+                        logger.warning("RESERVATION_AVAILABILITY_CHECK: server error %s", avail_resp)
+                        QMessageBox.warning(self, t("common.error"), t("reservations.err_server_error"))
+                        return
                 except Exception as e:
-                    logger.warning("Online availability check failed, falling back to local: %s", e)
+                    logger.warning("Online availability check errored: %s", e)
+                    QMessageBox.warning(self, t("common.error"), t("sync.server_unavailable"))
+                    return
 
             if not server_checked:
                 # Double-booking prevention — canonical overlap rule, real
@@ -831,7 +944,7 @@ class ReservationWidget(QWidget):
 
                 if not overlapping:
                     from app.models.maintenance import LocalMaintenance
-                    from datetime import timedelta
+                    from app.utils.fleet_status import FAR_FUTURE
                     for m in session.query(LocalMaintenance).filter(
                         LocalMaintenance.vehicle_id == v_id
                     ).all():
@@ -839,9 +952,11 @@ class ReservationWidget(QWidget):
                         if m_status in ("CANCELLED", "COMPLETED"):
                             continue
                         m_start = parse_datetime_utc(m.start_datetime)
-                        m_end = parse_datetime_utc(m.expected_end_datetime) or parse_datetime_utc(m.actual_end_datetime)
-                        if m_end is None and m_start:
-                            m_end = m_start + timedelta(days=1)
+                        # CANONICAL: an active maintenance with no explicit end
+                        # is open-ended — it occupies the vehicle until closed.
+                        m_end = (parse_datetime_utc(m.actual_end_datetime)
+                                 or parse_datetime_utc(m.expected_end_datetime)
+                                 or FAR_FUTURE)
                         if reservations_overlap(m_start, m_end, new_start, new_end):
                             overlapping = True
                             blocking_info = {
@@ -895,7 +1010,9 @@ class ReservationWidget(QWidget):
                     email=data.get("customer_email"),
                     cin_number=data.get("customer_cin"),
                     identity_card_image=data.get("identity_card_image"),
+                    identity_card_image_back=data.get("identity_card_image_back"),
                     driving_license_image=data.get("driving_license_image"),
+                    driving_license_image_back=data.get("driving_license_image_back"),
                     status="ACTIVE",
                     created_at=now_iso,
                     updated_at=now_iso,
@@ -911,7 +1028,9 @@ class ReservationWidget(QWidget):
                     "email": new_client.email,
                     "cin_number": new_client.cin_number,
                     "identity_card_image": new_client.identity_card_image,
+                    "identity_card_image_back": new_client.identity_card_image_back,
                     "driving_license_image": new_client.driving_license_image,
+                    "driving_license_image_back": new_client.driving_license_image_back,
                     "status": "ACTIVE",
                 })
                 data["customer_id"] = customer_id
@@ -928,6 +1047,7 @@ class ReservationWidget(QWidget):
                     customer_email=data.get("customer_email"),
                     identity_card_image=data.get("identity_card_image"),
                     driving_license_image=data.get("driving_license_image"),
+                    cancellation_reason=None,
                     start_datetime=data["start_datetime"],
                     end_datetime=data["end_datetime"],
                     daily_price=data.get("daily_price", 0.0),
@@ -951,6 +1071,34 @@ class ReservationWidget(QWidget):
                 queue = SyncQueue(session, self._device_id, self._user_id)
                 queue.enqueue("reservation", res_id, "CREATE", data)
 
+                # WRITE-BACK: an existing client whose fields were edited in
+                # this form updates the canonical Client record (same
+                # transaction), so every observer converges on the new data.
+                client_updates = client_field_updates
+                if data.get("customer_id") and not client_queue_item and client_updates:
+                    existing_client = session.query(LocalClient).filter_by(
+                        id=data["customer_id"]).one_or_none()
+                    if existing_client is not None:
+                        raw = (client_updates.get("name") or "").strip()
+                        parts = raw.split(" ", 1)
+                        if parts and parts[0]:
+                            existing_client.first_name = parts[0]
+                            existing_client.last_name = parts[1] if len(parts) > 1 else ""
+                        existing_client.phone = client_updates.get("phone") or None
+                        existing_client.email = client_updates.get("email") or None
+                        existing_client.cin_number = client_updates.get("cin") or None
+                        existing_client.updated_at = now_iso
+                        existing_client.version = (existing_client.version or 1) + 1
+                        queue.enqueue("client", existing_client.id, "UPDATE", {
+                            "id": existing_client.id,
+                            "first_name": existing_client.first_name,
+                            "last_name": existing_client.last_name,
+                            "phone": existing_client.phone,
+                            "email": existing_client.email,
+                            "cin_number": existing_client.cin_number,
+                            "version": existing_client.version,
+                        })
+
                 # Register durable pending-upload records for offline documents.
                 from app.sync.uploads import register_pending_upload
                 for field in ("identity_card_image", "driving_license_image"):
@@ -959,6 +1107,20 @@ class ReservationWidget(QWidget):
                         marker=data.get(field) or "",
                         entity_type="reservation",
                         entity_id=res_id,
+                        upload_type="CLIENT_DOCUMENT",
+                        remote_endpoint="/api/v1/clients/upload-image",
+                        field_name=field,
+                    )
+                # Verso images belong to the Client entity only (the reservation
+                # snapshot has no *_back columns). Register them against the
+                # client so the pending-upload processor resolves the marker in
+                # the client row + the client CREATE sync payload.
+                for field in ("identity_card_image_back", "driving_license_image_back"):
+                    register_pending_upload(
+                        session,
+                        marker=data.get(field) or "",
+                        entity_type="client",
+                        entity_id=customer_id,
                         upload_type="CLIENT_DOCUMENT",
                         remote_endpoint="/api/v1/clients/upload-image",
                         field_name=field,
@@ -1001,60 +1163,40 @@ class ReservationWidget(QWidget):
         finally:
             session.close()
 
-    def _complete_reservation(self, res_id: str):
-        session = get_local_session()
-        try:
+    def _set_reservation_status(self, res_id: str, new_status: str):
+        """Canonical write path for a manual reservation status change
+        (complete / cancel). One transaction via ``DomainStore.mutate()``: on
+        commit the store reloads and every view converges; on failure it rolls
+        back and publishes NOTHING.
+        """
+        def _apply(session):
             res = session.query(LocalReservation).filter_by(id=res_id).first()
             if not res:
                 return
-
             now_iso = datetime.now(timezone.utc).isoformat()
-            res.status = "COMPLETED"
+            res.status = new_status
             res.updated_at = now_iso
             res.version += 1
+            SyncQueue(session, self._device_id, self._user_id).enqueue(
+                "reservation", res_id, "UPDATE", {"id": res_id, "status": new_status})
 
-            vehicle = session.query(LocalVehicle).filter_by(id=res.vehicle_id).first()
-            if vehicle and vehicle.status == "RESERVED":
-                vehicle.status = "AVAILABLE"
-                vehicle.updated_at = now_iso
-                vehicle.version += 1
+        try:
+            self._store.mutate(_apply)
+        except Exception as e:
+            logger.error("Failed to set reservation %s -> %s: %s", res_id, new_status, e, exc_info=True)
+            QMessageBox.critical(self, t("common.error"), t("common.error"))
+            return
+        self.reservation_created.emit()  # -> MainWindow triggers a background sync
 
-            queue = SyncQueue(session, self._device_id, self._user_id)
-            queue.enqueue("reservation", res_id, "UPDATE", {"id": res_id, "status": "COMPLETED"})
-            if vehicle:
-                queue.enqueue("vehicle", vehicle.id, "UPDATE", {"id": vehicle.id, "status": "AVAILABLE"})
+    def _activate_reservation(self, res_id: str):
+        """RESERVED -> ACTIVE: an explicit operational bookkeeping transition
+        (e.g. confirming vehicle pickup at the counter). It does NOT gate the
+        "en location" / revenue KPIs, which are time-derived and already
+        count a RESERVED reservation covering `now` — see fleet_status.py."""
+        self._set_reservation_status(res_id, "ACTIVE")
 
-            session.commit()
-            self.refresh_data()
-            self.reservation_created.emit()
-        finally:
-            session.close()
+    def _complete_reservation(self, res_id: str):
+        self._set_reservation_status(res_id, "COMPLETED")
 
     def _cancel_reservation(self, res_id: str):
-        session = get_local_session()
-        try:
-            res = session.query(LocalReservation).filter_by(id=res_id).first()
-            if not res:
-                return
-
-            now_iso = datetime.now(timezone.utc).isoformat()
-            res.status = "CANCELLED"
-            res.updated_at = now_iso
-            res.version += 1
-
-            vehicle = session.query(LocalVehicle).filter_by(id=res.vehicle_id).first()
-            if vehicle and vehicle.status == "RESERVED":
-                vehicle.status = "AVAILABLE"
-                vehicle.updated_at = now_iso
-                vehicle.version += 1
-
-            queue = SyncQueue(session, self._device_id, self._user_id)
-            queue.enqueue("reservation", res_id, "UPDATE", {"id": res_id, "status": "CANCELLED"})
-            if vehicle:
-                queue.enqueue("vehicle", vehicle.id, "UPDATE", {"id": vehicle.id, "status": "AVAILABLE"})
-
-            session.commit()
-            self.refresh_data()
-            self.reservation_created.emit()
-        finally:
-            session.close()
+        self._set_reservation_status(res_id, "CANCELLED")

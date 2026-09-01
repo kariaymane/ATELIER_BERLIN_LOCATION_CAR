@@ -33,31 +33,59 @@ class ApiClient:
             h["Authorization"] = f"Bearer {self._access_token}"
         return h
 
-    def _request(self, method: str, path: str, **kwargs) -> Optional[httpx.Response]:
-        """Make a request, handle connectivity and token refresh."""
+    # Set by _request on the last transport failure so callers can tell a
+    # genuine "offline" (connect refused / DNS) from a transient "server slow"
+    # (read timeout — e.g. a fly.dev machine cold-starting).
+    _last_transport_error: Optional[str] = None
+
+    def _request(self, method: str, path: str, *, retries: int = 1, **kwargs) -> Optional[httpx.Response]:
+        """Make a request, handle connectivity and token refresh.
+
+        On a read timeout the request is retried (``retries`` times) with a
+        widened timeout, because the production backend can cold-start and the
+        first hit legitimately takes >10 s. A connect error is NOT retried —
+        that is a real offline condition.
+        """
         url = f"{self._base_url}{path}"
-        try:
-            with httpx.Client(timeout=self._timeout) as client:
-                response = getattr(client, method)(
-                    url, headers=self._headers(), **kwargs
-                )
-                self._is_online = True
+        self._last_transport_error = None
+        attempt = 0
+        timeout = self._timeout
+        while True:
+            try:
+                with httpx.Client(timeout=timeout) as client:
+                    response = getattr(client, method)(
+                        url, headers=self._headers(), **kwargs
+                    )
+                    self._is_online = True
 
-                # Auto-refresh on 401
-                if response.status_code == 401 and self._refresh_token:
-                    if self._do_refresh():
-                        response = getattr(client, method)(
-                            url, headers=self._headers(), **kwargs
-                        )
-                return response
+                    # Auto-refresh on 401
+                    if response.status_code == 401 and self._refresh_token:
+                        if self._do_refresh():
+                            response = getattr(client, method)(
+                                url, headers=self._headers(), **kwargs
+                            )
+                    return response
 
-        except (httpx.ConnectError, httpx.TimeoutException) as e:
-            self._is_online = False
-            logger.warning("API offline: %s", e)
-            return None
-        except Exception as e:
-            logger.error("API error: %s", e)
-            return None
+            except httpx.TimeoutException as e:
+                self._last_transport_error = "timeout"
+                if attempt < retries:
+                    attempt += 1
+                    timeout = max(timeout, self._timeout) * 2.5
+                    logger.warning("API timeout on %s — retry %d/%d with %.0fs timeout",
+                                   path, attempt, retries, timeout)
+                    continue
+                self._is_online = False
+                logger.warning("API timeout (server slow / cold start): %s", e)
+                return None
+            except httpx.ConnectError as e:
+                self._last_transport_error = "connect"
+                self._is_online = False
+                logger.warning("API offline (connect failed): %s", e)
+                return None
+            except Exception as e:
+                self._last_transport_error = "error"
+                logger.error("API error: %s", e)
+                return None
 
     def _do_refresh(self) -> bool:
         """Refresh the access token."""
@@ -127,9 +155,11 @@ class ApiClient:
         """
         from urllib.parse import urlencode
         query = urlencode({"start": start, "end": end})
-        r = self._request("get", f"/api/v1/vehicles/{vid}/availability?{query}")
+        r = self._request("get", f"/api/v1/vehicles/{vid}/availability?{query}", retries=2)
         if r is None:
-            return None
+            # No response object at all — surface WHY so the caller can decide
+            # between "you are offline" and "server was slow, fall back to local".
+            return {"http_error": self._last_transport_error or "NETWORK", "transport": True}
         if r.status_code == 200:
             try:
                 return r.json()

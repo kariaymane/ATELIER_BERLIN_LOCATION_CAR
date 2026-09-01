@@ -238,5 +238,12 @@ class VehicleService:
         }
 
     async def get_status_counts(self) -> dict[str, int]:
-        """Get count of vehicles per status."""
-        return await self._repo.count_by_status()
+        """Count of vehicles per EFFECTIVE status — the same derivation the
+        Dashboard uses, so /vehicles/stats and /dashboard/stats never disagree.
+        Structural buckets (SOLD/INACTIVE) are reported from raw status."""
+        from app.services.fleet_status import compute_effective_statuses
+        eff = await compute_effective_statuses(self._session)
+        counts: dict[str, int] = {}
+        for st in eff.values():
+            counts[st] = counts.get(st, 0) + 1
+        return counts

@@ -106,27 +106,46 @@ class FleetViewModel(
     private val _successMessage = MutableStateFlow<String?>(null)
     val successMessage: StateFlow<String?> = _successMessage.asStateFlow()
 
+    // False until the first session-restore attempt has finished. While false
+    // the UI stays on Splash instead of flashing the login screen for every
+    // cold start (including the common case where the stored session is valid).
+    private val _bootstrapped = MutableStateFlow(false)
+
     init {
         viewModelScope.launch {
-            userSession.collect { session ->
-                if (session != null) {
-                    _navigationStack.value = listOf(Screen.Dashboard)
-                    _currentTab.value = BottomNavTab.DASHBOARD
-                    refreshAll()
-                    realtimeSyncManager?.start()
-                } else {
-                    realtimeSyncManager?.stop()
-                    _navigationStack.value = listOf(Screen.Auth)
+            combine(userSession, _bootstrapped) { session, bootstrapped -> session to bootstrapped }
+                .collect { (session, bootstrapped) ->
+                    when {
+                        session != null -> {
+                            if (_navigationStack.value.lastOrNull() != Screen.Dashboard) {
+                                _navigationStack.value = listOf(Screen.Dashboard)
+                                _currentTab.value = BottomNavTab.DASHBOARD
+                                refreshAll()
+                            }
+                            realtimeSyncManager?.start()
+                        }
+                        bootstrapped -> {
+                            realtimeSyncManager?.stop()
+                            if (_navigationStack.value.lastOrNull() != Screen.Auth) {
+                                _navigationStack.value = listOf(Screen.Auth)
+                            }
+                        }
+                        else -> {
+                            // Restore still running: hold on Splash.
+                            _navigationStack.value = listOf(Screen.Splash)
+                        }
+                    }
                 }
-            }
         }
-        // SECURITY: a stored token is never authentication by itself.
-        // Validate any saved session against the backend during Splash;
-        // the collector above then routes to Dashboard (valid) or Auth.
+        // The backend is the source of truth: validate any saved session during
+        // Splash. On explicit rejection the collector routes to Auth; on a valid
+        // or (offline) cached session it routes to Dashboard.
         viewModelScope.launch {
-            // Give the session collector a tick to install before emitting.
-            kotlinx.coroutines.delay(50)
-            authRepository.validateAndRestoreSession()
+            try {
+                authRepository.validateAndRestoreSession()
+            } finally {
+                _bootstrapped.value = true
+            }
         }
     }
 

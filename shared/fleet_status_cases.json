@@ -1,0 +1,486 @@
+{
+  "_comment": "Cross-runtime parity vectors for effective vehicle status. Backend (Python/SQL), Desktop (Python/SQL) and Mobile (Kotlin) must ALL reproduce expected_effective, expected_counts and expected_next_boundary exactly. Times are ISO-8601 UTC. expected_next_boundary is fleet_status_reference.next_boundary(reservations, maintenances, now) with NO midnight injection (null == nothing time-driven pending). Edit the reference in shared/fleet_status_reference.py and regenerate expectations only with a deliberate, reviewed rule change.",
+  "now": "2026-08-30T12:00:00Z",
+  "cases": [
+    {
+      "name": "plain_available",
+      "vehicles": [
+        {
+          "id": "v1",
+          "status": "AVAILABLE"
+        }
+      ],
+      "reservations": [],
+      "maintenances": [],
+      "expected_effective": {
+        "v1": "AVAILABLE"
+      },
+      "expected_counts": {
+        "total_vehicles": 1,
+        "available": 1,
+        "reserved": 0,
+        "rented": 0,
+        "maintenance": 0
+      },
+      "expected_next_boundary": null
+    },
+    {
+      "name": "active_reservation_now_is_rented",
+      "vehicles": [
+        {
+          "id": "v1",
+          "status": "AVAILABLE"
+        }
+      ],
+      "reservations": [
+        {
+          "vehicle_id": "v1",
+          "status": "ACTIVE",
+          "start": "2026-08-30T08:00:00Z",
+          "end": "2026-08-31T08:00:00Z"
+        }
+      ],
+      "maintenances": [],
+      "expected_effective": {
+        "v1": "RENTED"
+      },
+      "expected_counts": {
+        "total_vehicles": 1,
+        "available": 0,
+        "reserved": 0,
+        "rented": 1,
+        "maintenance": 0
+      },
+      "expected_next_boundary": "2026-08-31T08:00:00Z"
+    },
+    {
+      "name": "reserved_status_reservation_covering_now_is_rented",
+      "_comment": "The business has no pickup step: a RESERVED reservation whose window contains now means the car is physically out.",
+      "vehicles": [
+        {
+          "id": "v1",
+          "status": "AVAILABLE"
+        }
+      ],
+      "reservations": [
+        {
+          "vehicle_id": "v1",
+          "status": "RESERVED",
+          "start": "2026-08-30T08:00:00Z",
+          "end": "2026-08-31T08:00:00Z"
+        }
+      ],
+      "maintenances": [],
+      "expected_effective": {
+        "v1": "RENTED"
+      },
+      "expected_counts": {
+        "total_vehicles": 1,
+        "available": 0,
+        "reserved": 0,
+        "rented": 1,
+        "maintenance": 0
+      },
+      "expected_next_boundary": "2026-08-31T08:00:00Z"
+    },
+    {
+      "name": "future_reservation_is_upcoming_reserved",
+      "_comment": "A booking that starts in the future does not block a new non-overlapping booking (check_availability), but it IS surfaced as RESERVED on the dashboard.",
+      "vehicles": [
+        {
+          "id": "v1",
+          "status": "AVAILABLE"
+        }
+      ],
+      "reservations": [
+        {
+          "vehicle_id": "v1",
+          "status": "RESERVED",
+          "start": "2026-09-05T08:00:00Z",
+          "end": "2026-09-07T08:00:00Z"
+        }
+      ],
+      "maintenances": [],
+      "expected_effective": {
+        "v1": "RESERVED"
+      },
+      "expected_counts": {
+        "total_vehicles": 1,
+        "available": 0,
+        "reserved": 1,
+        "rented": 0,
+        "maintenance": 0
+      },
+      "expected_next_boundary": "2026-09-05T08:00:00Z"
+    },
+    {
+      "name": "reservation_ended_one_minute_ago_frees_vehicle",
+      "vehicles": [
+        {
+          "id": "v1",
+          "status": "AVAILABLE"
+        }
+      ],
+      "reservations": [
+        {
+          "vehicle_id": "v1",
+          "status": "ACTIVE",
+          "start": "2026-08-29T12:00:00Z",
+          "end": "2026-08-30T11:59:00Z"
+        }
+      ],
+      "maintenances": [],
+      "expected_effective": {
+        "v1": "AVAILABLE"
+      },
+      "expected_counts": {
+        "total_vehicles": 1,
+        "available": 1,
+        "reserved": 0,
+        "rented": 0,
+        "maintenance": 0
+      },
+      "expected_next_boundary": null
+    },
+    {
+      "name": "half_open_end_exactly_now_frees_vehicle",
+      "vehicles": [
+        {
+          "id": "v1",
+          "status": "AVAILABLE"
+        }
+      ],
+      "reservations": [
+        {
+          "vehicle_id": "v1",
+          "status": "ACTIVE",
+          "start": "2026-08-29T12:00:00Z",
+          "end": "2026-08-30T12:00:00Z"
+        }
+      ],
+      "maintenances": [],
+      "expected_effective": {
+        "v1": "AVAILABLE"
+      },
+      "expected_counts": {
+        "total_vehicles": 1,
+        "available": 1,
+        "reserved": 0,
+        "rented": 0,
+        "maintenance": 0
+      },
+      "expected_next_boundary": null
+    },
+    {
+      "name": "half_open_start_exactly_now_blocks_vehicle",
+      "vehicles": [
+        {
+          "id": "v1",
+          "status": "AVAILABLE"
+        }
+      ],
+      "reservations": [
+        {
+          "vehicle_id": "v1",
+          "status": "ACTIVE",
+          "start": "2026-08-30T12:00:00Z",
+          "end": "2026-08-31T12:00:00Z"
+        }
+      ],
+      "maintenances": [],
+      "expected_effective": {
+        "v1": "RENTED"
+      },
+      "expected_counts": {
+        "total_vehicles": 1,
+        "available": 0,
+        "reserved": 0,
+        "rented": 1,
+        "maintenance": 0
+      },
+      "expected_next_boundary": "2026-08-31T12:00:00Z"
+    },
+    {
+      "name": "open_ended_active_maintenance_occupies",
+      "vehicles": [
+        {
+          "id": "v1",
+          "status": "AVAILABLE"
+        }
+      ],
+      "reservations": [],
+      "maintenances": [
+        {
+          "vehicle_id": "v1",
+          "status": "ACTIVE",
+          "start": "2026-08-25T00:00:00Z",
+          "expected_end": null,
+          "actual_end": null
+        }
+      ],
+      "expected_effective": {
+        "v1": "MAINTENANCE"
+      },
+      "expected_counts": {
+        "total_vehicles": 1,
+        "available": 0,
+        "reserved": 0,
+        "rented": 0,
+        "maintenance": 1
+      },
+      "expected_next_boundary": null
+    },
+    {
+      "name": "completed_maintenance_does_not_occupy",
+      "vehicles": [
+        {
+          "id": "v1",
+          "status": "AVAILABLE"
+        }
+      ],
+      "reservations": [],
+      "maintenances": [
+        {
+          "vehicle_id": "v1",
+          "status": "COMPLETED",
+          "start": "2026-08-25T00:00:00Z",
+          "expected_end": "2026-09-30T00:00:00Z",
+          "actual_end": "2026-08-28T00:00:00Z"
+        }
+      ],
+      "expected_effective": {
+        "v1": "AVAILABLE"
+      },
+      "expected_counts": {
+        "total_vehicles": 1,
+        "available": 1,
+        "reserved": 0,
+        "rented": 0,
+        "maintenance": 0
+      },
+      "expected_next_boundary": null
+    },
+    {
+      "name": "maintenance_wins_over_active_reservation",
+      "vehicles": [
+        {
+          "id": "v1",
+          "status": "AVAILABLE"
+        }
+      ],
+      "reservations": [
+        {
+          "vehicle_id": "v1",
+          "status": "ACTIVE",
+          "start": "2026-08-29T12:00:00Z",
+          "end": "2026-09-02T12:00:00Z"
+        }
+      ],
+      "maintenances": [
+        {
+          "vehicle_id": "v1",
+          "status": "ACTIVE",
+          "start": "2026-08-30T06:00:00Z",
+          "expected_end": "2026-08-31T06:00:00Z",
+          "actual_end": null
+        }
+      ],
+      "expected_effective": {
+        "v1": "MAINTENANCE"
+      },
+      "expected_counts": {
+        "total_vehicles": 1,
+        "available": 0,
+        "reserved": 0,
+        "rented": 0,
+        "maintenance": 1
+      },
+      "expected_next_boundary": "2026-08-31T06:00:00Z"
+    },
+    {
+      "name": "sold_is_structural_and_excluded_from_total",
+      "vehicles": [
+        {
+          "id": "v1",
+          "status": "SOLD"
+        },
+        {
+          "id": "v2",
+          "status": "AVAILABLE"
+        }
+      ],
+      "reservations": [
+        {
+          "vehicle_id": "v1",
+          "status": "ACTIVE",
+          "start": "2026-08-29T12:00:00Z",
+          "end": "2026-09-02T12:00:00Z"
+        }
+      ],
+      "maintenances": [],
+      "expected_effective": {
+        "v1": "SOLD",
+        "v2": "AVAILABLE"
+      },
+      "expected_counts": {
+        "total_vehicles": 1,
+        "available": 1,
+        "reserved": 0,
+        "rented": 0,
+        "maintenance": 0
+      },
+      "expected_next_boundary": "2026-09-02T12:00:00Z"
+    },
+    {
+      "name": "inactive_is_structural",
+      "vehicles": [
+        {
+          "id": "v1",
+          "status": "INACTIVE"
+        }
+      ],
+      "reservations": [],
+      "maintenances": [
+        {
+          "vehicle_id": "v1",
+          "status": "ACTIVE",
+          "start": "2026-08-25T00:00:00Z",
+          "expected_end": null,
+          "actual_end": null
+        }
+      ],
+      "expected_effective": {
+        "v1": "INACTIVE"
+      },
+      "expected_counts": {
+        "total_vehicles": 0,
+        "available": 0,
+        "reserved": 0,
+        "rented": 0,
+        "maintenance": 0
+      },
+      "expected_next_boundary": null
+    },
+    {
+      "name": "cancelled_reservation_does_not_block",
+      "vehicles": [
+        {
+          "id": "v1",
+          "status": "AVAILABLE"
+        }
+      ],
+      "reservations": [
+        {
+          "vehicle_id": "v1",
+          "status": "CANCELLED",
+          "start": "2026-08-29T12:00:00Z",
+          "end": "2026-09-02T12:00:00Z"
+        }
+      ],
+      "maintenances": [],
+      "expected_effective": {
+        "v1": "AVAILABLE"
+      },
+      "expected_counts": {
+        "total_vehicles": 1,
+        "available": 1,
+        "reserved": 0,
+        "rented": 0,
+        "maintenance": 0
+      },
+      "expected_next_boundary": null
+    },
+    {
+      "name": "mixed_fleet_sums_to_total",
+      "vehicles": [
+        {
+          "id": "a",
+          "status": "AVAILABLE"
+        },
+        {
+          "id": "b",
+          "status": "AVAILABLE"
+        },
+        {
+          "id": "c",
+          "status": "AVAILABLE"
+        },
+        {
+          "id": "d",
+          "status": "AVAILABLE"
+        },
+        {
+          "id": "e",
+          "status": "AVAILABLE"
+        },
+        {
+          "id": "f",
+          "status": "SOLD"
+        },
+        {
+          "id": "g",
+          "status": "AVAILABLE"
+        }
+      ],
+      "reservations": [
+        {
+          "vehicle_id": "b",
+          "status": "RESERVED",
+          "start": "2026-08-30T06:00:00Z",
+          "end": "2026-09-01T06:00:00Z"
+        },
+        {
+          "vehicle_id": "c",
+          "status": "ACTIVE",
+          "start": "2026-08-30T06:00:00Z",
+          "end": "2026-09-01T06:00:00Z"
+        },
+        {
+          "vehicle_id": "e",
+          "status": "ACTIVE",
+          "start": "2026-08-30T06:00:00Z",
+          "end": "2026-09-01T06:00:00Z"
+        },
+        {
+          "vehicle_id": "g",
+          "status": "RESERVED",
+          "start": "2026-08-31T09:00:00Z",
+          "end": "2026-09-02T09:00:00Z"
+        }
+      ],
+      "maintenances": [
+        {
+          "vehicle_id": "d",
+          "status": "ACTIVE",
+          "start": "2026-08-29T00:00:00Z",
+          "expected_end": "2026-09-05T00:00:00Z",
+          "actual_end": null
+        },
+        {
+          "vehicle_id": "e",
+          "status": "ACTIVE",
+          "start": "2026-08-30T00:00:00Z",
+          "expected_end": "2026-08-31T00:00:00Z",
+          "actual_end": null
+        }
+      ],
+      "expected_effective": {
+        "a": "AVAILABLE",
+        "b": "RENTED",
+        "c": "RENTED",
+        "d": "MAINTENANCE",
+        "e": "MAINTENANCE",
+        "f": "SOLD",
+        "g": "RESERVED"
+      },
+      "expected_counts": {
+        "total_vehicles": 6,
+        "available": 1,
+        "reserved": 1,
+        "rented": 2,
+        "maintenance": 2
+      },
+      "expected_next_boundary": "2026-08-31T00:00:00Z"
+    }
+  ]
+}

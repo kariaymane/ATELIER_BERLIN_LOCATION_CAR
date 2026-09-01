@@ -31,28 +31,32 @@ class LoginWorker(QThread):
         self._password = password
 
     def run(self):
-        user_data = self._authenticate_online()
-        if user_data is not None:
-            # Cache credentials locally so future logins work offline.
-            try:
-                self._cache_credentials_locally(
-                    self._email, self._password, user_data
-                )
-            except Exception as e:
-                logger.error("Failed to cache credentials locally: %s", e)
-            self.succeeded.emit(user_data)
-            return
+        try:
+            user_data = self._authenticate_online()
+            if user_data is not None:
+                # Cache credentials locally so future logins work offline.
+                try:
+                    self._cache_credentials_locally(
+                        self._email, self._password, user_data
+                    )
+                except Exception as e:
+                    logger.error("Failed to cache credentials locally: %s", e)
+                self.succeeded.emit(user_data)
+                return
 
-        if getattr(self, '_server_rejected', False):
+            if getattr(self, '_server_rejected', False):
+                self.rejected.emit(t("login.error"))
+                return
+
+            user_data = self._authenticate_offline()
+            if user_data is not None:
+                self.succeeded.emit(user_data)
+            else:
+                # Network failed AND offline failed
+                self.rejected.emit(t("common.error_connection"))
+        except Exception as e:
+            logger.exception("Unexpected error in login worker: %s", e)
             self.rejected.emit(t("login.error"))
-            return
-
-        user_data = self._authenticate_offline()
-        if user_data is not None:
-            self.succeeded.emit(user_data)
-        else:
-            # Network failed AND offline failed
-            self.rejected.emit(t("common.error_connection"))
 
     def _cache_credentials_locally(self, email, password, user_data):
         """Securely store Argon2 hashed password and metadata in SQLite."""

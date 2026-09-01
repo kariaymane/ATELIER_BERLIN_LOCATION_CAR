@@ -33,6 +33,31 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+def _as_utc(dt):
+    """Coerce a (possibly naive) datetime to aware UTC. Naive == UTC."""
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+def _maintenance_active_now(m) -> bool:
+    """True only when maintenance ``m`` occupies the vehicle at this instant —
+    the ONLY condition under which the raw ``vehicle.status`` MAINTENANCE hold
+    may be set. A future-dated ticket returns False; the canonical effective
+    status flips it via the interval rule when the window opens."""
+    if (getattr(m, "status", None) or "").upper() in ("CANCELLED", "COMPLETED"):
+        return False
+    start = _as_utc(getattr(m, "start_datetime", None))
+    if start is None:
+        return False
+    end = _as_utc(getattr(m, "expected_end_datetime", None)
+                  or getattr(m, "actual_end_datetime", None))
+    now = datetime.now(timezone.utc)
+    return start <= now and (end is None or end > now)
+
+
 class SyncService:
     def __init__(self, session: AsyncSession):
         self._session = session
@@ -322,6 +347,8 @@ class SyncService:
             if res.version > client_version: return {"status": "conflict", "server_version": res.version}
 
             if "status" in payload: res.status = payload["status"]
+            if "cancellation_reason" in payload:
+                res.cancellation_reason = payload["cancellation_reason"]
             res.version += 1
             await self._session.flush()
             return {"status": "ok", "server_version": res.version}
@@ -349,18 +376,33 @@ class SyncService:
                 created_by=user_id
             )
             self._session.add(m)
+            await self._session.flush()
 
-            if m.status == "ACTIVE":
+            cancelled_ids: list[str] = []
+            if (m.status or "").upper() not in ("CANCELLED", "COMPLETED"):
                 v = (await self._session.execute(select(Vehicle).where(Vehicle.id == m.vehicle_id))).scalar_one_or_none()
-                if v:
+                # Raw MAINTENANCE hold ONLY for a currently-active window — a
+                # future-dated ticket must not create a second status authority
+                # that contradicts the canonical derivation (forensic P0-B).
+                if v and v.status not in ("SOLD", "INACTIVE") and _maintenance_active_now(m):
                     v.status = "MAINTENANCE"
                     v.version += 1
+                # CANONICAL: maintenance wins — cancel overlapping reservations
+                # atomically inside this savepoint.
+                from app.repositories.rental_repository import RentalRepository
+                maint_end = m.expected_end_datetime or m.actual_end_datetime  # None => open-ended (helper applies FAR_FUTURE)
+                cancelled = await RentalRepository(self._session).cancel_overlapping_reservations(
+                    m.vehicle_id, m.start_datetime, maint_end
+                )
+                cancelled_ids = [str(r.id) for r in cancelled]
 
             await self._session.flush()
-            return {"status": "ok", "server_version": m.version}
+            return {
+                "status": "ok",
+                "server_version": m.version,
+                "cancelled_reservation_ids": cancelled_ids,
+            }
         except IntegrityError as e:
-            if "Vehicle is reserved" in str(e):
-                return {"status": "conflict", "message": "Vehicle is reserved during this time"}
             return {"status": "error", "message": "Constraint violation"}
         except Exception as e:
             raise
@@ -371,20 +413,36 @@ class SyncService:
             if not m: return {"status": "error", "message": "Not found"}
             if m.version > client_version: return {"status": "conflict", "server_version": m.version}
 
+            prev_status = (m.status or "").upper()
             for field in ["step", "status", "actual_end_datetime"]:
                 if field in payload:
                     val = datetime.fromisoformat(payload[field]) if field.endswith("datetime") and payload[field] else payload[field]
                     setattr(m, field, val)
 
-            if "status" in payload and payload["status"] in ["COMPLETED", "CANCELLED"]:
+            new_status = (m.status or "").upper()
+            cancelled_ids: list[str] = []
+            if "status" in payload and new_status in ["COMPLETED", "CANCELLED"]:
                 v = (await self._session.execute(select(Vehicle).where(Vehicle.id == m.vehicle_id))).scalar_one_or_none()
                 if v and v.status == "MAINTENANCE":
                     v.status = "AVAILABLE"
                     v.version += 1
+            elif prev_status in ("CANCELLED", "COMPLETED", "SCHEDULED") and new_status not in ("CANCELLED", "COMPLETED"):
+                # Ticket (re)activated — maintenance wins.
+                v = (await self._session.execute(select(Vehicle).where(Vehicle.id == m.vehicle_id))).scalar_one_or_none()
+                # Raw MAINTENANCE hold only for a currently-active window.
+                if v and v.status not in ("SOLD", "INACTIVE") and _maintenance_active_now(m):
+                    v.status = "MAINTENANCE"
+                    v.version += 1
+                from app.repositories.rental_repository import RentalRepository
+                maint_end = m.expected_end_datetime or m.actual_end_datetime  # None => open-ended (helper applies FAR_FUTURE)
+                cancelled = await RentalRepository(self._session).cancel_overlapping_reservations(
+                    m.vehicle_id, m.start_datetime, maint_end
+                )
+                cancelled_ids = [str(r.id) for r in cancelled]
 
             m.version += 1
             await self._session.flush()
-            return {"status": "ok", "server_version": m.version}
+            return {"status": "ok", "server_version": m.version, "cancelled_reservation_ids": cancelled_ids}
         except Exception as e:
             raise
 
@@ -399,8 +457,10 @@ class SyncService:
                 phone=payload.get("phone", "").strip() if payload.get("phone") else None,
                 cin_number=payload.get("cin_number", "").strip() if payload.get("cin_number") else None,
                 identity_card_image=payload.get("identity_card_image"),
+                identity_card_image_back=payload.get("identity_card_image_back"),
                 license_number=payload.get("license_number", "").strip() if payload.get("license_number") else None,
                 driving_license_image=payload.get("driving_license_image"),
+                driving_license_image_back=payload.get("driving_license_image_back"),
                 photo_url=payload.get("photo_url"),
                 notes=payload.get("notes"),
                 status=payload.get("status", "ACTIVE"),
@@ -421,7 +481,7 @@ class SyncService:
             if client.version > client_version:
                 return {"status": "conflict", "server_version": client.version}
 
-            for field in ["first_name", "last_name", "email", "phone", "cin_number", "identity_card_image", "license_number", "driving_license_image", "photo_url", "notes", "status"]:
+            for field in ["first_name", "last_name", "email", "phone", "cin_number", "identity_card_image", "identity_card_image_back", "license_number", "driving_license_image", "driving_license_image_back", "photo_url", "notes", "status"]:
                 if field in payload and payload[field] is not None:
                     setattr(client, field, payload[field])
 
@@ -570,6 +630,10 @@ class SyncService:
                 select(Vehicle).where(Vehicle.updated_at >= since)
             )
             vehicles = result.scalars().all()
+            from app.services.fleet_status import compute_effective_statuses
+            _eff = await compute_effective_statuses(
+                self._session, vehicle_ids=[v.id for v in vehicles]
+            ) if vehicles else {}
             for v in vehicles:
                 items.append({
                     "entity_type": "vehicle",
@@ -577,6 +641,7 @@ class SyncService:
                     "operation": "UPDATE",
                     "payload": {
                         "id": str(v.id),
+                        "effective_status": _eff.get(str(v.id), v.status),
                         "registration": v.registration,
                         "vin": v.vin,
                         "brand": v.brand,
@@ -616,6 +681,7 @@ class SyncService:
                         "end_datetime": r.end_datetime.isoformat(), "daily_price": float(r.daily_price),
                         "num_days": r.num_days, "total_price": float(r.total_price), "deposit": float(r.deposit),
                         "payment_status": r.payment_status, "status": r.status,
+                        "cancellation_reason": r.cancellation_reason,
                     },
                     "version": r.version, "updated_at": r.updated_at.isoformat()
                 })
@@ -645,8 +711,10 @@ class SyncService:
                         "id": str(c.id), "first_name": c.first_name, "last_name": c.last_name,
                         "email": c.email, "phone": c.phone, "cin_number": c.cin_number,
                         "identity_card_image": c.identity_card_image,
+                        "identity_card_image_back": c.identity_card_image_back,
                         "license_number": c.license_number,
                         "driving_license_image": c.driving_license_image,
+                        "driving_license_image_back": c.driving_license_image_back,
                         "photo_url": c.photo_url, "notes": c.notes, "status": c.status,
                     },
                     "version": c.version, "updated_at": c.updated_at.isoformat()
@@ -699,9 +767,14 @@ class SyncService:
         from sqlalchemy.orm import selectinload
         v_res = await self._session.execute(select(Vehicle).options(selectinload(Vehicle.images)).order_by(Vehicle.created_at.desc()))
         vehicles = v_res.scalars().all()
+        from app.services.fleet_status import compute_effective_statuses
+        _eff = await compute_effective_statuses(
+            self._session, vehicle_ids=[v.id for v in vehicles]
+        ) if vehicles else {}
         vehicle_responses = [
             VehicleResponse(
                 id=str(v.id),
+                effective_status=_eff.get(str(v.id), v.status),
                 registration=v.registration,
                 vin=v.vin,
                 brand=v.brand,
@@ -755,6 +828,7 @@ class SyncService:
                 deposit=float(r.deposit),
                 payment_status=r.payment_status,
                 status=r.status,
+                cancellation_reason=r.cancellation_reason,
                 notes=r.notes,
                 created_at=r.created_at,
                 updated_at=r.updated_at,
@@ -831,8 +905,10 @@ class SyncService:
                 phone=c.phone,
                 cin_number=c.cin_number,
                 identity_card_image=c.identity_card_image,
+                identity_card_image_back=c.identity_card_image_back,
                 license_number=c.license_number,
                 driving_license_image=c.driving_license_image,
+                driving_license_image_back=c.driving_license_image_back,
                 photo_url=c.photo_url,
                 notes=c.notes,
                 status=c.status,
@@ -841,6 +917,23 @@ class SyncService:
                 version=c.version,
             )
             client_responses.append(c_resp)
+
+        # Monotonic authoritative revision = latest updated_at (epoch-ms UTC)
+        # across every temporally-relevant row in this snapshot. `updated_at`
+        # only ever moves forward, so this is monotonic; it lets a client
+        # distinguish "complete through revision N" from a stale/partial cache
+        # and reject applying an older snapshot over a newer one.
+        def _rev_ms(row) -> int:
+            ts = getattr(row, "updated_at", None) or getattr(row, "created_at", None)
+            if ts is None:
+                return 0
+            if ts.tzinfo is None:
+                ts = ts.replace(tzinfo=timezone.utc)
+            return int(ts.timestamp() * 1000)
+
+        revision = 0
+        for _row in (*vehicles, *rentals, *maintenances):
+            revision = max(revision, _rev_ms(_row))
 
         if user_id:
             await self._audit.create(
@@ -858,6 +951,7 @@ class SyncService:
 
         return {
             "sync_version": 1,
+            "revision": revision,
             "server_time": server_time,
             "server_id": "car-rental-server-v1",
             "api_version": "1.0.0",

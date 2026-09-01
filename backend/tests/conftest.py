@@ -17,11 +17,14 @@ from sqlalchemy.ext.asyncio import (
     async_sessionmaker,
 )
 
-# Set test environment before importing app
-if "DATABASE_URL" not in os.environ:
-    os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///:memory:"
-if "DATABASE_URL_SYNC" not in os.environ:
-    os.environ["DATABASE_URL_SYNC"] = "sqlite:///:memory:"
+# Hard safety guard: Never use inherited DATABASE_URL in tests
+# unless explicitly marked as a test database.
+env_url = os.environ.get("DATABASE_URL", "")
+if env_url and ("production" in env_url.lower() or "prod" in env_url.lower() or "fly" in env_url.lower() or "supabase" in env_url.lower()):
+    raise RuntimeError("DANGER: Tests attempted to use a production DATABASE_URL. Execution aborted.")
+
+os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///:memory:"
+os.environ["DATABASE_URL_SYNC"] = "sqlite:///:memory:"
 os.environ["JWT_SECRET"] = "test-jwt-secret-not-for-production"
 os.environ["JWT_REFRESH_SECRET"] = "test-jwt-refresh-secret-not-for-production"
 os.environ["ADMIN_PASSWORD"] = "TestAdmin123!"

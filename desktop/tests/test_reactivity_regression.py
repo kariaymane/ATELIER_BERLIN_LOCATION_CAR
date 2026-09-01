@@ -51,35 +51,46 @@ def test_gap_a_maintenance_creation_refreshes_dashboard(qapp):
     user_data = {"user_id": "u1", "role": "ADMIN", "full_name": "Admin", "access_token": "mock", "refresh_token": "mock"}
     
     session = get_local_session()
+    v_id = str(uuid.uuid4())
+    now_iso = datetime.now(timezone.utc).isoformat()
     v = LocalVehicle(
-        id=str(uuid.uuid4()), 
+        id=v_id, 
         registration="MAINT-1", 
         brand="Test", 
         model="Car", 
         vin="VINMAINT1", 
+        year=2024,
+        color="Noir",
         fuel_type="Diesel", 
         transmission="Auto",
-        status="ACTIVE"
+        status="ACTIVE",
+        created_at=now_iso,
+        updated_at=now_iso
     )
     session.add(v)
     session.commit()
     session.close()
     
     window = MainWindow(user_data=user_data)
-    
-    bus_spy = MagicMock()
-    get_event_bus().data_refreshed.connect(bus_spy)
-    
+
+    # Committed mutations now converge through DomainStore.mutate(): one
+    # mutation publishes exactly one new revision, whose fan-out refreshes the
+    # dashboard (and every other view) with no manual pulse.
+    dash_spy = MagicMock(side_effect=window._refresh_dashboard)
+    window._refresh_dashboard = dash_spy
+    rev_before = window._store.revision
+
     data = {
-        "vehicle_id": v.id,
+        "vehicle_id": v_id,
         "type": "Entretien",
         "start_datetime": datetime.now(timezone.utc).isoformat(),
         "status": "ACTIVE",
         "parts": []
     }
-    
+
     window._create_maintenance_record(data)
-    bus_spy.assert_called()
+    assert window._store.revision == rev_before + 1
+    dash_spy.assert_called()
     window.deleteLater()
 
 def test_async_race_dashboard_stats(qapp):

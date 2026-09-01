@@ -25,74 +25,55 @@ class DashboardService:
         from app.models.vehicle import Vehicle
         
         now = datetime.now(ZoneInfo('Africa/Casablanca'))
-        
-        # 1. Total active vehicles (not deleted/inactive)
-        v_res = await self._session.execute(
-            select(func.count(Vehicle.id)).where(Vehicle.status != "INACTIVE")
-        )
-        total_vehicles = v_res.scalar() or 0
-        
-        # 2. Rented vehicles (ACTIVE reservation overlapping now)
-        rented_res = await self._session.execute(
-            select(func.count(func.distinct(Reservation.vehicle_id))).where(
-                Reservation.status == "ACTIVE",
-                Reservation.start_datetime <= now,
-                Reservation.end_datetime > now
-            )
-        )
-        rented = rented_res.scalar() or 0
-        
-        # 3. Reserved vehicles (CONFIRMED/PENDING reservation overlapping now)
-        reserved_res = await self._session.execute(
-            select(func.count(func.distinct(Reservation.vehicle_id))).where(
-                Reservation.status.in_(["CONFIRMED", "PENDING"]),
-                Reservation.start_datetime <= now,
-                Reservation.end_datetime > now
-            )
-        )
-        reserved = reserved_res.scalar() or 0
-        
-        # 4. Maintenance vehicles
-        maint_res = await self._session.execute(
-            select(func.count(func.distinct(Maintenance.vehicle_id))).where(
-                Maintenance.status == "ACTIVE",
-                Maintenance.start_datetime <= now,
-                func.coalesce(Maintenance.actual_end_datetime, Maintenance.expected_end_datetime) > now
-            )
-        )
-        maintenance = maint_res.scalar() or 0
-        
-        # A vehicle cannot be rented AND in maintenance realistically, but just in case:
-        available = max(0, total_vehicles - (rented + reserved + maintenance))
-        
+
+        # CANONICAL fleet breakdown — one derivation, mutually exclusive,
+        # provably sums to total_vehicles and matches per-vehicle
+        # effective_status from /vehicles. See app/services/fleet_status.py.
+        from app.services.fleet_status import compute_fleet_counts
+        fleet = await compute_fleet_counts(self._session, now=now)
+        total_vehicles = fleet["total_vehicles"]
+        available = fleet["available"]
+        reserved = fleet["reserved"]
+        rented = fleet["rented"]
+        maintenance = fleet["maintenance"]
         vehicle_counts = {
             "AVAILABLE": available,
             "RENTED": rented,
             "RESERVED": reserved,
-            "MAINTENANCE": maintenance
+            "MAINTENANCE": maintenance,
         }
 
         rental_counts = await self._rental_repo.count_by_status()
-        today_rentals = await self._rental_repo.get_today_rentals()
-        today_returns = await self._rental_repo.get_today_returns()
 
-        # Count active maintenance tickets
-        m_res = await self._session.execute(
-            select(func.count(Maintenance.id)).where(Maintenance.status == "ACTIVE")
-        )
-        active_maintenances = m_res.scalar() or 0
+        # The dashboard shows ONE maintenance number everywhere: vehicles
+        # currently occupied by maintenance (== the fleet card). No second,
+        # differently-computed "open tickets" figure that could contradict it.
+        active_maintenances = maintenance
 
         today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-
         today_end = today_start + timedelta(days=1)
-        today_revenue = await self._rental_repo.get_revenue_between(today_start, today_end)
+        
+        today_rentals = await self._rental_repo.count_rentals_between(today_start, today_end)
+        today_revenue = await self._rental_repo.get_revenue_between(today_start, today_end, now=now)
+        
+        # today_returns: any real (non-cancelled) rental ending today. A
+        # RESERVED reservation counts exactly like ACTIVE once it has covered
+        # `now` — see app/services/fleet_status.py's time-derived rule.
+        tr_res = await self._session.execute(
+            select(func.count(Reservation.id)).where(
+                Reservation.status != "CANCELLED",
+                Reservation.end_datetime >= today_start,
+                Reservation.end_datetime < today_end
+            )
+        )
+        today_returns = tr_res.scalar() or 0
 
         week_start = (now - timedelta(days=now.weekday())).replace(
             hour=0, minute=0, second=0, microsecond=0
         )
         week_end = week_start + timedelta(weeks=1)
         week_rentals = await self._rental_repo.count_rentals_between(week_start, week_end)
-        week_revenue = await self._rental_repo.get_revenue_between(week_start, week_end)
+        week_revenue = await self._rental_repo.get_revenue_between(week_start, week_end, now=now)
 
         month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
         if now.month == 12:
@@ -100,9 +81,7 @@ class DashboardService:
         else:
             month_end = month_start.replace(month=now.month + 1)
         month_rentals = await self._rental_repo.count_rentals_between(month_start, month_end)
-        month_revenue = await self._rental_repo.get_revenue_between(month_start, month_end)
-
-        total_vehicles = sum(vehicle_counts.values())
+        month_revenue = await self._rental_repo.get_revenue_between(month_start, month_end, now=now)
 
         return {
             "total_vehicles": total_vehicles,
@@ -113,8 +92,8 @@ class DashboardService:
             "active_rentals": rental_counts.get("ACTIVE", 0),
             "reserved_rentals": rental_counts.get("RESERVED", 0),
             "active_maintenance_tickets": active_maintenances,
-            "today_rentals": len(today_rentals),
-            "today_returns": len(today_returns),
+            "today_rentals": today_rentals,
+            "today_returns": today_returns,
             "today_revenue": today_revenue,
             "week_rentals": week_rentals,
             "week_revenue": week_revenue,
@@ -149,7 +128,7 @@ class DashboardService:
 
         rentals = await self._rental_repo.count_rentals_between(start, end)
         days = await self._rental_repo.sum_days_between(start, end)
-        revenue = await self._rental_repo.get_revenue_between(start, end)
+        revenue = await self._rental_repo.get_revenue_between(start, end, now=now)
 
         return {
             "period": period,

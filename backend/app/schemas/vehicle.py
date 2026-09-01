@@ -93,6 +93,10 @@ class VehicleResponse(BaseModel):
     daily_rental_price: float
     purchase_date: Optional[date]
     status: str
+    # Structural status is `status`. `effective_status` is the DERIVED
+    # right-now state (SOLD/INACTIVE > MAINTENANCE > RENTED > RESERVED >
+    # AVAILABLE) — the single value every list/dashboard/mobile screen shows.
+    effective_status: Optional[str] = None
     notes: Optional[str]
     assurance_expiry: Optional[date] = None
     vignette_expiry: Optional[date] = None

@@ -314,7 +314,6 @@ class VehicleDetailModal(QDialog):
                 """)
 
     def _set_main_pixmap(self, pixmap: QPixmap):
-        print('INSIDE SET MAIN PIXMAP')
         """Scale and set the pixmap on the main photo label with rounded corners."""
         target_size = self._main_photo.size()
         scaled = pixmap.scaled(
@@ -771,7 +770,13 @@ class VehicleRow(QFrame):
                 fresh_data = {
                     "id": v.id, "brand": v.brand, "model": v.model, "year": v.year,
                     "color": v.color, "current_mileage": v.current_mileage, "fuel_type": v.fuel_type,
-                    "transmission": v.transmission, "status": v.status,
+                    "transmission": v.transmission,
+                    # EFFECTIVE status only — the canonical value already carried
+                    # by the DomainStore-backed row (self._data). Never re-read
+                    # the raw ``v.status`` column here: it can hold a MAINTENANCE
+                    # hint set ahead of the maintenance window and would
+                    # contradict the Vehicles list badge and the Dashboard.
+                    "status": self._data.get("status", v.status),
                     "daily_rental_price": v.daily_rental_price,
                     "image_url": getattr(v, "image_url", None),
                     "registration_number": getattr(v, "registration_number", None),
@@ -784,10 +789,7 @@ class VehicleRow(QFrame):
         modal.exec()
 
     def _on_image_loaded(self, url: str, pixmap: QPixmap):
-        print(f"VehicleRow._on_image_loaded called for {url}")
-        print("current url:", getattr(self, "_current_img_url", None))
         if getattr(self, "_current_img_url", None) == url and not pixmap.isNull():
-            print("ENTERING IF BLOCK")
             target_size = self._thumb.size()
             scaled = pixmap.scaled(
                 target_size,

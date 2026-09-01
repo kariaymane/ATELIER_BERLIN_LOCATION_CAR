@@ -100,31 +100,25 @@ class MaintenancePart(Base, TimestampMixin):
     maintenance = relationship("Maintenance", back_populates="parts")
 
 
-# Cross-table trigger for Reservation vs Maintenance overlap
+# Cross-table guard: a NEW reservation may not be created/updated onto a
+# vehicle that already has an overlapping active maintenance period.
+#
+# NOTE (canonical rule, 2026-08): maintenance WINS over reservations. Creating
+# an active maintenance that overlaps an existing reservation does NOT raise —
+# the application layer (maintenance API + sync service) atomically cancels the
+# conflicting reservation with cancellation_reason='MAINTENANCE'. Therefore only
+# the reservation-side trigger remains; the old trg_check_overlap_maint (which
+# rejected the maintenance) has been removed. See migration
+# g2b3c4d5e6f7_reservation_cancellation_reason_and_maintenance_wins.
 _create_overlap_triggers = DDL("""
     DO $$
     BEGIN
         CREATE OR REPLACE FUNCTION check_reservation_maintenance_overlap()
         RETURNS TRIGGER AS $func$
         DECLARE
-            overlapping_res UUID;
             overlapping_maint UUID;
         BEGIN
-            -- If inserting/updating a maintenance record
-            IF TG_TABLE_NAME = 'maintenances' AND NEW.status NOT IN ('COMPLETED', 'CANCELLED') THEN
-                SELECT id INTO overlapping_res FROM reservations
-                WHERE vehicle_id = NEW.vehicle_id
-                AND status NOT IN ('CANCELLED', 'COMPLETED')
-                AND tstzrange(start_datetime, end_datetime, '[)') &&
-                    tstzrange(NEW.start_datetime, COALESCE(NEW.expected_end_datetime, NEW.actual_end_datetime, NEW.start_datetime + interval '1 day'), '[)')
-                LIMIT 1;
-
-                IF overlapping_res IS NOT NULL THEN
-                    RAISE EXCEPTION 'Vehicle is reserved during this maintenance period';
-                END IF;
-
-            -- If inserting/updating a reservation record
-            ELSIF TG_TABLE_NAME = 'reservations' AND NEW.status NOT IN ('CANCELLED', 'COMPLETED') THEN
+            IF NEW.status NOT IN ('CANCELLED', 'COMPLETED') THEN
                 SELECT id INTO overlapping_maint FROM maintenances
                 WHERE vehicle_id = NEW.vehicle_id
                 AND status NOT IN ('CANCELLED', 'COMPLETED')
@@ -142,9 +136,6 @@ _create_overlap_triggers = DDL("""
         $func$ LANGUAGE plpgsql;
 
         DROP TRIGGER IF EXISTS trg_check_overlap_maint ON maintenances;
-        CREATE TRIGGER trg_check_overlap_maint
-        BEFORE INSERT OR UPDATE ON maintenances
-        FOR EACH ROW EXECUTE FUNCTION check_reservation_maintenance_overlap();
 
         DROP TRIGGER IF EXISTS trg_check_overlap_res ON reservations;
         CREATE TRIGGER trg_check_overlap_res

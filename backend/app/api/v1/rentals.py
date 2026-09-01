@@ -51,6 +51,7 @@ def _rental_response(r, vehicle=None) -> RentalResponse:
         deposit=float(r.deposit),
         payment_status=r.payment_status,
         status=r.status,
+        cancellation_reason=getattr(r, "cancellation_reason", None),
         notes=r.notes,
         created_at=r.created_at,
         updated_at=r.updated_at,

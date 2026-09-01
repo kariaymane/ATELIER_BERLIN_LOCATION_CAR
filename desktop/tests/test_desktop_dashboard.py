@@ -1,7 +1,9 @@
 import pytest
 import sys
 import os
+from datetime import datetime, timedelta, timezone
 os.environ["QT_QPA_PLATFORM"] = "offscreen"
+os.environ.setdefault("CAR_RENTAL_DB_RESET", "1")
 from PySide6.QtWidgets import QApplication
 
 from app.ui.dashboard import DashboardWidget, OperationalStatCard, ExecutiveFleetCard
@@ -70,3 +72,55 @@ def test_dashboard_initialization_and_periods(qapp):
     # Test live retranslation
     widget.retranslate_ui()
     assert widget._period_combo.count() == 3
+
+
+def test_vehicules_en_location_is_two_over_five(qapp):
+    """USER SCENARIO: 5 total vehicles, 2 reservations covering now (both still
+    stored as RESERVED) -> the 'Véhicules en location' card must read 2 / 5.
+    Future / cancelled / ended reservations must NOT inflate the numerator.
+    """
+    from app.database import get_local_session, init_local_db
+    from app.models.vehicle import LocalVehicle
+    from app.models.reservation import LocalReservation
+    from app.sync.dashboard_cache import compute_local_overview
+
+    init_local_db()
+    s = get_local_session()
+    now = datetime.now(timezone.utc)
+    for i in range(5):
+        s.add(LocalVehicle(
+            id=f"envloc-v{i}", registration=f"EL-{i}", vin=f"EL{i}0000000000000",
+            brand="B", model="M", year=2024, color="N", fuel_type="D",
+            transmission="M", status="AVAILABLE", daily_rental_price=100,
+            created_at=now.isoformat(), updated_at=now.isoformat(), version=1))
+
+    def _res(rid, vid, start, end, status="RESERVED"):
+        s.add(LocalReservation(
+            id=rid, vehicle_id=vid, customer_name="X",
+            start_datetime=start.isoformat(), end_datetime=end.isoformat(),
+            daily_price=100, num_days=1, total_price=500, deposit=0, status=status,
+            created_at=now.isoformat(), updated_at=now.isoformat(), version=1))
+
+    # 2 covering now, still RESERVED status
+    _res("r0", "envloc-v0", now - timedelta(days=1), now + timedelta(days=2))
+    _res("r1", "envloc-v1", now - timedelta(hours=2), now + timedelta(days=1))
+    # future -> RESERVED bucket, NOT en location
+    _res("r2", "envloc-v2", now + timedelta(days=3), now + timedelta(days=5))
+    # ended -> nothing
+    _res("r3", "envloc-v3", now - timedelta(days=5), now - timedelta(days=1))
+    # cancelled covering now -> nothing
+    _res("r4", "envloc-v4", now - timedelta(days=1), now + timedelta(days=2), status="CANCELLED")
+    s.commit(); s.close()
+
+    ov = compute_local_overview()
+    assert ov["total_vehicles"] == 5
+    assert ov["rented"] == 2
+    assert ov["reserved"] == 1          # only the future one
+    assert ov["available"] == 2         # ended + cancelled vehicles are free
+
+    widget = DashboardWidget()
+    widget.refresh_data(ov, [])
+    total = ov["available"] + ov["rented"] + ov["reserved"] + ov["maintenance"]
+    assert total == 5
+    assert widget._card_rented._count_lbl.text() == "2"
+    assert widget._card_rented._ratio_lbl.text() == "2/5"

@@ -105,7 +105,9 @@ fun AtelierBerlinApp(viewModel: FleetViewModel) {
         viewModel.navigateBack()
     }
 
-    if (userSession == null || currentScreen is Screen.Auth) {
+    if (currentScreen is Screen.Splash) {
+        SplashScaffold()
+    } else if (userSession == null || currentScreen is Screen.Auth) {
         AuthScreen(
             viewModel = viewModel,
             onLoginSuccess = { /* Navigation handled in ViewModel */ }
@@ -200,6 +202,38 @@ fun AtelierBerlinApp(viewModel: FleetViewModel) {
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun SplashScaffold() {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(ExecutiveBackground),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Image(
+                painter = painterResource(id = R.drawable.logo_transparent_officiel),
+                contentDescription = "ATELIER BERLIN LOCATION CAR Logo",
+                contentScale = androidx.compose.ui.layout.ContentScale.Fit,
+                modifier = Modifier.width(320.dp)
+            )
+            Spacer(modifier = Modifier.height(18.dp))
+            Text(
+                text = "ATELIER BERLIN LOCATION CAR",
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Bold,
+                color = androidx.compose.ui.graphics.Color(0xFF1E4D38)
+            )
+            Spacer(modifier = Modifier.height(28.dp))
+            CircularProgressIndicator(
+                color = ExecutiveGold,
+                modifier = Modifier.size(30.dp),
+                strokeWidth = 3.dp
+            )
         }
     }
 }

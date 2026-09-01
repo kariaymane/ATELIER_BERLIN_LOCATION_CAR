@@ -11,6 +11,7 @@ from app.models.vehicle import LocalVehicle
 from app.models.reservation import LocalReservation
 from app.models.maintenance import LocalMaintenance
 from app.database import get_local_session, init_local_db
+from app.state.domain_store import get_domain_store
 
 @pytest.fixture(autouse=True)
 def clean_db():
@@ -60,7 +61,9 @@ def test_reservation_overlap_excludes_vehicle(qapp):
     db_session.add(r)
     db_session.commit()
 
-    # 2. Init Widget
+    # 2. Init Widget — the grid renders from the canonical DomainStore
+    # snapshot; prime it from the seeded DB (startup / fan-out does this live).
+    get_domain_store().reload()
     widget = ReservationWidget(device_id="test-dev", user_id="test-user")
     qapp.processEvents()
 
@@ -114,6 +117,9 @@ def test_maintenance_overlap_excludes_vehicle(qapp):
     db_session.add(m)
     db_session.commit()
 
+    # The reservations widget renders from the canonical DomainStore snapshot;
+    # prime it from the seeded DB (a live app does this on startup / fan-out).
+    get_domain_store().reload()
     widget = ReservationWidget(device_id="test-dev", user_id="test-user")
     qapp.processEvents()
 
@@ -144,7 +150,13 @@ def test_exact_boundary_allows_vehicle(qapp):
     )
     db_session.add(v)
     
-    now = datetime.now(timezone.utc)
+    # Real reservations are persisted from a QDateTimeEdit (millisecond
+    # resolution at best); the availability request comes from the same
+    # QDateTime path. Use a whole-second instant so the stored end and the
+    # requested start describe the *same* boundary — a synthetic microsecond
+    # tail here would make the QDateTime-truncated request land ~0.5 ms early
+    # and read as a spurious overlap.
+    now = datetime.now(timezone.utc).replace(microsecond=0)
     res_start = now + timedelta(days=1)
     res_end = now + timedelta(days=3)
     
@@ -164,6 +176,9 @@ def test_exact_boundary_allows_vehicle(qapp):
     db_session.add(r)
     db_session.commit()
 
+    # The reservations widget renders from the canonical DomainStore snapshot;
+    # prime it from the seeded DB (a live app does this on startup / fan-out).
+    get_domain_store().reload()
     widget = ReservationWidget(device_id="test-dev", user_id="test-user")
     qapp.processEvents()
 

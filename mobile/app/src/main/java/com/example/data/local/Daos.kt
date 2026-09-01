@@ -112,6 +112,11 @@ interface SyncMetadataDao {
     @Query("SELECT value FROM sync_metadata WHERE `key` = :key")
     suspend fun getValue(key: String): String?
 
+    /** Reactive variant — emits on every write to `key` (used to publish the
+     *  temporal-cache-completeness flag to observers). */
+    @Query("SELECT value FROM sync_metadata WHERE `key` = :key")
+    fun observeValue(key: String): Flow<String?>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun setValue(metadata: SyncMetadataEntity)
 

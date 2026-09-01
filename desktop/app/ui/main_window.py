@@ -18,6 +18,8 @@ from PySide6.QtGui import QFont, QAction
 
 from app.i18n import t, is_rtl, set_language, load_translations, get_language
 from app.services.event_bus import get_event_bus
+from app.state.domain_store import get_domain_store
+from app.state.boundary_clock import BoundaryClock
 from app.config import (
     API_BASE_URL, THEMES, DEFAULT_THEME, get_saved_theme, save_theme,
     get_saved_language, save_language, SYNC_INTERVAL_SECONDS
@@ -157,6 +159,15 @@ class MainWindow(QMainWindow):
         self._api = ApiClient(API_BASE_URL)
         self._api.set_tokens(self._access_token, self._refresh_token)
 
+        # Canonical local domain-state layer. Every main view renders FROM this
+        # snapshot; none derives a competing global state. (Increment 2)
+        self._store = get_domain_store()
+        self._store_unsub = self._store.subscribe(self._on_domain_changed)
+
+        # ONE temporal mechanism: recompute + republish at each reservation /
+        # maintenance interval boundary, with no user action. (Increment 3)
+        self._boundary_clock = BoundaryClock(self._store)
+
         self._setup_ui()
         self._apply_theme(self._current_theme)
 
@@ -174,10 +185,21 @@ class MainWindow(QMainWindow):
         self._sync_timer.timeout.connect(self._run_sync)
         self._sync_timer.start(SYNC_INTERVAL_SECONDS * 1000)
 
+        # Start the temporal clock — it subscribes to the store and arms one
+        # single-shot timer for the next reservation/maintenance boundary.
+        try:
+            self._boundary_clock.start()
+        except Exception as e:
+            logger.debug("BoundaryClock start: %s", e)
+
         # Initial data load
         QTimer.singleShot(100, self._initial_load)
-        
-        # Connect to global event bus
+
+        # Legacy pulse -> canonical store reload. `data_refreshed` is retained
+        # only as a trigger (mutation handlers, background sync/uploads,
+        # existing regression tests). It no longer fans out views by hand;
+        # `DomainStore.reload()` publishes a revisioned snapshot and the
+        # subscriber `_on_domain_changed` performs the isolated fan-out.
         get_event_bus().data_refreshed.connect(self._on_global_data_refreshed)
 
     def _on_realtime_event(self, event: dict):
@@ -370,6 +392,9 @@ class MainWindow(QMainWindow):
         self._current_page_key = page_key
         self._sidebar._set_active(page_key)
 
+        # Every entrypoint below publishes a fresh revision through the store
+        # before rendering, so a tab visit always shows current truth even if
+        # an earlier fan-out to that view had failed (self-heal).
         if page_key == "vehicles":
             self._load_vehicles_from_local()
         elif page_key == "dashboard":
@@ -458,109 +483,59 @@ class MainWindow(QMainWindow):
     # ──── Data Loading ────
 
     def _initial_load(self):
-        get_event_bus().data_refreshed.emit()
+        # Prime the canonical snapshot, then sync. The reload publishes to every
+        # subscribed view; no per-view kick-off needed.
+        self._store.reload()
         self._run_sync()
 
     def _load_vehicles_from_local(self):
-        session = get_local_session()
+        """Render the Vehicles page FROM the canonical snapshot.
+
+        Called both as a direct entrypoint (tab switch, tests) and from the
+        domain fan-out. As a direct entrypoint it asks the store to publish a
+        fresh revision first; that reload's fan-out re-enters this method to do
+        the actual render, so the outer call then returns without
+        double-rendering. When reached from the fan-out, reload() is a
+        re-entrant no-op and this method renders directly. Either way the
+        snapshot already carries each vehicle's canonical EFFECTIVE status
+        (app.utils.fleet_status) — identical to the Dashboard and the backend.
+        This method never queries SQLite or re-derives status itself.
+        """
         try:
-            vehicles = session.query(LocalVehicle).all()
-            
-            # Compute effective status based on active reservations and maintenance
-            from datetime import datetime, timezone
-            from app.models.reservation import LocalReservation
-            from app.models.maintenance import LocalMaintenance
-            from app.utils.datetime_utils import parse_datetime_utc
-            
-            now = datetime.now(timezone.utc)
-            
-            # Load active overlaps
-            rented_vids = set()
-            reserved_vids = set()
-            for r in session.query(LocalReservation).filter(LocalReservation.status != "CANCELLED").all():
-                r_start = parse_datetime_utc(r.start_datetime)
-                r_end = parse_datetime_utc(r.end_datetime)
-                if r_start and r_end and r_start <= now < r_end:
-                    st = (r.status or "").upper()
-                    if st == "ACTIVE":
-                        rented_vids.add(r.vehicle_id)
-                    elif st == "RESERVED":
-                        reserved_vids.add(r.vehicle_id)
-                        
-            maintenance_vids = set()
-            for m in session.query(LocalMaintenance).filter(LocalMaintenance.status == "ACTIVE").all():
-                m_start = parse_datetime_utc(m.start_datetime)
-                m_end = parse_datetime_utc(getattr(m, 'actual_end_datetime', None) or m.expected_end_datetime)
-                if m_start and m_end and m_start <= now < m_end:
-                    maintenance_vids.add(m.vehicle_id)
-            
-            vehicle_dicts = []
-            for v in vehicles:
-                try:
-                    images_list = [img.image_url for img in v.images] if hasattr(v, 'images') else []
-                except Exception as e:
-                    images_list = []
-                    print("Error getting images:", e)
-
-                # Determine effective status
-                effective_status = v.status
-                if effective_status not in ("SOLD", "INACTIVE"):
-                    if v.id in maintenance_vids:
-                        effective_status = "MAINTENANCE"
-                    elif v.id in rented_vids:
-                        effective_status = "RENTED"
-                    elif v.id in reserved_vids:
-                        effective_status = "RESERVED"
-
-                vehicle_dicts.append({
-                    "id": v.id,
-                    "registration": v.registration,
-                    "vin": v.vin,
-                    "brand": v.brand,
-                    "model": v.model,
-                    "year": v.year,
-                    "color": v.color,
-                    "fuel_type": v.fuel_type,
-                    "transmission": v.transmission,
-                    "current_mileage": v.current_mileage,
-                    "purchase_mileage": v.purchase_mileage,
-                    "purchase_price": v.purchase_price,
-                    "daily_rental_price": v.daily_rental_price,
-                    "status": effective_status,
-                    "image_url": v.image_url,
-                    "images": images_list,
-                    "assurance_expiry": v.assurance_expiry,
-                    "vignette_expiry": v.vignette_expiry,
-                    "visite_technique_expiry": v.visite_technique_expiry,
-                    "carte_grise_expiry": v.carte_grise_expiry,
-                    "autres_label": v.autres_label,
-                    "autres_expiry": v.autres_expiry,
-                    "notes": v.notes,
-                })
-            self._vehicle_list.load_vehicles(vehicle_dicts)
+            rev_before = self._store.revision
+            self._store.reload()
+            if self._store.revision != rev_before:
+                return  # reload() published a new revision; the fan-out already rendered
+            vehicles = [dict(v) for v in self._store.snapshot.vehicles]
+            self._vehicle_list.load_vehicles(vehicles)
         except Exception as e:
-            logger.error("Failed to load vehicles from local db: %s", e)
-        finally:
-            session.close()
+            logger.error("Failed to render vehicles from domain snapshot: %s", e, exc_info=True)
 
     def _refresh_dashboard(self, fetch_server: bool = False):
         """Render instantly from local data, then refresh via API in background.
 
         Never performs network I/O on the UI thread. The offline snapshot uses
-        EXACTLY the backend canonical rule (status ACTIVE+COMPLETED, start in
-        [start, end), Africa/Casablanca) so cached values never contradict the
-        server. On transient API errors the last known server values win.
+        EXACTLY the backend canonical rule (time-derived: a reservation whose
+        window covers now is "en location" whatever its RESERVED/ACTIVE status;
+        revenue = non-cancelled, started, start in [period_start, period_end),
+        Africa/Casablanca) so cached values never contradict the server. On
+        transient API errors the last known server values win.
         """
+        rev_before = self._store.revision
         try:
-            from app.sync.dashboard_cache import compute_local_overview
-            overview = compute_local_overview()
-            # Keep previously fetched server revenue when offline values are
-            # unavailable (e.g. no cached reservations yet).
-            prev = getattr(self, "_last_server_overview", None) or {}
-            for key in ("today_revenue", "week_revenue", "month_revenue"):
-                if overview.get(key) is None:
-                    overview[key] = prev.get(key, 0.0)
-            self._dashboard.refresh_data(overview, getattr(self, "_last_server_top_vehicles", []))
+            self._store.reload()
+            reentrant_render_done = self._store.revision != rev_before
+            if not reentrant_render_done:
+                # We are inside the fan-out (or nothing changed): render now.
+                overview = dict(self._store.snapshot.overview or {})
+                prev = getattr(self, "_last_server_overview", None) or {}
+                for key in ("today_revenue", "week_revenue", "month_revenue"):
+                    if overview.get(key) is None:
+                        overview[key] = prev.get(key, 0.0)
+                self._dashboard.refresh_data(
+                    overview, getattr(self, "_last_server_top_vehicles", []))
+            elif not fetch_server:
+                return  # reload()'s fan-out already re-rendered the dashboard
         except Exception as e:
             logger.error("Local dashboard snapshot failed: %s", e)
 
@@ -699,13 +674,40 @@ class MainWindow(QMainWindow):
     def _save_vehicle(self, data: dict):
         self._create_vehicle(data)
 
-    def _create_vehicle(self, data: dict):
+    def _register_vehicle_image_uploads(self, vehicle_id: str, data: dict):
+        """Register durable pending-upload records for offline images.
+
+        Runs on its own session AFTER the entity is safely persisted —
+        ``register_pending_upload`` self-commits, so it cannot participate in
+        the ``DomainStore.mutate()`` transaction.
+        """
+        from app.sync.uploads import register_pending_upload
+        markers = set()
+        if (data.get("image_url") or "").startswith("pending_uploads/"):
+            markers.add(data["image_url"])
+        for u in data.get("images") or []:
+            if str(u).startswith("pending_uploads/"):
+                markers.add(str(u))
+        if not markers:
+            return
         session = get_local_session()
         try:
-            vehicle_id = data.get("id") or str(uuid.uuid4())
-            data["id"] = vehicle_id
-            now_iso = datetime.now(timezone.utc).isoformat()
+            for marker in markers:
+                register_pending_upload(
+                    session, marker=marker, entity_type="vehicle",
+                    entity_id=vehicle_id, upload_type="VEHICLE_IMAGE",
+                    remote_endpoint="/api/v1/vehicles/upload-image",
+                    field_name="image_url",
+                )
+        finally:
+            session.close()
 
+    def _create_vehicle(self, data: dict):
+        vehicle_id = data.get("id") or str(uuid.uuid4())
+        data["id"] = vehicle_id
+        now_iso = datetime.now(timezone.utc).isoformat()
+
+        def _apply(session):
             v = LocalVehicle(
                 id=vehicle_id,
                 registration=data["registration"],
@@ -734,47 +736,28 @@ class MainWindow(QMainWindow):
                 version=1
             )
             session.add(v)
-
             from app.sync.queue import SyncQueue
-            queue = SyncQueue(session, self._device_id, self._user_data.get("user_id"))
-            queue.enqueue("vehicle", vehicle_id, "CREATE", data)
+            SyncQueue(session, self._device_id, self._user_data.get("user_id")).enqueue(
+                "vehicle", vehicle_id, "CREATE", data)
 
-            # Register durable pending-upload records for offline images.
-            from app.sync.uploads import register_pending_upload
-            markers = set()
-            if (data.get("image_url") or "").startswith("pending_uploads/"):
-                markers.add(data["image_url"])
-            for u in data.get("images") or []:
-                if str(u).startswith("pending_uploads/"):
-                    markers.add(str(u))
-            for marker in markers:
-                register_pending_upload(
-                    session,
-                    marker=marker,
-                    entity_type="vehicle",
-                    entity_id=vehicle_id,
-                    upload_type="VEHICLE_IMAGE",
-                    remote_endpoint="/api/v1/vehicles/upload-image",
-                    field_name="image_url",
-                )
-
-            session.commit()
-            get_event_bus().data_refreshed.emit()
-            self._run_sync()
-            self.statusBar().showMessage(t("vehicles.form_success_create"), 3000)
+        # Canonical write path: one transaction → store reload → every view
+        # converges. On failure: rollback, NO publish, visible error.
+        try:
+            self._store.mutate(_apply)
         except Exception as e:
-            session.rollback()
+            logger.error("Erreur lors de l'ajout du véhicule: %s", e, exc_info=True)
             QMessageBox.critical(self, t("common.error"), f"Erreur lors de l'ajout: {e}")
-        except Exception as e:
-            print("ERROR IN LOAD:", e)
-        finally:
-            session.close()
+            return
+        self._register_vehicle_image_uploads(vehicle_id, data)
+        self._run_sync()
+        self.statusBar().showMessage(t("vehicles.form_success_create"), 3000)
 
     def _on_edit_vehicle(self, vehicle_id: str):
         from app.ui.vehicles.vehicle_hover_preview import get_hover_preview
         get_hover_preview().hide_preview()
 
         session = get_local_session()
+        v_data = None
         try:
             v = session.query(LocalVehicle).filter_by(id=vehicle_id).first()
             if not v:
@@ -805,23 +788,27 @@ class MainWindow(QMainWindow):
                 "notes": v.notes,
             }
         except Exception as e:
-            print("ERROR IN LOAD:", e)
+            logger.error("Failed to load vehicle %s for edit: %s", vehicle_id, e, exc_info=True)
         finally:
             session.close()
+
+        if v_data is None:
+            QMessageBox.critical(self, t("common.error"),
+                                 "Impossible de charger ce véhicule. Consultez les journaux.")
+            return
 
         dialog = VehicleFormDialog(vehicle_data=v_data, api_client=self._api, parent=self)
         dialog.saved.connect(self._update_vehicle)
         dialog.exec()
 
     def _update_vehicle(self, data: dict):
-        session = get_local_session()
-        try:
-            vehicle_id = data.get("id")
+        vehicle_id = data.get("id")
+        now_iso = datetime.now(timezone.utc).isoformat()
+
+        def _apply(session):
             v = session.query(LocalVehicle).filter_by(id=vehicle_id).first()
             if not v:
                 return
-
-            now_iso = datetime.now(timezone.utc).isoformat()
             v.registration = data["registration"]
             v.brand = data["brand"]
             v.model = data["model"]
@@ -851,34 +838,12 @@ class MainWindow(QMainWindow):
             v.version += 1
 
             from app.sync.queue import SyncQueue
-            queue = SyncQueue(session, self._device_id, self._user_data.get("user_id"))
-            queue.enqueue("vehicle", vehicle_id, "UPDATE", data)
+            SyncQueue(session, self._device_id, self._user_data.get("user_id")).enqueue(
+                "vehicle", vehicle_id, "UPDATE", data)
 
-            # Register durable pending-upload records for offline images.
-            from app.sync.uploads import register_pending_upload
-            markers = set()
-            if (data.get("image_url") or "").startswith("pending_uploads/"):
-                markers.add(data["image_url"])
-            for u in data.get("images") or []:
-                if str(u).startswith("pending_uploads/"):
-                    markers.add(str(u))
-            for marker in markers:
-                register_pending_upload(
-                    session,
-                    marker=marker,
-                    entity_type="vehicle",
-                    entity_id=vehicle_id,
-                    upload_type="VEHICLE_IMAGE",
-                    remote_endpoint="/api/v1/vehicles/upload-image",
-                    field_name="image_url",
-                )
-
-            session.commit()
-            get_event_bus().data_refreshed.emit()
-            self._run_sync()
-            self.statusBar().showMessage(t("vehicles.form_success_edit"), 3000)
+        try:
+            self._store.mutate(_apply)
         except Exception as e:
-            session.rollback()
             logger.error("Erreur lors de la modification: %s", e, exc_info=True)
             error_msg = str(e).lower()
             if "readonly database" in error_msg:
@@ -886,37 +851,44 @@ class MainWindow(QMainWindow):
             else:
                 user_msg = f"Une erreur technique est survenue lors de la modification. Consultez les journaux pour plus de détails."
             QMessageBox.critical(self, t("common.error"), user_msg)
-        except Exception as e:
-            print("ERROR IN LOAD:", e)
-        finally:
-            session.close()
+            return
+        self._register_vehicle_image_uploads(vehicle_id, data)
+        self._run_sync()
+        self.statusBar().showMessage(t("vehicles.form_success_edit"), 3000)
 
     def _on_delete_vehicle(self, vehicle_id: str):
-        session = get_local_session()
+        # Read-only lookup for the confirm dialog text (own short-lived session).
+        rs = get_local_session()
         try:
+            v = rs.query(LocalVehicle).filter_by(id=vehicle_id).first()
+            if not v:
+                return
+            registration = v.registration
+        finally:
+            rs.close()
+
+        reply = QMessageBox.question(
+            self,
+            t("vehicles.confirm_delete_title"),
+            t("vehicles.confirm_delete_msg", reg=registration),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        def _apply(session):
             v = session.query(LocalVehicle).filter_by(id=vehicle_id).first()
             if not v:
                 return
+            from app.sync.queue import SyncQueue
+            SyncQueue(session, self._device_id, self._user_data.get("user_id")).enqueue(
+                "vehicle", vehicle_id, "DELETE", {"id": vehicle_id})
+            session.delete(v)
 
-            reply = QMessageBox.question(
-                self,
-                t("vehicles.confirm_delete_title"),
-                t("vehicles.confirm_delete_msg", reg=v.registration),
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.No
-            )
-
-            if reply == QMessageBox.StandardButton.Yes:
-                from app.sync.queue import SyncQueue
-                queue = SyncQueue(session, self._device_id, self._user_data.get("user_id"))
-                queue.enqueue("vehicle", vehicle_id, "DELETE", {"id": vehicle_id})
-
-                session.delete(v)
-                session.commit()
-                get_event_bus().data_refreshed.emit()
-                self._run_sync()
+        try:
+            self._store.mutate(_apply)
         except Exception as e:
-            session.rollback()
             logger.error("Erreur lors de la suppression: %s", e, exc_info=True)
             error_msg = str(e).lower()
             if "readonly database" in error_msg:
@@ -924,13 +896,12 @@ class MainWindow(QMainWindow):
             else:
                 user_msg = f"Une erreur technique est survenue lors de la suppression. Consultez les journaux pour plus de détails."
             QMessageBox.critical(self, t("common.error"), user_msg)
-        except Exception as e:
-            print("ERROR IN LOAD:", e)
-        finally:
-            session.close()
+            return
+        self._run_sync()
 
     def _on_maintenance_requested(self, vehicle_id: str):
         session = get_local_session()
+        v_dict = None
         try:
             v = session.query(LocalVehicle).filter_by(id=vehicle_id).first()
             if not v:
@@ -942,9 +913,14 @@ class MainWindow(QMainWindow):
                 "registration": v.registration
             }
         except Exception as e:
-            print("ERROR IN LOAD:", e)
+            logger.error("Failed to load vehicle %s for maintenance: %s", vehicle_id, e, exc_info=True)
         finally:
             session.close()
+
+        if v_dict is None:
+            QMessageBox.critical(self, t("common.error"),
+                                 "Impossible de charger ce véhicule. Consultez les journaux.")
+            return
 
         from app.ui.maintenance.maintenance_list import MaintenanceFormDialog
         dialog = MaintenanceFormDialog(v_dict, self)
@@ -955,11 +931,12 @@ class MainWindow(QMainWindow):
         self._create_maintenance_record(data)
 
     def _create_maintenance_record(self, data: dict):
-        session = get_local_session()
-        try:
-            m_id = str(uuid.uuid4())
-            now_iso = datetime.now(timezone.utc).isoformat()
+        m_id = str(uuid.uuid4())
+        now_iso = datetime.now(timezone.utc).isoformat()
+        data["id"] = m_id
+        result = {"cancelled": 0}
 
+        def _apply(session):
             m = LocalMaintenance(
                 id=m_id,
                 vehicle_id=data.get("vehicle_id", ""),
@@ -997,7 +974,7 @@ class MainWindow(QMainWindow):
 
             from app.models.maintenance import LocalMaintenancePart
             for p in data.get("parts", []):
-                part = LocalMaintenancePart(
+                session.add(LocalMaintenancePart(
                     id=str(uuid.uuid4()),
                     maintenance_id=m_id,
                     part_name=p["part_name"],
@@ -1007,44 +984,111 @@ class MainWindow(QMainWindow):
                     notes=p.get("notes"),
                     created_at=now_iso,
                     updated_at=now_iso
-                )
-                session.add(part)
-
-            vehicle = session.query(LocalVehicle).filter_by(id=data["vehicle_id"]).first()
-            if vehicle:
-                vehicle.status = "MAINTENANCE"
-                vehicle.updated_at = now_iso
-                vehicle.version += 1
+                ))
 
             from app.sync.queue import SyncQueue
             queue = SyncQueue(session, self._device_id, self._user_data.get("user_id"))
-            data["id"] = m_id
             queue.enqueue("maintenance", m_id, "CREATE", data)
-            if vehicle:
-                queue.enqueue("vehicle", vehicle.id, "UPDATE", {"id": vehicle.id, "status": "MAINTENANCE"})
 
-            session.commit()
-            get_event_bus().data_refreshed.emit()
-            self._run_sync()
+            # CANONICAL RULE: maintenance wins over reservations. In the SAME
+            # transaction, cancel every RESERVED / ACTIVE reservation of this
+            # vehicle whose period overlaps the maintenance window. The
+            # reservation row is preserved (status + machine reason), never
+            # deleted or hidden. DomainStore.mutate() commits it as one unit,
+            # then publishes one revision so every view converges.
+            from app.models.reservation import LocalReservation
+            from app.utils.datetime_utils import (
+                parse_datetime_utc, reservations_overlap,
+                BLOCKING_RESERVATION_STATUSES,
+            )
+            m_start = parse_datetime_utc(m.start_datetime)
+            m_end = parse_datetime_utc(
+                data.get("expected_end_datetime")
+                or data.get("actual_end_datetime")
+                or data.get("start_datetime")
+            )
+            if m_start and m_end and m_end > m_start:
+                conflicting = session.query(LocalReservation).filter(
+                    LocalReservation.vehicle_id == data.get("vehicle_id", ""),
+                    LocalReservation.status.in_(BLOCKING_RESERVATION_STATUSES),
+                ).all()
+                for res in conflicting:
+                    r_start = parse_datetime_utc(res.start_datetime)
+                    r_end = parse_datetime_utc(res.end_datetime)
+                    if reservations_overlap(m_start, m_end, r_start, r_end):
+                        res.status = "CANCELLED"
+                        res.cancellation_reason = "MAINTENANCE"
+                        res.updated_at = now_iso
+                        res.version = (res.version or 1) + 1
+                        queue.enqueue("reservation", res.id, "UPDATE", {
+                            "id": res.id,
+                            "status": "CANCELLED",
+                            "cancellation_reason": "MAINTENANCE",
+                        })
+                        result["cancelled"] += 1
+
+        try:
+            self._store.mutate(_apply)
         except Exception as e:
-            print("Error creating maintenance:", e)
-        finally:
-            session.close()
+            logger.error("Erreur lors de la création de la maintenance: %s", e, exc_info=True)
+            QMessageBox.critical(
+                self, t("common.error"),
+                "Une erreur technique est survenue lors de l'enregistrement de la maintenance. "
+                "Consultez les journaux pour plus de détails.",
+            )
+            return
+        self._run_sync()
+        if result["cancelled"]:
+            self.statusBar().showMessage(
+                t("maintenance.reservation_cancelled_toast", n=result["cancelled"]), 4000)
+        else:
+            self.statusBar().showMessage("Maintenance enregistrée", 3000)
 
     def _on_global_data_refreshed(self):
-        # Refresh all open main tabs
-        self._load_vehicles_from_local()
-        self._refresh_dashboard()
-        self._reservations.refresh_data()
-        self._maintenance.refresh_data()
-        self._clients_page.refresh_data()
+        """Legacy trigger: rebuild the canonical snapshot.
+
+        Committed domain mutations now converge through ``DomainStore.mutate()``
+        directly. This slot remains for the *external* change sources that
+        cannot: background sync push/pull applied off-thread
+        (``_on_sync_finished``), the pending-upload processor
+        (``sync/uploads.py``), the conflict-revert path (``sync/engine.py``),
+        and the manual refresh button. Each asks the store to re-read SQLite
+        and publish one revision; ``_on_domain_changed`` then fans out.
+        """
+        try:
+            self._store.reload()
+        except Exception as e:
+            logger.error("DomainStore reload failed: %s", e, exc_info=True)
+
+    def _on_domain_changed(self, snapshot, revision):
+        """Canonical fan-out — invoked by DomainStore on every published
+        revision. Each view is refreshed in isolation: one view raising must
+        NOT stop the others, and no silent failure may leave a tab stale (the
+        next revision or a tab visit re-heals it).
+        """
+        for label, fn in (
+            ("vehicles", self._load_vehicles_from_local),
+            ("dashboard", self._refresh_dashboard),
+            ("reservations", self._reservations.refresh_data),
+            ("maintenance", self._maintenance.refresh_data),
+            ("clients", self._clients_page.refresh_data),
+        ):
+            try:
+                fn()
+            except Exception as e:
+                logger.error("Domain fan-out to %s failed at revision %s: %s",
+                             label, revision, e, exc_info=True)
+        self._last_applied_revision = revision
 
     def _on_reservation_updated(self):
-        get_event_bus().data_refreshed.emit()
+        # The reservation widget already committed through DomainStore.mutate()
+        # (or refresh_data()'s reload) — the snapshot is published and every
+        # view has converged. Only the background sync push remains.
         self._run_sync()
 
     def _on_maintenance_updated(self):
-        get_event_bus().data_refreshed.emit()
+        # As above: the maintenance widget committed through
+        # DomainStore.mutate(); just push to the server.
         self._run_sync()
 
     def changeEvent(self, event):
@@ -1058,6 +1102,20 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event):
         _safely_cancel_hover()
+        # Stop the temporal clock (cancels its pending timer, no leaked threads).
+        try:
+            if getattr(self, "_boundary_clock", None):
+                self._boundary_clock.stop()
+        except Exception:
+            pass
+        # Detach from the domain store so a destroyed window is never called
+        # back into (which would touch deleted C++ widgets).
+        try:
+            if getattr(self, "_store_unsub", None):
+                self._store_unsub()
+                self._store_unsub = None
+        except Exception:
+            pass
         if hasattr(self, "_sync_timer"):
             try:
                 self._sync_timer.stop()

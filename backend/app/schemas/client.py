@@ -9,8 +9,10 @@ class ClientCreate(BaseModel):
     phone: Optional[str] = Field(None, max_length=20)
     cin_number: Optional[str] = Field(None, max_length=50)
     identity_card_image: Optional[str] = None
+    identity_card_image_back: Optional[str] = None
     license_number: Optional[str] = Field(None, max_length=50)
     driving_license_image: Optional[str] = None
+    driving_license_image_back: Optional[str] = None
     photo_url: Optional[str] = None
     notes: Optional[str] = None
 
@@ -21,8 +23,10 @@ class ClientUpdate(BaseModel):
     phone: Optional[str] = Field(None, max_length=20)
     cin_number: Optional[str] = Field(None, max_length=50)
     identity_card_image: Optional[str] = None
+    identity_card_image_back: Optional[str] = None
     license_number: Optional[str] = Field(None, max_length=50)
     driving_license_image: Optional[str] = None
+    driving_license_image_back: Optional[str] = None
     photo_url: Optional[str] = None
     notes: Optional[str] = None
     status: Optional[str] = Field(None, max_length=20)
@@ -35,8 +39,10 @@ class ClientResponse(BaseModel):
     phone: Optional[str] = None
     cin_number: Optional[str] = None
     identity_card_image: Optional[str] = None
+    identity_card_image_back: Optional[str] = None
     license_number: Optional[str] = None
     driving_license_image: Optional[str] = None
+    driving_license_image_back: Optional[str] = None
     photo_url: Optional[str] = None
     notes: Optional[str] = None
     status: str = "ACTIVE"
