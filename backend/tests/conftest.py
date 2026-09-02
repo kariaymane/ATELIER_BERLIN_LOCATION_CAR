@@ -23,8 +23,25 @@ env_url = os.environ.get("DATABASE_URL", "")
 if env_url and ("production" in env_url.lower() or "prod" in env_url.lower() or "fly" in env_url.lower() or "supabase" in env_url.lower()):
     raise RuntimeError("DANGER: Tests attempted to use a production DATABASE_URL. Execution aborted.")
 
-os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///:memory:"
-os.environ["DATABASE_URL_SYNC"] = "sqlite:///:memory:"
+# CI runs the suite a SECOND time against a real PostgreSQL (TEST_DATABASE_URL)
+# so the prod code path — TIMESTAMP(timezone=True) aware round-trips, tstzrange
+# GIST exclusion constraints, NUMERIC summation — is actually exercised. Locally
+# and by default, the fast in-memory SQLite path is used.
+# (FORENSIC_ROOT_CAUSE_ANALYSIS.md §1.2)
+_test_db = os.environ.get("TEST_DATABASE_URL", "").strip()
+if _test_db and ("production" in _test_db.lower() or "fly" in _test_db.lower() or "supabase" in _test_db.lower()):
+    raise RuntimeError("DANGER: TEST_DATABASE_URL points at production. Aborted.")
+
+if _test_db:
+    os.environ["DATABASE_URL"] = _test_db
+    os.environ["DATABASE_URL_SYNC"] = os.environ.get(
+        "TEST_DATABASE_URL_SYNC",
+        _test_db.replace("+asyncpg", "").replace("postgresql", "postgresql+psycopg2", 1)
+        if "postgresql" in _test_db else _test_db,
+    )
+else:
+    os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///:memory:"
+    os.environ["DATABASE_URL_SYNC"] = "sqlite:///:memory:"
 os.environ["JWT_SECRET"] = "test-jwt-secret-not-for-production"
 os.environ["JWT_REFRESH_SECRET"] = "test-jwt-refresh-secret-not-for-production"
 os.environ["ADMIN_PASSWORD"] = "TestAdmin123!"

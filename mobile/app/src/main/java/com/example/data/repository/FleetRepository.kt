@@ -54,7 +54,7 @@ class FleetRepository(
             res.map {
                 FleetStatus.ReservationRow(
                     it.vehicleId, it.status, it.startDatetimeIso, it.endDatetimeIso,
-                    it.totalAmount.toDouble(),
+                    it.totalAmount.toDouble(), it.numDays,
                 )
             } to maint.map {
                 FleetStatus.MaintenanceRow(

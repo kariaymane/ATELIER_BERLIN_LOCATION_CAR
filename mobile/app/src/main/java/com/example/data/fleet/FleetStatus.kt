@@ -52,6 +52,7 @@ object FleetStatus {
         val startIso: String?,
         val endIso: String?,
         val totalAmount: Double = 0.0,
+        val numDays: Int = 1,
     )
 
     data class MaintenanceRow(
@@ -266,26 +267,33 @@ object FleetStatus {
     ): PeriodOverview {
         val counts = fleetCounts(vehicles, reservations, maintenances, nowMillis)
         val p = periodBounds(nowMillis, zone)
+
+        // booking COUNT stays anchored to the start date (a rental "made in
+        // September" by when it started).
         var tB = 0; var wB = 0; var mB = 0; var yB = 0
-        var tR = 0.0; var wR = 0.0; var mR = 0.0; var yR = 0.0
         for (r in reservations) {
-            val st = norm(r.status)
-            if (st == "CANCELLED") continue
+            if (norm(r.status) == "CANCELLED") continue
             val start = parseUtcMillis(r.startIso) ?: continue
-            val inT = start in p.today; val inW = start in p.week
-            val inM = start in p.month; val inY = start in p.year
-            if (inT) tB++; if (inW) wB++; if (inM) mB++; if (inY) yB++
-            // Revenue is recognised when the rental has started (start <= now):
-            // any non-cancelled booking whose window has begun.
-            if (start <= nowMillis) {
-                if (inT) tR += r.totalAmount; if (inW) wR += r.totalAmount
-                if (inM) mR += r.totalAmount; if (inY) yR += r.totalAmount
-            }
+            if (start in p.today) tB++; if (start in p.week) wB++
+            if (start in p.month) mB++; if (start in p.year) yB++
+        }
+
+        // revenue = the ONE pro-rata engine (shared/revenue_reference.py).
+        val rentals = reservations.map {
+            RevenueEngine.Rental(
+                it.status, parseUtcMillis(it.startIso), it.numDays,
+                java.math.BigDecimal(it.totalAmount.toString()),
+            )
+        }
+        fun rev(name: String): Double {
+            val (f, t) = RevenueEngine.namedPeriodBounds(name, nowMillis, zone)
+            return RevenueEngine.revenueBetween(rentals, f, t, nowMillis, zone)
         }
         return PeriodOverview(
             counts["total_vehicles"]!!, counts["available"]!!, counts["rented"]!!,
             counts["reserved"]!!, counts["maintenance"]!!,
-            tB, wB, mB, yB, tR, wR, mR, yR,
+            tB, wB, mB, yB,
+            rev("today"), rev("week"), rev("month"), rev("year"),
         )
     }
 

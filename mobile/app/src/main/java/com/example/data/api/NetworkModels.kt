@@ -30,13 +30,15 @@ data class UserDto(
 
 @JsonClass(generateAdapter = true)
 data class LoginResponseDto(
+    // Canonical backend contract (backend/app/schemas/auth.py::LoginResponse):
+    // flat fields only, NO nested `user` object. FORENSIC_ROOT_CAUSE_ANALYSIS.md §3.
     @Json(name = "access_token") val accessToken: String,
     @Json(name = "refresh_token") val refreshToken: String? = null,
     @Json(name = "token_type") val tokenType: String = "bearer",
+    @Json(name = "expires_in") val expiresIn: Int? = null,
     @Json(name = "user_id") val userId: String? = null,
     @Json(name = "role") val role: String? = null,
-    @Json(name = "full_name") val fullName: String? = null,
-    @Json(name = "user") val user: UserDto? = null
+    @Json(name = "full_name") val fullName: String? = null
 )
 
 @JsonClass(generateAdapter = true)

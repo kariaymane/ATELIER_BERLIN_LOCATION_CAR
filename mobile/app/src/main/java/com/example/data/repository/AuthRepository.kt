@@ -200,7 +200,7 @@ class AuthRepository(
                 body.refreshToken?.takeIf { it.isNotBlank() }?.let {
                     tokenManager.saveRefreshToken(it)
                 }
-                val userEmail = body.user?.email ?: email.trim()
+                val userEmail = email.trim()
                 val fullName = body.fullName?.takeIf { it.isNotBlank() }
                     ?: userEmail.substringBefore("@").replaceFirstChar { it.uppercase() }
 
@@ -229,10 +229,14 @@ class AuthRepository(
                 _currentUserSession.value = session
                 Result.success(session)
             } else {
-                val errorMsg = when (response.code()) {
-                    401, 404 -> "Identifiants incorrects"
-                    403 -> "Accès refusé. Rôle non autorisé."
-                    429 -> "Trop de tentatives. Veuillez patienter une minute."
+                val body = response.errorBody()?.string()?.lowercase().orEmpty()
+                val errorMsg = when {
+                    response.code() == 401 && ("verrou" in body || "bloqu" in body || "lock" in body) ->
+                        "Compte bloqué après plusieurs tentatives. Réessayez dans 15 minutes."
+                    response.code() == 401 || response.code() == 404 -> "E-mail ou mot de passe incorrect."
+                    response.code() == 403 -> "Accès refusé. Rôle non autorisé."
+                    response.code() == 429 -> "Trop de tentatives. Patientez une minute avant de réessayer."
+                    response.code() >= 500 -> "Le serveur a rencontré une erreur. Réessayez dans un instant."
                     else -> "Erreur de connexion au serveur (${response.code()})."
                 }
                 Result.failure(Exception(errorMsg))

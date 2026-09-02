@@ -2,15 +2,74 @@
 Dashboard view — 1:1 Stitch ATELIER BERLIN LOCATION CAR Dashboard Overview.
 Styled after Stitch Design with full French & Arabic localization support.
 """
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
     QLabel, QFrame, QGroupBox, QPushButton, QProgressBar, QComboBox,
-    QScrollArea
+    QScrollArea, QDateEdit
 )
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QDate, QThread, Signal
 from PySide6.QtGui import QFont
 from app.i18n import t, is_rtl
+
+# The 8 preset periods + custom. Names match shared/money_time.PERIOD_NAMES.
+_REVENUE_PERIODS = (
+    "today", "yesterday", "week", "last_week",
+    "month", "last_month", "year", "last_year", "custom",
+)
+
+
+def _preset_date_bounds(name: str, today: date):
+    """(from_date, to_date_inclusive) for a preset — mirrors
+    shared.money_time.period_bounds (to made inclusive for the UI)."""
+    if name == "today":
+        return today, today
+    if name == "yesterday":
+        y = today - timedelta(days=1)
+        return y, y
+    if name == "week":
+        s = today - timedelta(days=today.weekday())
+        return s, s + timedelta(days=6)
+    if name == "last_week":
+        tw = today - timedelta(days=today.weekday())
+        return tw - timedelta(days=7), tw - timedelta(days=1)
+    if name == "month":
+        s = today.replace(day=1)
+        nm = date(s.year + 1, 1, 1) if s.month == 12 else date(s.year, s.month + 1, 1)
+        return s, nm - timedelta(days=1)
+    if name == "last_month":
+        tm = today.replace(day=1)
+        end = tm - timedelta(days=1)
+        return end.replace(day=1), end
+    if name == "year":
+        return date(today.year, 1, 1), date(today.year, 12, 31)
+    if name == "last_year":
+        return date(today.year - 1, 1, 1), date(today.year - 1, 12, 31)
+    return today, today
+
+
+class RevenueRangeWorker(QThread):
+    """Fetches chiffre d'affaires for a date range off the UI thread.
+
+    The provider (injected by MainWindow) tries the canonical backend
+    endpoint first and falls back to the offline pro-rata computation over
+    the DomainStore snapshot — so the number is ALWAYS the same rule.
+    """
+    done = Signal(float, str, int)  # (revenue, source, req_id)
+
+    def __init__(self, provider, from_date: date, to_date: date, req_id: int, parent=None):
+        super().__init__(parent)
+        self._provider = provider
+        self._from = from_date
+        self._to = to_date
+        self._req_id = req_id
+
+    def run(self):
+        try:
+            rev, source = self._provider(self._from, self._to)
+            self.done.emit(float(rev) if rev is not None else -1.0, source, self._req_id)
+        except Exception:
+            self.done.emit(-1.0, "error", self._req_id)
 
 
 class OperationalStatCard(QFrame):
@@ -114,10 +173,18 @@ class DashboardWidget(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._current_period = "week"
+        self._current_period = "month"
         self._overview_data = {}
         self._top_vehicles_data = []
+        self._revenue_provider = None      # set by MainWindow
+        self._revenue_worker = None
         self._setup_ui()
+
+    def set_revenue_provider(self, provider):
+        """provider(from_date, to_date) -> (revenue: float|None, source: str).
+        MainWindow injects one that hits the canonical backend endpoint and
+        falls back to the offline pro-rata computation."""
+        self._revenue_provider = provider
 
     def _setup_ui(self):
         self.setLayoutDirection(Qt.LayoutDirection.RightToLeft if is_rtl() else Qt.LayoutDirection.LeftToRight)
@@ -161,25 +228,10 @@ class DashboardWidget(QWidget):
         layout.addLayout(header_layout)
 
         # ─────────────────────────────────────────────────────────────
-        # 1. Operational Stats Row
+        # 1. Chiffre d'affaires — compact filter panel
         # ─────────────────────────────────────────────────────────────
-        filter_layout = QHBoxLayout()
-        self._period_lbl = QLabel(t("dashboard.period"))
-        self._period_lbl.setFont(QFont("Hanken Grotesk", 10, QFont.Weight.Bold))
-        self._period_lbl.setStyleSheet("color: #6B7264;")
-
-        self._period_combo = QComboBox()
-        self._period_combo.addItem(t("dashboard.period_today"), "today")
-        self._period_combo.addItem(t("dashboard.period_week"), "week")
-        self._period_combo.addItem(t("dashboard.period_month"), "month")
-        self._period_combo.addItem(t("dashboard.period_year"), "year")
-        self._period_combo.setCurrentIndex(1)  # Default: week
-        self._period_combo.currentIndexChanged.connect(self._on_period_changed)
-
-        filter_layout.addStretch()
-        filter_layout.addWidget(self._period_lbl)
-        filter_layout.addWidget(self._period_combo)
-        layout.addLayout(filter_layout)
+        self._revenue_panel = self._build_revenue_panel()
+        layout.addWidget(self._revenue_panel)
 
         from app.ui.widgets.flow_layout import FlowLayout
         
@@ -188,16 +240,12 @@ class DashboardWidget(QWidget):
         perf_layout.m_hSpace = 14
         perf_layout.m_vSpace = 14
 
-        self._card_revenue = OperationalStatCard(t("dashboard.revenue"), "0 DH")
+        # Revenue now lives in the dedicated panel above; these two stay.
         self._card_day = OperationalStatCard(t("dashboard.week_reservations"), "0")
         self._card_maintenance = OperationalStatCard(t("dashboard.active_maintenances"), "0")
+        self._card_day.setMinimumWidth(240)
+        self._card_maintenance.setMinimumWidth(240)
 
-        # Let the cards expand a bit if needed
-        self._card_revenue.setMinimumWidth(250)
-        self._card_day.setMinimumWidth(250)
-        self._card_maintenance.setMinimumWidth(250)
-
-        perf_layout.addWidget(self._card_revenue)
         perf_layout.addWidget(self._card_day)
         perf_layout.addWidget(self._card_maintenance)
         layout.addLayout(perf_layout)
@@ -248,24 +296,168 @@ class DashboardWidget(QWidget):
         layout.addWidget(self._top_box)
         layout.addStretch()
 
+    # ── Revenue panel ────────────────────────────────────────────────
+    def _build_revenue_panel(self) -> QFrame:
+        panel = QFrame()
+        panel.setObjectName("revenuePanel")
+        panel.setProperty("card", "true")
+        panel.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        v = QVBoxLayout(panel)
+        v.setContentsMargins(18, 14, 18, 14)
+        v.setSpacing(10)
+
+        # Row 1: title + period combo (wraps on narrow windows via FlowLayout-free
+        # simple HBox; the combo is small so this stays compact)
+        top = QHBoxLayout()
+        top.setSpacing(10)
+        self._revenue_title_lbl = QLabel(t("dashboard.revenue"))
+        self._revenue_title_lbl.setFont(QFont("Hanken Grotesk", 11, QFont.Weight.Bold))
+        self._revenue_title_lbl.setStyleSheet("color: #637060;")
+        top.addWidget(self._revenue_title_lbl)
+        top.addStretch()
+
+        self._period_combo = QComboBox()
+        self._period_combo.setMinimumContentsLength(14)
+        for name in _REVENUE_PERIODS:
+            self._period_combo.addItem(t(f"dashboard.rev_period_{name}"), name)
+        self._period_combo.setCurrentIndex(_REVENUE_PERIODS.index("month"))
+        self._period_combo.currentIndexChanged.connect(self._on_period_changed)
+        top.addWidget(self._period_combo)
+        v.addLayout(top)
+
+        # Row 2: the big number
+        self._revenue_value_lbl = QLabel("—")
+        self._revenue_value_lbl.setFont(QFont("Hanken Grotesk", 26, QFont.Weight.Bold))
+        self._revenue_value_lbl.setStyleSheet("color: #1A221A;")
+        v.addWidget(self._revenue_value_lbl)
+
+        # Row 3: custom Du / Au date pickers (hidden unless "Personnalisé")
+        self._custom_row = QWidget()
+        cr = QHBoxLayout(self._custom_row)
+        cr.setContentsMargins(0, 0, 0, 0)
+        cr.setSpacing(8)
+        self._from_lbl = QLabel(t("dashboard.rev_from"))
+        self._from_lbl.setStyleSheet("color: #6B7264;")
+        self._date_from = QDateEdit()
+        self._date_from.setDisplayFormat("dd/MM/yyyy")
+        self._date_from.setCalendarPopup(True)
+        self._date_from.setDate(QDate.currentDate().addDays(-30))
+        self._to_lbl = QLabel(t("dashboard.rev_to"))
+        self._to_lbl.setStyleSheet("color: #6B7264;")
+        self._date_to = QDateEdit()
+        self._date_to.setDisplayFormat("dd/MM/yyyy")
+        self._date_to.setCalendarPopup(True)
+        self._date_to.setDate(QDate.currentDate())
+        self._date_from.dateChanged.connect(self._on_custom_dates_changed)
+        self._date_to.dateChanged.connect(self._on_custom_dates_changed)
+        for w in (self._from_lbl, self._date_from, self._to_lbl, self._date_to):
+            cr.addWidget(w)
+        cr.addStretch()
+        self._custom_row.setVisible(False)
+        v.addWidget(self._custom_row)
+
+        # Row 4: effective range + last update + refresh
+        foot = QHBoxLayout()
+        foot.setSpacing(10)
+        self._range_lbl = QLabel("")
+        self._range_lbl.setFont(QFont("Hanken Grotesk", 9))
+        self._range_lbl.setStyleSheet("color: #909C8E;")
+        foot.addWidget(self._range_lbl)
+        foot.addStretch()
+        self._rev_updated_lbl = QLabel("")
+        self._rev_updated_lbl.setFont(QFont("Hanken Grotesk", 9))
+        self._rev_updated_lbl.setStyleSheet("color: #909C8E;")
+        foot.addWidget(self._rev_updated_lbl)
+        self._rev_refresh_btn = QPushButton(t("dashboard.rev_refresh"))
+        self._rev_refresh_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._rev_refresh_btn.clicked.connect(self._request_revenue)
+        foot.addWidget(self._rev_refresh_btn)
+        v.addLayout(foot)
+        return panel
+
+    def _selected_range(self):
+        """(from_date, to_date_inclusive) for the current selection."""
+        name = self._period_combo.currentData() or "month"
+        if name == "custom":
+            f = self._date_from.date().toPython()
+            t_ = self._date_to.date().toPython()
+            return (f, t_) if f <= t_ else (t_, f)
+        return _preset_date_bounds(name, date.today())
+
+    def _on_period_changed(self, *_):
+        is_custom = (self._period_combo.currentData() == "custom")
+        self._custom_row.setVisible(is_custom)
+        self._render_reservations_card()
+        self._request_revenue()
+
+    def _on_custom_dates_changed(self, *_):
+        if self._period_combo.currentData() == "custom":
+            self._request_revenue()
+
+    def _request_revenue(self):
+        f, t_incl = self._selected_range()
+        self._range_lbl.setText(
+            t("dashboard.rev_range", frm=f.strftime("%d/%m/%Y"),
+              to=t_incl.strftime("%d/%m/%Y"))
+        )
+        self._revenue_value_lbl.setText("…")
+        if self._revenue_provider is None:
+            return
+        from PySide6.QtWidgets import QApplication
+        self._revenue_req_id = getattr(self, "_revenue_req_id", 0) + 1
+        # Parent to the QApplication (not this widget) so a widget teardown can
+        # never destroy a still-running QThread; the bound-method connection is
+        # auto-severed by Qt when this widget is destroyed.
+        w = RevenueRangeWorker(
+            self._revenue_provider, f, t_incl, self._revenue_req_id,
+            parent=QApplication.instance(),
+        )
+        w.done.connect(self._on_revenue_done)
+        w.finished.connect(w.deleteLater)
+        self._revenue_worker = w
+        w.start()
+
+    def closeEvent(self, event):  # noqa: N802 (Qt override)
+        w = getattr(self, "_revenue_worker", None)
+        try:
+            if w is not None and w.isRunning():
+                w.wait(2000)
+        except RuntimeError:
+            pass
+        super().closeEvent(event)
+
+    def _on_revenue_done(self, revenue: float, source: str, req_id: int = 0):
+        # Ignore results from a superseded request (rapid combo / date changes).
+        if req_id and req_id != getattr(self, "_revenue_req_id", 0):
+            return
+        if revenue < 0 or source == "error":
+            self._revenue_value_lbl.setText(t("dashboard.rev_unavailable"))
+            self._rev_updated_lbl.setText("")
+            return
+        self._revenue_value_lbl.setText(f"{revenue:,.2f} DH".replace(",", " "))
+        stamp = datetime.now().strftime("%H:%M:%S")
+        key = "dashboard.rev_updated" if source == "server" else "dashboard.rev_updated_local"
+        self._rev_updated_lbl.setText(t(key, time=stamp))
+
     def retranslate_ui(self):
         """Live update all strings when application language changes."""
         self.setLayoutDirection(Qt.LayoutDirection.RightToLeft if is_rtl() else Qt.LayoutDirection.LeftToRight)
         self._title_lbl.setText(t("dashboard.title"))
         self._last_refresh_lbl.setText(t("dashboard.last_refresh", time=datetime.now().strftime('%H:%M')))
-        self._period_lbl.setText(t("dashboard.period"))
 
-        current_idx = self._period_combo.currentIndex()
+        self._revenue_title_lbl.setText(t("dashboard.revenue"))
+        cur = self._period_combo.currentIndex()
         self._period_combo.blockSignals(True)
         self._period_combo.clear()
-        self._period_combo.addItem(t("dashboard.period_today"), "today")
-        self._period_combo.addItem(t("dashboard.period_week"), "week")
-        self._period_combo.addItem(t("dashboard.period_month"), "month")
-        self._period_combo.addItem(t("dashboard.period_year"), "year")
-        self._period_combo.setCurrentIndex(max(0, current_idx))
+        for name in _REVENUE_PERIODS:
+            self._period_combo.addItem(t(f"dashboard.rev_period_{name}"), name)
+        self._period_combo.setCurrentIndex(max(0, cur))
         self._period_combo.blockSignals(False)
+        self._from_lbl.setText(t("dashboard.rev_from"))
+        self._to_lbl.setText(t("dashboard.rev_to"))
+        self._rev_refresh_btn.setText(t("dashboard.rev_refresh"))
 
-        self._card_revenue.set_title(t("dashboard.revenue"))
+        self._card_day.set_title(t("dashboard.week_reservations"))
         self._card_maintenance.set_title(t("dashboard.active_maintenances"))
         self._card_available.set_title(t("dashboard.available_fleet"))
         self._card_rented.set_title(t("dashboard.rented_fleet"))
@@ -273,68 +465,51 @@ class DashboardWidget(QWidget):
         self._card_fleet_maintenance.set_title(t("dashboard.maintenance_fleet"))
         self._top_box.setTitle(t("dashboard.top_rented"))
 
-        self._on_period_changed()
+        self._render_fleet_cards()
+        self._request_revenue()
         self._render_top_vehicles()
 
     def _set_period(self, period: str):
         self._current_period = period
 
     def refresh_data(self, overview: dict, top_vehicles: list = None):
-        """Refresh all real dashboard data from database."""
+        """Apply the fleet/maintenance figures + Top-5. Revenue is fetched
+        independently by the panel (always the canonical rule)."""
         self._overview_data = overview or {}
         self._top_vehicles_data = top_vehicles or []
         self._last_refresh_lbl.setText(t("dashboard.last_refresh", time=datetime.now().strftime('%H:%M')))
 
-        active_maintenances = self._overview_data.get("active_maintenances", 0)
-        self._card_maintenance.set_data(str(active_maintenances))
-
-        self._on_period_changed()
+        maint = self._overview_data.get(
+            "active_maintenance_tickets",
+            self._overview_data.get("active_maintenances",
+                                    self._overview_data.get("maintenance", 0)),
+        )
+        self._card_maintenance.set_data(str(maint))
+        # "réservations" card follows the revenue period selection
+        self._render_reservations_card()
+        self._render_fleet_cards()
+        self._request_revenue()
         self._render_top_vehicles()
 
-    def _on_period_changed(self, index=0):
-        period_data = self._period_combo.currentData() or "week"
-        if period_data == "today":
-            self._current_period = "today"
-            rev = self._overview_data.get("today_revenue", 0.0)
-            locs = self._overview_data.get("today_rentals", self._overview_data.get("day_locations", 0))
-            self._card_day.set_title(t("dashboard.today_reservations"))
-        elif period_data == "week":
-            self._current_period = "week"
-            rev = self._overview_data.get("week_revenue", 0.0)
-            locs = self._overview_data.get("week_rentals", self._overview_data.get("week_locations", 0))
-            self._card_day.set_title(t("dashboard.week_reservations"))
-        elif period_data == "month":
-            self._current_period = "month"
-            rev = self._overview_data.get("month_revenue", 0.0)
-            locs = self._overview_data.get("month_rentals", self._overview_data.get("month_locations", 0))
-            self._card_day.set_title(t("dashboard.month_reservations"))
-        elif period_data == "year":
-            self._current_period = "year"
-            rev = self._overview_data.get("year_revenue", 0.0)
-            locs = self._overview_data.get("year_rentals", self._overview_data.get("year_locations", 0))
-            self._card_day.set_title(t("dashboard.year_reservations"))
+    def _render_reservations_card(self):
+        name = self._period_combo.currentData() or "month"
+        key = {"today": "today", "week": "week", "month": "month",
+               "year": "year"}.get(name)
+        if key:
+            locs = self._overview_data.get(
+                f"{key}_rentals", self._overview_data.get(f"{key}_locations", 0))
+            self._card_day.set_title(t(f"dashboard.{key}_reservations"))
         else:
-            self._current_period = "week"
-            rev = self._overview_data.get("today_revenue", 0.0)
-            locs = self._overview_data.get("today_rentals", self._overview_data.get("day_locations", 0))
+            locs = "—"
             self._card_day.set_title(t("dashboard.reservations_default"))
+        self._card_day.set_data(str(locs))
 
-        try:
-            self._card_revenue.set_data(f"{float(rev):.2f} DH")
-            self._card_day.set_data(str(locs))
-        except Exception:
-            self._card_revenue.set_data("0.00 DH")
-            self._card_day.set_data("0")
-
-        avail = self._overview_data.get("available", 0)
-        rented = self._overview_data.get("rented", 0)
-        reserved = self._overview_data.get("reserved", 0)
-        maint = self._overview_data.get("maintenance", 0)
-
-        self._card_available.set_count(str(avail))
-        self._card_rented.set_count(str(rented))
-        self._card_reserved.set_count(str(reserved))
-        self._card_fleet_maintenance.set_count(str(maint))
+    def _render_fleet_cards(self):
+        d = self._overview_data
+        self._card_available.set_count(str(d.get("available", 0)))
+        self._card_rented.set_count(str(d.get("rented", 0)))
+        self._card_reserved.set_count(str(d.get("reserved", 0)))
+        self._card_fleet_maintenance.set_count(str(d.get("maintenance", 0)))
 
     def _render_top_vehicles(self):
         while self._top_layout.count():
