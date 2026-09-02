@@ -260,7 +260,6 @@ class SyncService:
                 select(Vehicle).where(Vehicle.id == UUID(entity_id))
             )
             vehicle = result.scalar_one_or_none()
-
             if not vehicle:
                 return {"status": "ok", "message": "Already deleted"}
 
@@ -295,6 +294,13 @@ class SyncService:
                     if v and v.status == "MAINTENANCE":
                         v.status = "AVAILABLE"
                         v.version += 1
+                await self._audit.create(
+                    entity_type="maintenance",
+                    action="DELETED",
+                    entity_id=m.id,
+                    user_id=user_id,
+                    old_values={"title": m.title, "vehicle_id": str(m.vehicle_id), "source": "sync"},
+                )
                 await self._session.delete(m)
                 await self._session.flush()
             return {"status": "ok"}

@@ -8,6 +8,7 @@ import com.example.data.repository.FleetRepository
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import kotlinx.coroutines.*
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -53,12 +54,36 @@ class RealtimeSyncManager(
     private var pingJob: Job? = null
     private var reconnectDelayMs = 2000L
     private val maxReconnectDelayMs = 30000L
+    private val eventQueue = Channel<String>(Channel.UNLIMITED)
+    private var eventProcessorJob: Job? = null
 
     fun start() {
         if (isRunning) return
         isRunning = true
         Log.i(tag, "Starting Realtime Sync Engine...")
+        startEventProcessor()
         connect()
+    }
+
+    private fun startEventProcessor() {
+        eventProcessorJob?.cancel()
+        eventProcessorJob = scope.launch {
+            for (text in eventQueue) {
+                try {
+                    val event = eventAdapter.fromJson(text)
+                    if (event != null) {
+                        if (event.type == "PONG" || event.eventType == "CONNECTED") {
+                            Log.d(tag, "Handshake/Heartbeat event: ${event.eventType ?: event.type}")
+                        } else {
+                            Log.i(tag, "Authoritative Event received: ${event.eventType ?: event.type} for ${event.entityType ?: event.entity} (ID: ${event.entityId})")
+                            fleetRepository.handleRealtimeEvent(event)
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.e(tag, "Error parsing / processing WebSocket event: ${e.message}", e)
+                }
+            }
+        }
     }
 
     fun stop() {
@@ -66,6 +91,7 @@ class RealtimeSyncManager(
         reconnectJob?.cancel()
         fallbackPollJob?.cancel()
         pingJob?.cancel()
+        eventProcessorJob?.cancel()
         webSocket?.close(1000, "Client stopped")
         webSocket = null
         _connectionState.value = RealtimeConnectionState.DISCONNECTED
@@ -116,21 +142,7 @@ class RealtimeSyncManager(
 
             override fun onMessage(ws: WebSocket, text: String) {
                 Log.d(tag, "WebSocket Message received: $text")
-                scope.launch {
-                    try {
-                        val event = eventAdapter.fromJson(text)
-                        if (event != null) {
-                            if (event.type == "PONG" || event.eventType == "CONNECTED") {
-                                Log.d(tag, "Handshake/Heartbeat event: ${event.eventType ?: event.type}")
-                            } else {
-                                Log.i(tag, "Authoritative Event received: ${event.eventType ?: event.type} for ${event.entityType ?: event.entity} (ID: ${event.entityId})")
-                                fleetRepository.handleRealtimeEvent(event)
-                            }
-                        }
-                    } catch (e: Exception) {
-                        Log.e(tag, "Error parsing / processing WebSocket event: ${e.message}", e)
-                    }
-                }
+                eventQueue.trySend(text)
             }
 
             override fun onClosing(ws: WebSocket, code: Int, reason: String) {

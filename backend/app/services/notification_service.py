@@ -26,7 +26,8 @@ class NotificationService:
         Scan vehicles and maintenance records to create alerts for document
         expirations and maintenance events.
         """
-        today = date.today()
+        from shared.money_time import now_business
+        today = now_business().date()
         warning_window = today + timedelta(days=15)
         created_count = 0
 

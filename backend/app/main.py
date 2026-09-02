@@ -138,8 +138,14 @@ def create_app() -> FastAPI:
 
     # Root WebSocket endpoint for direct ws://host:8000/ws
     from app.services.event_broadcaster import broadcaster
+    from app.api.v1.events import _extract_bearer_token, _require_valid_token
     @app.websocket("/ws")
     async def root_websocket_endpoint(websocket: WebSocket):
+        payload = _require_valid_token(_extract_bearer_token(websocket))
+        if not payload:
+            await websocket.close(code=4401)
+            return
+
         await broadcaster.connect_socket(websocket)
         try:
             recent = broadcaster.get_recent_events(limit=10)

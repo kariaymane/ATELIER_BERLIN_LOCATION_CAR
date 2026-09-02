@@ -382,7 +382,12 @@ class DashboardWidget(QWidget):
             f = self._date_from.date().toPython()
             t_ = self._date_to.date().toPython()
             return (f, t_) if f <= t_ else (t_, f)
-        return _preset_date_bounds(name, date.today())
+        try:
+            from zoneinfo import ZoneInfo
+            today = datetime.now(ZoneInfo("Africa/Casablanca")).date()
+        except Exception:
+            today = date.today()
+        return _preset_date_bounds(name, today)
 
     def _on_period_changed(self, *_):
         is_custom = (self._period_combo.currentData() == "custom")

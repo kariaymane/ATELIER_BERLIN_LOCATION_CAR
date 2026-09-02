@@ -615,10 +615,12 @@ class MainWindow(QMainWindow):
         if thread is not None:
             try:
                 if thread.isRunning():
-                    return  # previous cycle still running — skip, avoid pile-up
+                    self._sync_pending = True
+                    return  # previous cycle still running — mark pending to avoid losing events
             except RuntimeError:
                 pass  # C++ object already deleted — safe to start a new one
             self._sync_thread = None
+        self._sync_pending = False
         thread = SyncThread(
             self._device_id, self._access_token, self._refresh_token, parent=self
         )
@@ -636,6 +638,9 @@ class MainWindow(QMainWindow):
         object (which previously killed the sync loop silently).
         """
         self._sync_thread = None
+        if getattr(self, "_sync_pending", False):
+            self._sync_pending = False
+            self._run_sync()
 
     def _on_sync_finished(self, report: dict):
         """Handle background sync results on the UI thread."""

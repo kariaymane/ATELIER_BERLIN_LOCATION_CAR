@@ -34,6 +34,7 @@ class RentalUpdate(BaseModel):
 class RentalResponse(BaseModel):
     id: str
     vehicle_id: str
+    customer_id: Optional[str] = None
     customer_name: Optional[str] = None
     customer_phone: Optional[str] = None
     customer_email: Optional[str] = None
