@@ -52,6 +52,7 @@ def init_local_db():
         cursor.execute("PRAGMA journal_mode=WAL")
         cursor.execute("PRAGMA synchronous=NORMAL")
         cursor.execute("PRAGMA busy_timeout=15000")
+        cursor.execute("PRAGMA foreign_keys=ON")
         cursor.close()
 
     _session_factory = sessionmaker(bind=_engine)

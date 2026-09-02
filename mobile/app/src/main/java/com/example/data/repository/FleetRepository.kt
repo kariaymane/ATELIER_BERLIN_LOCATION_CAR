@@ -1075,6 +1075,7 @@ class FleetRepository(
                             }
                         } catch (_: Exception) {}
                     }
+                    refreshRentals()
                     refreshNotifications()
                 }
 

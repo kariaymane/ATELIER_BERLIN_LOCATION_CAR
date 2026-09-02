@@ -94,6 +94,7 @@ data class VehicleStatusUpdateDto(
 data class RentalDto(
     @Json(name = "id") val id: String,
     @Json(name = "vehicle_id") val vehicleId: String,
+    @Json(name = "customer_id") val customerId: String? = null,
     @Json(name = "customer_name") val customerName: String? = null,
     @Json(name = "customer_phone") val customerPhone: String? = null,
     @Json(name = "customer_email") val customerEmail: String? = null,
@@ -107,6 +108,7 @@ data class RentalDto(
     @Json(name = "deposit") val deposit: Double = 0.0,
     @Json(name = "payment_status") val paymentStatus: String = "PENDING",
     @Json(name = "status") val status: String = "RESERVED",
+    @Json(name = "cancellation_reason") val cancellationReason: String? = null,
     @Json(name = "notes") val notes: String? = null,
     @Json(name = "vehicle_registration") val vehicleRegistration: String? = null,
     @Json(name = "vehicle_brand") val vehicleBrand: String? = null,
@@ -317,7 +319,9 @@ data class ClientDto(
     @Json(name = "cin_number") val cinNumber: String? = null,
     @Json(name = "license_number") val licenseNumber: String? = null,
     @Json(name = "identity_card_image") val identityCardImage: String? = null,
+    @Json(name = "identity_card_image_back") val identityCardImageBack: String? = null,
     @Json(name = "driving_license_image") val drivingLicenseImage: String? = null,
+    @Json(name = "driving_license_image_back") val drivingLicenseImageBack: String? = null,
     @Json(name = "photo_url") val photoUrl: String? = null,
     @Json(name = "status") val status: String = "ACTIVE",
     @Json(name = "created_at") val createdAt: String? = null

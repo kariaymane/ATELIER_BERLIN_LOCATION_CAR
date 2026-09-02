@@ -154,10 +154,20 @@ class SyncEngine:
                             if res_status == "ok":
                                 queue.mark_synced(pending[i].id)
                                 s_ver = result.get("server_version")
-                                if s_ver and pending[i].entity_type == "vehicle":
-                                    v = session.query(LocalVehicle).filter_by(id=pending[i].entity_id).first()
-                                    if v:
-                                        v.version = s_ver
+                                if s_ver:
+                                    etype = pending[i].entity_type
+                                    eid = pending[i].entity_id
+                                    ent = None
+                                    if etype == "vehicle":
+                                        ent = session.query(LocalVehicle).filter_by(id=eid).first()
+                                    elif etype == "reservation":
+                                        ent = session.query(LocalReservation).filter_by(id=eid).first()
+                                    elif etype == "maintenance":
+                                        ent = session.query(LocalMaintenance).filter_by(id=eid).first()
+                                    elif etype == "client":
+                                        ent = session.query(LocalClient).filter_by(id=eid).first()
+                                    if ent and hasattr(ent, "version"):
+                                        ent.version = s_ver
                                         session.commit()
                             elif res_status == "conflict":
                                 queue.mark_conflict(pending[i].id, result.get("message", "Conflict"))
@@ -171,7 +181,6 @@ class SyncEngine:
                                 # row would permanently block those vehicle dates
                                 # in the offline overlap check.
                                 if pending[i].entity_type == "reservation" and pending[i].operation == "CREATE":
-                                    from app.models.reservation import LocalReservation
                                     lr = session.query(LocalReservation).filter_by(
                                         id=pending[i].entity_id).first()
                                     if lr and (lr.status or "").upper() in ("RESERVED", "ACTIVE"):
@@ -255,9 +264,22 @@ class SyncEngine:
 
         session = get_local_session()
         try:
+            pending_ids = set()
+            try:
+                from app.models.sync_queue import SyncQueueItem
+                p_rows = session.query(SyncQueueItem.entity_id).filter(
+                    SyncQueueItem.sync_status == "PENDING"
+                ).all()
+                pending_ids = {str(r[0]) for r in p_rows if r[0]}
+            except Exception:
+                pass
+
             for item in items:
                 etype = item.get("entity_type", "").lower()
                 eid = str(item.get("entity_id", ""))
+                if eid in pending_ids:
+                    logger.info("Skipping pulled item for %s %s: pending local mutation exists", etype, eid)
+                    continue
                 op = item.get("operation", "").upper()
                 payload = item.get("payload", {})
                 ver = item.get("version", 1)
