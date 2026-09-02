@@ -15,6 +15,40 @@ class Settings(BaseSettings):
         default="", description="Sync PostgreSQL connection string (for Alembic)"
     )
 
+    # ── Database connection pool ───────────────────────────────────────────
+    # Sized for the PRODUCTION database VM, not for raw throughput. The hard
+    # upper bound on server-side PostgreSQL connections opened by this API is:
+    #
+    #     (DB_POOL_SIZE + DB_MAX_OVERFLOW) * <number of uvicorn worker processes>
+    #
+    # The container runs a SINGLE uvicorn worker (docker/Dockerfile.backend has
+    # no --workers flag), so the real ceiling is DB_POOL_SIZE + DB_MAX_OVERFLOW.
+    # That ceiling must stay well below the database's own `max_connections`
+    # minus the slots reserved for repmgr / the monitor / `alembic upgrade` /
+    # a manual psql session. The defaults below (10 max) are safe for a small
+    # Fly `postgres-flex` node (256 MB–1 GB). An over-large pool on a small DB
+    # is an OOM / "too many connections" hazard, which is exactly how the
+    # production database fell over. Override per-environment via env vars.
+    DB_POOL_SIZE: int = Field(default=5, ge=1, le=50,
+                              description="Persistent connections kept open per worker")
+    DB_MAX_OVERFLOW: int = Field(default=5, ge=0, le=50,
+                                 description="Extra burst connections per worker beyond the pool")
+    DB_POOL_TIMEOUT: int = Field(default=30, ge=1, le=120,
+                                 description="Seconds a request waits for a free connection before failing")
+    DB_POOL_RECYCLE: int = Field(default=1800, ge=60,
+                                 description="Recycle a connection older than this many seconds")
+    DB_POOL_PRE_PING: bool = Field(default=True,
+                                   description="Validate a pooled connection before handing it out")
+    # If the configured pool could ever exceed this, engine initialisation
+    # fails loudly instead of letting the API silently exhaust the database.
+    DB_MAX_CONNECTIONS_HARD_CAP: int = Field(default=40, ge=2, le=500,
+                                             description="Refuse to start if pool_size+max_overflow exceeds this")
+
+    @property
+    def db_max_connections_per_worker(self) -> int:
+        """Hard upper bound on concurrent server-side connections one worker can open."""
+        return self.DB_POOL_SIZE + self.DB_MAX_OVERFLOW
+
     # JWT
     JWT_SECRET: str = Field(..., description="JWT signing secret")
     JWT_REFRESH_SECRET: str = Field(..., description="JWT refresh token secret")

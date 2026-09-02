@@ -205,11 +205,23 @@ class FleetViewModel(
             _errorMessage.value = null
             val result = fleetRepository.refreshAll()
             if (result.isFailure) {
-                _errorMessage.value = result.exceptionOrNull()?.message ?: "Erreur de synchronisation avec le serveur API."
+                // If Room already holds data, the screens fall back to it and
+                // show a non-fatal offline banner (driven by syncStatus). Only
+                // raise a blocking error message when there is nothing cached.
+                val hasCache = vehicles.value.isNotEmpty() ||
+                    reservations.value.isNotEmpty() ||
+                    maintenances.value.isNotEmpty()
+                if (!hasCache) {
+                    _errorMessage.value = result.exceptionOrNull()?.message
+                        ?: "Erreur de synchronisation avec le serveur API."
+                }
             }
             _isRefreshing.value = false
         }
     }
+
+    /** Manual retry from the offline banner. */
+    fun retrySync() = refreshAll()
 
     fun refreshVehicles() {
         viewModelScope.launch {
@@ -247,6 +259,14 @@ class FleetViewModel(
         }
     }
 
+    /**
+     * SECURITY: `pass` is a plain method parameter used ONLY for the single
+     * [authRepository.login] call below. It is never assigned to a field, a
+     * companion object, SavedStateHandle, or any persistent store, so it is
+     * eligible for garbage collection the moment this coroutine finishes. The
+     * caller ([com.example.ui.screens.AuthScreen]) wipes its own copy on
+     * success. Everything after authentication runs on the token/session only.
+     */
     fun login(email: String, pass: String, onResult: (Boolean) -> Unit) {
         viewModelScope.launch {
             _isLoading.value = true
@@ -272,6 +292,11 @@ class FleetViewModel(
         viewModelScope.launch {
             authRepository.logout()
         }
+        // Clear transient auth-related UI state so nothing from the previous
+        // session (error text, messages) survives into the login screen. The
+        // plaintext password is owned by AuthScreen and wiped there on dispose.
+        _errorMessage.value = null
+        _successMessage.value = null
         _navigationStack.value = listOf(Screen.Auth)
     }
 

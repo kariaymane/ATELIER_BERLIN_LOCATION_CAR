@@ -27,6 +27,7 @@ fun ReservationsScreen(
     val reservations by viewModel.reservations.collectAsState()
     val statusFilter by viewModel.reservationStatusFilter.collectAsState()
     val userSession by viewModel.userSession.collectAsState()
+    val syncStatus by viewModel.syncStatus.collectAsState()
 
     val filterScrollState = rememberScrollState()
 
@@ -67,6 +68,12 @@ fun ReservationsScreen(
                 }
             )
 
+            OfflineBanner(
+                syncStatus = syncStatus,
+                hasCachedData = reservations.isNotEmpty(),
+                onRetry = { viewModel.retrySync() },
+            )
+
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -86,9 +93,20 @@ fun ReservationsScreen(
             Spacer(modifier = Modifier.height(8.dp))
 
             if (filteredReservations.isEmpty()) {
+                val hasCache = reservations.isNotEmpty()
+                val dbDown = syncStatus.isServerDatabaseDown && !hasCache
+                val isError = syncStatus.isShowingStaleData && !hasCache
                 EmptyStateView(
-                    title = "Aucune réservation",
-                    description = "Aucune réservation trouvée dans la base de données."
+                    title = when {
+                        dbDown -> "Base de données du serveur indisponible"
+                        isError -> "Connexion au serveur impossible"
+                        else -> "Aucune réservation"
+                    },
+                    description = when {
+                        dbDown -> "Le serveur est accessible mais sa base de données ne répond pas. Réessayez dans un instant."
+                        isError -> "Veuillez vérifier votre connexion au serveur."
+                        else -> "Aucune réservation trouvée dans la base de données."
+                    }
                 )
             } else {
                 LazyColumn(

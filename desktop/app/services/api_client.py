@@ -88,34 +88,31 @@ class ApiClient:
                 return None
 
     def _do_refresh(self) -> bool:
-        """Refresh the access token."""
-        try:
-            with httpx.Client(timeout=5.0) as client:
-                r = client.post(
-                    f"{self._base_url}/api/v1/auth/refresh",
-                    json={"refresh_token": self._refresh_token},
-                    headers={"Content-Type": "application/json"},
-                )
-                if r.status_code == 200:
-                    data = r.json()
-                    self._access_token = data["access_token"]
-                    self._refresh_token = data["refresh_token"]
-                    logger.info("Token refreshed")
-                    return True
-        except Exception as e:
-            logger.error("Token refresh failed: %s", e)
+        """Refresh the access token via the ONE AuthClient (single refresh
+        path — see FORENSIC_ROOT_CAUSE_ANALYSIS.md §1.1)."""
+        from app.services.auth_client import AuthClient
+
+        data = AuthClient(self._base_url).refresh(self._refresh_token)
+        if data:
+            self._access_token = data["access_token"]
+            self._refresh_token = data["refresh_token"]
+            logger.info("Token refreshed")
+            return True
         return False
 
     # ── Auth ──
 
     def login(self, email: str, password: str) -> Optional[dict]:
-        r = self._request("post", "/api/v1/auth/login", json={
-            "email": email, "password": password,
-        })
-        if r and r.status_code == 200:
-            data = r.json()
-            self.set_tokens(data["access_token"], data["refresh_token"])
-            return data
+        """Authenticate via the ONE AuthClient. Returns the token dict on
+        success, else None. The login SCREEN uses AuthClient directly (for the
+        typed outcome); this stays for programmatic/headless callers."""
+        from app.services.auth_client import AuthClient
+
+        result = AuthClient(self._base_url).login(email, password)
+        if result.ok:
+            self._is_online = True
+            self.set_tokens(result.data["access_token"], result.data["refresh_token"])
+            return result.data
         return None
 
     # ── Vehicles ──
@@ -216,6 +213,18 @@ class ApiClient:
 
     def get_stats(self, period: str) -> Optional[dict]:
         r = self._request("get", f"/api/v1/dashboard/{period}")
+        return r.json() if r and r.status_code == 200 else None
+
+    def get_revenue_range(self, from_iso: str, to_iso: str) -> Optional[dict]:
+        """Canonical custom-range chiffre d'affaires. `from`/`to` are ISO
+        YYYY-MM-DD; `to` is inclusive (the UI 'Au' date counts in full)."""
+        r = self._request(
+            "get", f"/api/v1/dashboard/revenue?from={from_iso}&to={to_iso}", retries=2
+        )
+        return r.json() if r and r.status_code == 200 else None
+
+    def get_period_revenue(self, name: str) -> Optional[dict]:
+        r = self._request("get", f"/api/v1/dashboard/period/{name}", retries=2)
         return r.json() if r and r.status_code == 200 else None
 
     def get_vehicle_performance(self) -> Optional[list]:

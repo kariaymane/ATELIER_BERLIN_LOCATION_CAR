@@ -52,6 +52,7 @@ object FleetStatus {
         val startIso: String?,
         val endIso: String?,
         val totalAmount: Double = 0.0,
+        val numDays: Int = 1,
     )
 
     data class MaintenanceRow(
@@ -222,13 +223,17 @@ object FleetStatus {
     data class PeriodOverview(
         val totalVehicles: Int, val available: Int, val rented: Int,
         val reserved: Int, val maintenance: Int,
-        val todayBookings: Int, val weekBookings: Int, val monthBookings: Int,
-        val todayRevenue: Double, val weekRevenue: Double, val monthRevenue: Double,
+        val todayBookings: Int, val weekBookings: Int, val monthBookings: Int, val yearBookings: Int,
+        val todayRevenue: Double, val weekRevenue: Double, val monthRevenue: Double, val yearRevenue: Double,
+    )
+
+    data class PeriodRanges(
+        val today: LongRange, val week: LongRange, val month: LongRange, val year: LongRange,
     )
 
     /** Africa/Casablanca-local [today, tomorrow), [weekStart Mon, +7d),
-     *  [monthStart, nextMonth) as epoch-millis bounds for [nowMillis]. */
-    private fun periodBounds(nowMillis: Long, zone: TimeZone): Triple<LongRange, LongRange, LongRange> {
+     *  [monthStart, nextMonth), [yearStart, nextYear) as epoch-millis bounds. */
+    private fun periodBounds(nowMillis: Long, zone: TimeZone): PeriodRanges {
         fun cal() = Calendar.getInstance(zone, Locale.US).apply {
             firstDayOfWeek = Calendar.MONDAY; time = Date(nowMillis)
             set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0)
@@ -243,7 +248,14 @@ object FleetStatus {
         val weekEnd = weekStart + 7L * 86_400_000L
         val monthStart = cal().apply { set(Calendar.DAY_OF_MONTH, 1) }.timeInMillis
         val monthEnd = cal().apply { set(Calendar.DAY_OF_MONTH, 1); add(Calendar.MONTH, 1) }.timeInMillis
-        return Triple(todayStart until todayEnd, weekStart until weekEnd, monthStart until monthEnd)
+        val yearStart = cal().apply { set(Calendar.MONTH, Calendar.JANUARY); set(Calendar.DAY_OF_MONTH, 1) }.timeInMillis
+        val yearEnd = cal().apply {
+            set(Calendar.MONTH, Calendar.JANUARY); set(Calendar.DAY_OF_MONTH, 1); add(Calendar.YEAR, 1)
+        }.timeInMillis
+        return PeriodRanges(
+            todayStart until todayEnd, weekStart until weekEnd,
+            monthStart until monthEnd, yearStart until yearEnd,
+        )
     }
 
     fun dashboardOverview(
@@ -254,25 +266,34 @@ object FleetStatus {
         zone: TimeZone = CASABLANCA,
     ): PeriodOverview {
         val counts = fleetCounts(vehicles, reservations, maintenances, nowMillis)
-        val (today, week, month) = periodBounds(nowMillis, zone)
-        var tB = 0; var wB = 0; var mB = 0
-        var tR = 0.0; var wR = 0.0; var mR = 0.0
+        val p = periodBounds(nowMillis, zone)
+
+        // booking COUNT stays anchored to the start date (a rental "made in
+        // September" by when it started).
+        var tB = 0; var wB = 0; var mB = 0; var yB = 0
         for (r in reservations) {
-            val st = norm(r.status)
-            if (st == "CANCELLED") continue
+            if (norm(r.status) == "CANCELLED") continue
             val start = parseUtcMillis(r.startIso) ?: continue
-            val inT = start in today; val inW = start in week; val inM = start in month
-            if (inT) tB++; if (inW) wB++; if (inM) mB++
-            // Revenue is recognised when the rental has started (start <= now):
-            // any non-cancelled booking whose window has begun.
-            if (start <= nowMillis) {
-                if (inT) tR += r.totalAmount; if (inW) wR += r.totalAmount; if (inM) mR += r.totalAmount
-            }
+            if (start in p.today) tB++; if (start in p.week) wB++
+            if (start in p.month) mB++; if (start in p.year) yB++
+        }
+
+        // revenue = the ONE pro-rata engine (shared/revenue_reference.py).
+        val rentals = reservations.map {
+            RevenueEngine.Rental(
+                it.status, parseUtcMillis(it.startIso), it.numDays,
+                java.math.BigDecimal(it.totalAmount.toString()),
+            )
+        }
+        fun rev(name: String): Double {
+            val (f, t) = RevenueEngine.namedPeriodBounds(name, nowMillis, zone)
+            return RevenueEngine.revenueBetween(rentals, f, t, nowMillis, zone)
         }
         return PeriodOverview(
             counts["total_vehicles"]!!, counts["available"]!!, counts["rented"]!!,
             counts["reserved"]!!, counts["maintenance"]!!,
-            tB, wB, mB, tR, wR, mR,
+            tB, wB, mB, yB,
+            rev("today"), rev("week"), rev("month"), rev("year"),
         )
     }
 

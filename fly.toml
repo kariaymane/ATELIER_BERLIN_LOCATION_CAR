@@ -10,9 +10,14 @@ primary_region = 'cdg'
 [http_service]
   internal_port = 8000
   force_https = true
-  auto_stop_machines = 'stop'
+  # One machine stays warm at all times: the cold-start (3-15s) was the #1
+  # cause of "login fails / erreur de connexion" on the desktop and phone
+  # (FORENSIC_ROOT_CAUSE_ANALYSIS.md §2). A single always-on machine also
+  # keeps the in-process EventBroadcaster (live WS events) continuously
+  # available. auto_start still covers a burst needing a second machine.
+  auto_stop_machines = 'suspend'
   auto_start_machines = true
-  min_machines_running = 0
+  min_machines_running = 1
   processes = ['app']
 
 [[vm]]

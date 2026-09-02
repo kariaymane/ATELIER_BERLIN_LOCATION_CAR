@@ -1,7 +1,9 @@
 """
 Dashboard & statistics API endpoints.
 """
-from fastapi import APIRouter, Depends, Query
+from datetime import date
+
+from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -10,6 +12,7 @@ from app.auth.rbac import Permission
 from app.services.dashboard_service import DashboardService
 from app.services.rental_service import RentalService
 from app.repositories.vehicle_repository import VehicleRepository
+from shared.money_time import PERIOD_NAMES
 import logging
 from uuid import UUID
 
@@ -66,6 +69,36 @@ async def yearly_stats(
     """This year's statistics."""
     service = DashboardService(db)
     return await service.get_period_stats("yearly")
+
+
+@router.get("/revenue")
+async def revenue_range(
+    from_: date = Query(..., alias="from", description="ISO date YYYY-MM-DD, inclusive"),
+    to: date = Query(..., description="ISO date YYYY-MM-DD, inclusive (the picked 'Au' date counts in full)"),
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(require_perm(Permission.VEHICLES_READ)),
+):
+    """Chiffre d'affaires for an arbitrary date range (pro-rata by day).
+
+    `from`/`to` are ISO dates in the business timezone; `to` is INCLUSIVE
+    (the operator's 'Au:' date counts fully). One engine, same as every card.
+    """
+    service = DashboardService(db)
+    return await service.get_revenue_range(from_, to)
+
+
+@router.get("/period/{name}")
+async def period_stats_named(
+    name: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(require_perm(Permission.VEHICLES_READ)),
+):
+    """Stats for a named preset period: today, yesterday, week, last_week,
+    month, last_month, year, last_year."""
+    if name not in PERIOD_NAMES:
+        raise HTTPException(status_code=422, detail=f"unknown period '{name}'")
+    service = DashboardService(db)
+    return await service.get_period_stats(name)
 
 
 @router.get("/vehicle-performance")

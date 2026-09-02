@@ -1,0 +1,341 @@
+{
+  "_comment": "NORMATIVE cross-runtime revenue vectors. backend/desktop/mobile revenue engines are asserted byte-for-byte against shared/revenue_reference.py on every case here. to_date is EXCLUSIVE. All dates business-local (Africa/Casablanca).",
+  "revenue_cases": [
+    {
+      "name": "single_past_rental_fully_inside_window",
+      "now": "2026-09-15T12:00:00+01:00",
+      "reservations": [
+        {
+          "id": "R1",
+          "status": "COMPLETED",
+          "start_datetime": "2026-08-03T09:00:00+01:00",
+          "num_days": 2,
+          "daily_price": "300.00",
+          "total_price": "600.00"
+        }
+      ],
+      "queries": [
+        {
+          "from": "2026-08-01",
+          "to": "2026-09-01",
+          "expected_revenue": 600.0,
+          "expected_days": 2
+        },
+        {
+          "from": "2026-08-03",
+          "to": "2026-08-04",
+          "expected_revenue": 300.0,
+          "expected_days": 1
+        },
+        {
+          "from": "2026-08-04",
+          "to": "2026-08-05",
+          "expected_revenue": 300.0,
+          "expected_days": 1
+        },
+        {
+          "from": "2026-08-05",
+          "to": "2026-08-10",
+          "expected_revenue": 0.0,
+          "expected_days": 0
+        },
+        {
+          "from": "2026-09-01",
+          "to": "2026-10-01",
+          "expected_revenue": 0.0,
+          "expected_days": 0
+        }
+      ]
+    },
+    {
+      "name": "rental_spanning_month_boundary_is_split",
+      "now": "2026-09-15T12:00:00+01:00",
+      "reservations": [
+        {
+          "id": "R2",
+          "status": "ACTIVE",
+          "start_datetime": "2026-08-30T12:00:00+01:00",
+          "num_days": 4,
+          "daily_price": "100.00",
+          "total_price": "400.00"
+        }
+      ],
+      "queries": [
+        {
+          "from": "2026-08-01",
+          "to": "2026-09-01",
+          "expected_revenue": 200.0,
+          "expected_days": 2
+        },
+        {
+          "from": "2026-09-01",
+          "to": "2026-10-01",
+          "expected_revenue": 200.0,
+          "expected_days": 2
+        },
+        {
+          "from": "2026-01-01",
+          "to": "2027-01-01",
+          "expected_revenue": 400.0,
+          "expected_days": 4
+        }
+      ]
+    },
+    {
+      "name": "ongoing_rental_capped_at_today",
+      "now": "2026-09-15T12:00:00+01:00",
+      "reservations": [
+        {
+          "id": "R3",
+          "status": "ACTIVE",
+          "start_datetime": "2026-09-10T08:00:00+01:00",
+          "num_days": 10,
+          "daily_price": "50.00",
+          "total_price": "500.00"
+        }
+      ],
+      "queries": [
+        {
+          "from": "2026-09-01",
+          "to": "2026-10-01",
+          "expected_revenue": 300.0,
+          "expected_days": 6
+        },
+        {
+          "from": "2026-09-01",
+          "to": "2026-09-30",
+          "expected_revenue": 300.0,
+          "expected_days": 6
+        },
+        {
+          "from": "2026-09-16",
+          "to": "2026-09-25",
+          "expected_revenue": 0.0,
+          "expected_days": 0
+        },
+        {
+          "from": "2026-01-01",
+          "to": "2027-01-01",
+          "expected_revenue": 300.0,
+          "expected_days": 6
+        }
+      ]
+    },
+    {
+      "name": "future_booking_contributes_nothing",
+      "now": "2026-09-15T12:00:00+01:00",
+      "reservations": [
+        {
+          "id": "R4",
+          "status": "RESERVED",
+          "start_datetime": "2026-10-01T10:00:00+01:00",
+          "num_days": 3,
+          "daily_price": "200.00",
+          "total_price": "600.00"
+        }
+      ],
+      "queries": [
+        {
+          "from": "2026-10-01",
+          "to": "2026-11-01",
+          "expected_revenue": 0.0,
+          "expected_days": 0
+        },
+        {
+          "from": "2026-01-01",
+          "to": "2027-01-01",
+          "expected_revenue": 0.0,
+          "expected_days": 0
+        }
+      ]
+    },
+    {
+      "name": "cancelled_never_counts",
+      "now": "2026-09-15T12:00:00+01:00",
+      "reservations": [
+        {
+          "id": "R5",
+          "status": "CANCELLED",
+          "start_datetime": "2026-09-05T10:00:00+01:00",
+          "num_days": 2,
+          "daily_price": "999.00",
+          "total_price": "1998.00"
+        }
+      ],
+      "queries": [
+        {
+          "from": "2026-09-01",
+          "to": "2026-10-01",
+          "expected_revenue": 0.0,
+          "expected_days": 0
+        },
+        {
+          "from": "2026-01-01",
+          "to": "2027-01-01",
+          "expected_revenue": 0.0,
+          "expected_days": 0
+        }
+      ]
+    },
+    {
+      "name": "decimal_split_rounds_back_to_total",
+      "now": "2026-09-15T12:00:00+01:00",
+      "reservations": [
+        {
+          "id": "R6",
+          "status": "COMPLETED",
+          "start_datetime": "2026-09-02T09:00:00+01:00",
+          "num_days": 3,
+          "daily_price": "33.33",
+          "total_price": "100.00"
+        }
+      ],
+      "queries": [
+        {
+          "from": "2026-09-02",
+          "to": "2026-09-05",
+          "expected_revenue": 100.0,
+          "expected_days": 3
+        },
+        {
+          "from": "2026-09-02",
+          "to": "2026-09-03",
+          "expected_revenue": 33.33,
+          "expected_days": 1
+        },
+        {
+          "from": "2026-09-03",
+          "to": "2026-09-05",
+          "expected_revenue": 66.67,
+          "expected_days": 2
+        }
+      ]
+    },
+    {
+      "name": "aggregate_multiple_rentals",
+      "now": "2026-09-15T12:00:00+01:00",
+      "reservations": [
+        {
+          "id": "A",
+          "status": "COMPLETED",
+          "start_datetime": "2026-09-08T09:00:00+01:00",
+          "num_days": 2,
+          "daily_price": "150.00",
+          "total_price": "300.00"
+        },
+        {
+          "id": "B",
+          "status": "ACTIVE",
+          "start_datetime": "2026-09-12T09:00:00+01:00",
+          "num_days": 5,
+          "daily_price": "80.00",
+          "total_price": "400.00"
+        },
+        {
+          "id": "C",
+          "status": "CANCELLED",
+          "start_datetime": "2026-09-09T09:00:00+01:00",
+          "num_days": 3,
+          "daily_price": "500.00",
+          "total_price": "1500.00"
+        },
+        {
+          "id": "D",
+          "status": "RESERVED",
+          "start_datetime": "2026-09-20T09:00:00+01:00",
+          "num_days": 2,
+          "daily_price": "90.00",
+          "total_price": "180.00"
+        }
+      ],
+      "queries": [
+        {
+          "from": "2026-09-14",
+          "to": "2026-09-21",
+          "expected_revenue": 160.0,
+          "expected_days": 2
+        },
+        {
+          "from": "2026-09-07",
+          "to": "2026-09-14",
+          "expected_revenue": 460.0,
+          "expected_days": 4
+        },
+        {
+          "from": "2026-09-01",
+          "to": "2026-10-01",
+          "expected_revenue": 620.0,
+          "expected_days": 6
+        }
+      ]
+    }
+  ],
+  "period_bounds_cases": [
+    {
+      "now": "2026-09-16T12:00:00+01:00",
+      "name": "today",
+      "start": "2026-09-16",
+      "end": "2026-09-17"
+    },
+    {
+      "now": "2026-09-16T12:00:00+01:00",
+      "name": "yesterday",
+      "start": "2026-09-15",
+      "end": "2026-09-16"
+    },
+    {
+      "now": "2026-09-16T12:00:00+01:00",
+      "name": "week",
+      "start": "2026-09-14",
+      "end": "2026-09-21"
+    },
+    {
+      "now": "2026-09-16T12:00:00+01:00",
+      "name": "last_week",
+      "start": "2026-09-07",
+      "end": "2026-09-14"
+    },
+    {
+      "now": "2026-09-16T12:00:00+01:00",
+      "name": "month",
+      "start": "2026-09-01",
+      "end": "2026-10-01"
+    },
+    {
+      "now": "2026-09-16T12:00:00+01:00",
+      "name": "last_month",
+      "start": "2026-08-01",
+      "end": "2026-09-01"
+    },
+    {
+      "now": "2026-09-16T12:00:00+01:00",
+      "name": "year",
+      "start": "2026-01-01",
+      "end": "2027-01-01"
+    },
+    {
+      "now": "2026-09-16T12:00:00+01:00",
+      "name": "last_year",
+      "start": "2025-01-01",
+      "end": "2026-01-01"
+    },
+    {
+      "now": "2026-01-01T00:30:00+01:00",
+      "name": "last_month",
+      "start": "2025-12-01",
+      "end": "2026-01-01"
+    },
+    {
+      "now": "2026-01-10T00:30:00+01:00",
+      "name": "last_year",
+      "start": "2025-01-01",
+      "end": "2026-01-01"
+    },
+    {
+      "now": "2026-03-02T12:00:00+01:00",
+      "name": "last_month",
+      "start": "2026-02-01",
+      "end": "2026-03-01"
+    }
+  ]
+}

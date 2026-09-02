@@ -7,7 +7,8 @@ on:
     branches: [ "main" ]
 
 jobs:
-  test:
+  # Fast feedback: the full suite on in-memory SQLite.
+  test-sqlite:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -20,12 +21,51 @@ jobs:
           cd backend
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-      - name: Run Tests
+      - name: Run Tests (SQLite)
         env:
-          DATABASE_URL: sqlite+aiosqlite:///:memory:
-          DATABASE_URL_SYNC: sqlite:///:memory:
           JWT_SECRET: testsecret
           JWT_REFRESH_SECRET: testrefreshsecret
+        run: |
+          cd backend
+          pytest tests/
+
+  # Truth check: the SAME suite against a real PostgreSQL, so the prod code
+  # path (aware TIMESTAMP round-trips, tstzrange GIST exclusion constraints,
+  # NUMERIC summation) is actually exercised in CI — not only in production.
+  test-postgres:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: rental_ci
+          POSTGRES_PASSWORD: rental_ci
+          POSTGRES_DB: car_rental_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U rental_ci"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install Dependencies
+        run: |
+          cd backend
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install "psycopg2-binary" "asyncpg"
+      - name: Run Tests (PostgreSQL)
+        env:
+          JWT_SECRET: testsecret
+          JWT_REFRESH_SECRET: testrefreshsecret
+          TEST_DATABASE_URL: postgresql+asyncpg://rental_ci:rental_ci@localhost:5432/car_rental_ci
+          TEST_DATABASE_URL_SYNC: postgresql+psycopg2://rental_ci:rental_ci@localhost:5432/car_rental_ci
         run: |
           cd backend
           pytest tests/

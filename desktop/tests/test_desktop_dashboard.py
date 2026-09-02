@@ -14,70 +14,77 @@ def qapp():
     return QApplication.instance() or QApplication(sys.argv)
 
 
-def test_dashboard_initialization_and_periods(qapp):
+def test_dashboard_revenue_panel_periods_and_custom_range(qapp):
+    from datetime import date
     widget = DashboardWidget()
     assert widget is not None
 
-    # Verify period selector states exist
     combo = widget._period_combo
-    assert combo.count() == 3
-    assert combo.itemData(0) == "today"
-    assert combo.itemData(1) == "week"
-    assert combo.itemData(2) == "month"
+    # 8 presets + Personnalisé
+    names = [combo.itemData(i) for i in range(combo.count())]
+    assert names == ["today", "yesterday", "week", "last_week",
+                     "month", "last_month", "year", "last_year", "custom"]
 
-    # Test callback _on_period_changed does not crash for all 3 states
-    sample_overview = {
-        "total_vehicles": 10,
-        "available": 6,
-        "rented": 3,
-        "reserved": 1,
-        "maintenance": 0,
-        "active_maintenances": 0,
-        "day_locations": 2,
-        "today_revenue": 900.0,
-        "week_locations": 7,
-        "week_revenue": 3150.0,
-        "month_locations": 25,
-        "month_revenue": 11250.0,
-    }
-    sample_top = [
-        {"id": "v1", "brand": "Porsche", "model": "Macan", "registration": "12345-A-1", "rental_count": 5},
-        {"id": "v2", "brand": "Mercedes", "model": "Classe C", "registration": "67890-B-2", "rental_count": 3},
-    ]
+    # provider records the range it was asked for and returns a fixed number
+    calls = []
+    def provider(frm, to):
+        calls.append((frm, to))
+        return 4242.0, "server"
+    widget.set_revenue_provider(provider)
 
-    widget.refresh_data(sample_overview, sample_top)
+    # preset "today" -> from == to == today
+    combo.setCurrentIndex(names.index("today"))
+    widget._revenue_worker.wait(3000)
+    qapp.processEvents()
+    assert calls[-1][0] == calls[-1][1] == date.today()
+    assert "4 242.00 DH" in widget._revenue_value_lbl.text()
+    assert widget._custom_row.isHidden() is True
 
-    # 1. Test Today
-    combo.setCurrentIndex(0)
-    assert widget._current_period == "today"
-    assert "900.00 DH" in widget._card_revenue._count_lbl.text()
-    assert widget._card_day._count_lbl.text() == "2"
+    # preset "last_month" -> a full previous calendar month
+    combo.setCurrentIndex(names.index("last_month"))
+    widget._revenue_worker.wait(3000)
+    f, t_ = calls[-1]
+    assert f.day == 1 and t_.month == f.month and (t_ + __import__("datetime").timedelta(days=1)).day == 1
 
-    # 2. Test Week
-    combo.setCurrentIndex(1)
-    assert widget._current_period == "week"
-    assert "3150.00 DH" in widget._card_revenue._count_lbl.text()
-    assert widget._card_day._count_lbl.text() == "7"
+    # Personnalisé -> date pickers appear and drive the query
+    combo.setCurrentIndex(names.index("custom"))
+    assert widget._custom_row.isHidden() is False
+    from PySide6.QtCore import QDate
+    widget._date_from.setDate(QDate(2026, 3, 1))
+    widget._date_to.setDate(QDate(2026, 3, 15))
+    widget._revenue_worker.wait(3000)
+    assert calls[-1] == (date(2026, 3, 1), date(2026, 3, 15))
 
-    # 3. Test Month
-    combo.setCurrentIndex(2)
-    assert widget._current_period == "month"
-    assert "11250.00 DH" in widget._card_revenue._count_lbl.text()
-    assert widget._card_day._count_lbl.text() == "25"
+    # error source -> "données indisponibles", not a stale number
+    widget._on_revenue_done(-1.0, "error")
+    assert "indispon" in widget._revenue_value_lbl.text().lower()
 
-    # Verify fleet cards counts
-    assert widget._card_available._count_lbl.text() == "6"
-    assert widget._card_rented._count_lbl.text() == "3"
-
-    # Test live retranslation
     widget.retranslate_ui()
-    assert widget._period_combo.count() == 3
+    assert widget._period_combo.count() == 9
+    widget._revenue_worker.wait(3000)
+    qapp.processEvents()
+    widget.close()
 
 
-def test_vehicules_en_location_is_two_over_five(qapp):
+def test_dashboard_reads_maintenance_from_canonical_key(qapp):
+    """C1: the operational 'Maintenances actives' card must show the same
+    number as the fleet card, whichever key the payload used."""
+    widget = DashboardWidget()
+    widget.set_revenue_provider(lambda f, t: (0.0, "local"))
+    widget.refresh_data({
+        "total_vehicles": 3, "available": 0, "rented": 1,
+        "reserved": 0, "maintenance": 2,
+        "active_maintenance_tickets": 2,  # online payload key
+    }, [])
+    assert widget._card_maintenance._count_lbl.text() == "2"
+    assert widget._card_fleet_maintenance._count_lbl.text() == "2"
+
+
+def test_vehicules_en_location_shows_only_the_count_no_denominator(qapp):
     """USER SCENARIO: 5 total vehicles, 2 reservations covering now (both still
-    stored as RESERVED) -> the 'Véhicules en location' card must read 2 / 5.
-    Future / cancelled / ended reservations must NOT inflate the numerator.
+    stored as RESERVED) -> the 'Véhicules en location' card must read exactly
+    "2" — NO "/5", NO "2 sur 5", NO capacity ratio, NO progress bar.
+    Future / cancelled / ended reservations must NOT inflate the count.
     """
     from app.database import get_local_session, init_local_db
     from app.models.vehicle import LocalVehicle
@@ -122,5 +129,11 @@ def test_vehicules_en_location_is_two_over_five(qapp):
     widget.refresh_data(ov, [])
     total = ov["available"] + ov["rented"] + ov["reserved"] + ov["maintenance"]
     assert total == 5
+    # ONLY the number — the card no longer carries a denominator or a gauge.
     assert widget._card_rented._count_lbl.text() == "2"
-    assert widget._card_rented._ratio_lbl.text() == "2/5"
+    assert not hasattr(widget._card_rented, "_ratio_lbl")
+    assert not hasattr(widget._card_rented, "_prog_bar")
+    # and nothing anywhere on the card renders a "/5"-style ratio
+    from PySide6.QtWidgets import QLabel
+    for lbl in widget._card_rented.findChildren(QLabel):
+        assert "/" not in lbl.text() and " sur " not in lbl.text()

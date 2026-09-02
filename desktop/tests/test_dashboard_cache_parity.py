@@ -1,127 +1,79 @@
 """
-Desktop offline dashboard rule == backend canonical rule (parity proof).
+CROSS-RUNTIME PARITY — desktop offline revenue engine vs the normative spec.
 
-Seeds identical controlled data and asserts the desktop cache computation
-matches the exact semantics pinned in backend tests (status filter,
-start-in-[start,end) boundaries, Africa/Casablanca periods).
+Every case in ``shared/revenue_cases.json`` is pushed through the desktop
+``dashboard_cache.revenue_between_rows`` (the ONE desktop revenue function).
+Its output must equal ``shared/revenue_reference.py`` — the same file the
+backend and mobile parity tests assert against — so the desktop Dashboard,
+the backend and the phone can never show a different chiffre d'affaires.
 """
+import json
 import os
+import pathlib
 import sys
-from datetime import datetime, timedelta, timezone
-from zoneinfo import ZoneInfo
+from datetime import date, datetime
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ["CAR_RENTAL_DB_RESET"] = "1"
 
 import pytest
 
-TZ = ZoneInfo("Africa/Casablanca")
+_SHARED = pathlib.Path(__file__).resolve().parents[2] / "shared"
+sys.path.insert(0, str(_SHARED))
+from revenue_reference import revenue_between as ref_revenue  # noqa: E402
+from money_time import period_bounds as ref_period_bounds  # noqa: E402
+
+_CASES = json.loads((_SHARED / "revenue_cases.json").read_text())
 
 
-@pytest.fixture()
-def seeded():
-    from app.database import init_local_db, get_local_session
-    from app.models.vehicle import LocalVehicle
-    from app.models.reservation import LocalReservation
-    from app.models.maintenance import LocalMaintenance
-    init_local_db()
-    session = get_local_session()
-    now = datetime.now(timezone.utc).isoformat()
+@pytest.mark.parametrize("case", _CASES["revenue_cases"], ids=lambda c: c["name"])
+def test_desktop_revenue_matches_reference(case):
+    from app.sync.dashboard_cache import revenue_between_rows
 
-    session.merge(LocalVehicle(
-        id="d-veh-1", registration="DASH-1-A-1", vin="1M8GDM9AXKP042788",
-        brand="Renault", model="Clio", year=2024, color="Bleu",
-        fuel_type="DIESEL", transmission="MANUAL", current_mileage=100,
-        daily_rental_price=300.0, status="AVAILABLE",
-        created_at=now, updated_at=now, version=1))
-    session.merge(LocalVehicle(
-        id="d-veh-2", registration="DASH-2-B-2", vin="1M8GDM9AXKP042789",
-        brand="Dacia", model="Logan", year=2024, color="Blanc",
-        fuel_type="GASOLINE", transmission="MANUAL", current_mileage=200,
-        daily_rental_price=250.0, status="RENTED",
-        created_at=now, updated_at=now, version=1))
-    session.merge(LocalMaintenance(
-        id="d-mnt-1", vehicle_id="d-veh-1", type="Entretien",
-        start_datetime=now, status="ACTIVE", step="EN COURS",
-        created_at=now, updated_at=now, version=1))
-
-    tznow = datetime.now(TZ)
-    def local_iso(dt):
-        return dt.replace(tzinfo=None).isoformat()  # naive local wall time
-
+    now = datetime.fromisoformat(case["now"])
     rows = [
-        # (start_local, days, total, status)
-        (tznow.replace(hour=8), 2, 600.0, "COMPLETED"),    # today -> counted
-        (tznow.replace(hour=0, minute=0, second=0), 1, 250.0, "ACTIVE"), # today -> counted & currently active
-        (tznow - timedelta(days=3), 4, 999.0, "CANCELLED"),# excluded
-        (tznow - timedelta(days=10), 3, 750.0, "COMPLETED"),# this month only
+        {
+            "status": r["status"],
+            "start_datetime": r["start_datetime"],
+            "num_days": r["num_days"],
+            "daily_price": r["daily_price"],
+            "total_price": r["total_price"],
+        }
+        for r in case["reservations"]
     ]
-    for i, (start, days, total, status) in enumerate(rows):
-        session.merge(LocalReservation(
-            id=f"d-res-{i}", vehicle_id="d-veh-1" if i % 2 == 0 else "d-veh-2",
-            customer_name="Parity Test", customer_phone="+212612345678",
-            start_datetime=local_iso(start),
-            end_datetime=local_iso(start + timedelta(days=days)),
-            daily_price=100.0, num_days=days, total_price=total,
-            deposit=0, status=status, payment_status="PENDING",
-            created_at=now, updated_at=now, version=1))
-    session.commit()
-    session.close()
-    yield
+    for q in case["queries"]:
+        fd, td = date.fromisoformat(q["from"]), date.fromisoformat(q["to"])
+        rev, days = revenue_between_rows(rows, fd, td, now)
+        assert rev == pytest.approx(q["expected_revenue"]), (
+            f"{case['name']} {q['from']}..{q['to']}: desktop {rev} != {q['expected_revenue']}"
+        )
+        assert days == q["expected_days"]
+        assert rev == pytest.approx(ref_revenue(case["reservations"], fd, td, now))
 
 
-def test_local_overview_matches_backend_rule(seeded):
-    from app.sync.dashboard_cache import compute_local_overview
-    o = compute_local_overview()
+@pytest.mark.parametrize("pc", _CASES["period_bounds_cases"],
+                         ids=lambda c: f"{c['name']}@{c['now'][:10]}")
+def test_desktop_named_period_bounds_match_shared(pc):
+    from app.sync.dashboard_cache import _named_period_date_bounds, _now_biz
 
-    # Canonical effective status: d-veh-1 has an ACTIVE, open-ended maintenance
-    # ticket that has started -> it occupies the vehicle (MAINTENANCE) until
-    # closed. d-veh-2 has an ACTIVE reservation covering now -> RENTED.
-    # The dashboard shows ONE maintenance number.
-    assert o["total_vehicles"] == 2
-    assert o["available"] == 0 and o["rented"] == 1
-    assert o["reserved"] == 0 and o["maintenance"] == 1
-    assert o["active_maintenances"] == o["maintenance"] == 1
-    assert (o["available"] + o["rented"] + o["reserved"] + o["maintenance"]
-            == o["total_vehicles"])
+    now = _now_biz(datetime.fromisoformat(pc["now"]))
+    fd, td = _named_period_date_bounds(pc["name"], now)
+    assert fd.isoformat() == pc["start"]
+    assert td.isoformat() == pc["end"]
+    # and identical to the shared money_time implementation
+    s, e = ref_period_bounds(pc["name"], datetime.fromisoformat(pc["now"]))
+    assert fd == s.date() and td == e.date()
 
-    # Today: COMPLETED(600) + ACTIVE(250) count; CANCELLED excluded
-    assert o["today_rentals"] == 2
-    assert o["today_revenue"] == pytest.approx(850.0)
 
-    # Week: today's two + none older this week unless the -10d falls in it.
-    # Compute expected week revenue from the same rule.
-    from datetime import datetime as dt
-    now = datetime.now(TZ)
-    week_start = (now - timedelta(days=now.weekday())).replace(
-        hour=0, minute=0, second=0, microsecond=0)
-    expected_week = 850.0
-    if now - timedelta(days=10) >= week_start:
-        expected_week += 750.0  # -10d COMPLETED also in this week
-    assert o["week_revenue"] == pytest.approx(expected_week)
-    assert o["week_rentals"] == (3 if expected_week > 850 else 2)
+def test_overview_exposes_both_maintenance_keys():
+    """C1: the online payload uses `active_maintenance_tickets`, the offline
+    path historically only set `active_maintenances`. Both must always be
+    present so the UI's key lookup cannot miss."""
+    from app.sync.dashboard_cache import compute_overview_rows
 
-    # Month: all three non-cancelled (assuming all within current month)
-    in_month = (now - timedelta(days=10)).month == now.month
-    expected_month = 850.0 + (750.0 if in_month else 0.0)
-    assert o["month_revenue"] == pytest.approx(expected_month)
-
-    # Decimal precision: 0.1 + 0.2 case
-    from app.database import get_local_session
-    from app.models.reservation import LocalReservation
-    session = get_local_session()
-    now_iso = datetime.now(timezone.utc).isoformat()
-    tznow = datetime.now(TZ)
-    session.merge(LocalReservation(
-        id="d-res-prec", vehicle_id="d-veh-1",
-        customer_name="Parity", customer_phone="+212612345678",
-        start_datetime=tznow.replace(hour=11).replace(tzinfo=None).isoformat(),
-        end_datetime=(tznow + timedelta(days=1)).replace(tzinfo=None).isoformat(),
-        daily_price=0.15, num_days=1, total_price=0.1 + 0.2,
-        deposit=0, status="COMPLETED", payment_status="PENDING",
-        created_at=now_iso, updated_at=now_iso, version=1))
-    session.commit()
-    session.close()
-
-    o2 = compute_local_overview()
-    assert o2["today_revenue"] == pytest.approx(850.3)  # exact decimal, no drift
+    fleet = {"total_vehicles": 3, "available": 0, "rented": 1,
+             "reserved": 0, "maintenance": 2}
+    o = compute_overview_rows([], fleet, now=datetime.fromisoformat("2026-09-15T12:00:00+01:00"))
+    assert o["active_maintenances"] == 2
+    assert o["active_maintenance_tickets"] == 2
+    assert o["maintenance"] == 2

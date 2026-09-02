@@ -15,7 +15,14 @@ import androidx.room.RoomDatabase
         NotificationEntity::class,
         SyncMetadataEntity::class
     ],
-    version = 8,   // +ReservationEntity.startDatetimeIso/endDatetimeIso, +MaintenanceEntity.startDatetimeIso
+    // v9 — forced one-time cache reset for the dashboard-live-sync release.
+    // Schema is unchanged; the bump exists only so `fallbackToDestructiveMigration`
+    // wipes any stale local mirror (obsolete dashboard/sync-metadata/notification
+    // rows) on first launch of this build. Room then re-runs a clean INITIAL
+    // bootstrap from FastAPI/PostgreSQL (META_CACHE_COMPLETE is gone -> refreshAll()
+    // routes to bootstrapAndReset()). This is a CACHE reset only — it never
+    // touches the authoritative PostgreSQL data.
+    version = 9,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {

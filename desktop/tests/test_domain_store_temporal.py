@@ -191,9 +191,11 @@ def test_local_midnight_rolls_the_dashboard_period_cards():
     store = DomainStore(now_fn=lambda: holder["now"])
     store.reload()
 
-    assert store.snapshot.overview["today_revenue"] == 500.0
+    # PRO-RATA: at 23:59:59 only day 0 of the 5-day rental has elapsed -> 1 day
+    # of revenue (100), not the whole 500.
+    assert store.snapshot.overview["today_revenue"] == 100.0
     assert store.snapshot.overview["today_rentals"] == 1
-    assert store.snapshot.overview["week_revenue"] == 500.0
+    assert store.snapshot.overview["week_revenue"] == 100.0
     # the store armed the next boundary at local midnight
     assert store.snapshot.next_boundary == next_local_midnight(holder["now"])
     rev = store.revision
@@ -204,10 +206,11 @@ def test_local_midnight_rolls_the_dashboard_period_cards():
     assert published is True
     assert store.revision == rev + 1
 
-    assert store.snapshot.overview["today_revenue"] == 0.0   # new day, no rentals started today
+    # New calendar day: the one realised day (Aug 26) is no longer "today".
+    assert store.snapshot.overview["today_revenue"] == 0.0
     assert store.snapshot.overview["today_rentals"] == 0
-    assert store.snapshot.overview["week_revenue"] == 500.0  # still the same week
-    assert store.snapshot.overview["month_revenue"] == 500.0
+    assert store.snapshot.overview["week_revenue"] == 100.0   # Aug 26 still this week
+    assert store.snapshot.overview["month_revenue"] == 100.0  # and still this month
 
     # a second recompute at the same instant changes nothing
     assert store.recompute_effective() is False
@@ -230,21 +233,50 @@ def test_midnight_recompute_that_changes_nothing_is_silent():
     assert store.revision == rev
 
 
-# ── THE FORENSIC PROOF — real clock, real QTimer, nothing touched ──────
+# ── THE FORENSIC PROOF — controlled clock, manual scheduler, nothing touched ──
 def test_forensic_state_changes_because_time_passed(qapp, request):
-    """Seed a reservation ending in ~4 seconds. Observe RENTED. Do NOTHING —
-    no refresh, no tab switch, no sync, no mutation, no UI interaction. Wait.
-    Observe AVAILABLE. Exactly one revision, exactly one notification, every
-    subscribed view converged."""
-    now = datetime.now(timezone.utc)
-    end = now + timedelta(seconds=4)
+    """Seed a reservation ending 4s after T0. Observe RENTED. Do NOTHING —
+    no refresh, no tab switch, no sync, no mutation, no UI interaction. Advance
+    the clock past the boundary and let the BoundaryClock's scheduled callback
+    fire. Observe AVAILABLE. Exactly one revision, exactly one notification,
+    every subscribed view converged.
+
+    Deterministic: the DomainStore and the BoundaryClock run on an injected
+    clock (`now_fn`) and an injected scheduler (`schedule_fn`) — the project's
+    existing time abstraction — so the "before" state can never race a real
+    wall-clock and no sleeps or timing loops are needed. The full stack
+    (MainWindow, DomainStore, BoundaryClock, vehicle list, dashboard, store
+    subscriptions) is still exercised end to end.
+    """
+    T0 = datetime(2026, 1, 15, 12, 0, 0, tzinfo=timezone.utc)
+    clock = {"now": T0}
+    now_fn = lambda: clock["now"]
+
+    # Manual scheduler — records the pending (delay, callback); the test fires
+    # it explicitly after advancing the clock. Mirrors boundary_clock._qt_schedule
+    # / _QtTimerHandle without any real QTimer.
+    pending = []
+
+    def fake_schedule(delay_seconds, callback):
+        entry = [delay_seconds, callback]
+        pending.append(entry)
+
+        class _Handle:
+            def cancel(_self):
+                try:
+                    pending.remove(entry)
+                except ValueError:
+                    pass
+        return _Handle()
+
+    end = T0 + timedelta(seconds=4)
 
     s = get_local_session()
     _v(s, "veh-forensic")
-    _r(s, "res-forensic", "veh-forensic", now - timedelta(hours=1), end)
+    _r(s, "res-forensic", "veh-forensic", T0 - timedelta(hours=1), end)  # status ACTIVE
     s.commit(); s.close()
 
-    reset_domain_store()  # real wall-clock now_fn (default)
+    reset_domain_store(now_fn=now_fn)  # the singleton store runs on the fake clock
 
     from app.ui.main_window import MainWindow
     w = MainWindow(user_data={"user_id": "u1", "role": "ADMIN", "full_name": "A",
@@ -258,14 +290,25 @@ def test_forensic_state_changes_because_time_passed(qapp, request):
             w._realtime_client.stop()
         except Exception:
             pass
+
+    # Swap MainWindow's production BoundaryClock (real _utcnow + real QTimer)
+    # for one on the injected clock + manual scheduler, BEFORE any data loads.
+    w._boundary_clock.stop()
+    from app.state.boundary_clock import BoundaryClock as _BC
+    w._boundary_clock = _BC(w._store, now_fn=now_fn, schedule_fn=fake_schedule)
+    w._boundary_clock.start()
+
     request.addfinalizer(lambda: (w.close(), w.deleteLater(), qapp.processEvents()))
 
     store = w._store
-    # Let the deferred _initial_load (QTimer.singleShot(100)) fire and settle,
-    # so nothing but the BoundaryClock can bump the revision afterwards.
-    QTest.qWait(400)
+    # Drive the initial SQLite -> store load synchronously (instead of waiting on
+    # the QTimer.singleShot(100, _initial_load)); then neutralise the pending
+    # deferred call so nothing but the BoundaryClock can bump the revision.
+    w._initial_load()
+    w._initial_load = lambda *a, **k: None
+    qapp.processEvents()
 
-    # ── T-before ──────────────────────────────────────────────────────
+    # ── T-before (clock == T0 — deterministic) ────────────────────────
     old_revision = store.revision
     assert store.snapshot.effective_status("veh-forensic") == "RENTED"
     assert {v["id"]: v["status"] for v in w._vehicle_list._vehicles_data}["veh-forensic"] == "RENTED"
@@ -273,17 +316,17 @@ def test_forensic_state_changes_because_time_passed(qapp, request):
     boundary = store.snapshot.next_boundary
     assert boundary == end
     assert w._boundary_clock.running and w._boundary_clock.next_boundary == end
+    assert pending, "the BoundaryClock armed a timer for the boundary"
 
     notifications = []
     store.subscribe(lambda snap, rev: notifications.append(rev))
 
-    # ── DO NOTHING. Just let the Qt event loop run past the boundary. ──
-    import time as _time
-    _t0 = _time.monotonic()
-    while (_time.monotonic() - _t0 < 10.0
-           and store.snapshot.effective_status("veh-forensic") != "AVAILABLE"):
-        QTest.qWait(100)
-    print(f"waited              : {_time.monotonic() - _t0:.1f}s")
+    # ── TIME PASSES. Advance the clock past the boundary and let the
+    #    already-scheduled BoundaryClock callback fire. Nothing else. ──
+    clock["now"] = end + timedelta(seconds=1)
+    _delay, _cb = pending.pop()
+    _cb()                     # BoundaryClock._fire -> store.recompute_effective(now=fake)
+    qapp.processEvents()
 
     # ── T-after ───────────────────────────────────────────────────────
     new_revision = store.revision
