@@ -1,92 +1,38 @@
-# RELEASE MANIFEST — ATELIER BERLIN LOCATION CAR
+# RELEASE MANIFEST
 
-## Release Identification
-
-- **Release date**: 2026-08-24
-- **Application name**: ATELIER BERLIN LOCATION CAR
-- **Release status**: CLIENT DELIVERY READY — EXTERNAL SIGNING/DEPLOYMENT REQUIRED
-
-## Windows Package
-
-| Item | Value |
+| Field | Value |
 |---|---|
-| Package name | `ATELIER_BERLIN_LOCATION_CAR_WINDOWS.zip` |
-| Size | 61,439,783 bytes |
-| Build date | 2026-08-23 19:49 (UTC+1) |
-| Contents | `ATELIER_BERLIN_LOCATION_CAR.exe` + `_internal/` (bundled Qt DLLs incl. `qwindows.dll`, assets, translations) |
-| Validation | Built via PyInstaller; launch-tested under Wine (application start, local database initialization, GUI event loop, zero errors). Physical-Windows validation not performed. |
-| SHA-256 | `e49efd62ddb6bdbe6914c2a3d84cdbb94abb009f91484b3ef891329d5f16e8b3` |
+| Git branch | `main` |
+| Git SHA | `7aec46e` (merge: one auth system · one pro-rata revenue engine · one date/time contract · Postgres CI) |
+| Build date (UTC) | 2026-09-02 ~20:33 |
+| Tree state | clean (committed) |
 
-## Android Package
+## Android
 
-| Item | Value |
+| Field | Value |
 |---|---|
-| Package name | `app-debug.apk` (`com.example`) |
-| Type | DEBUG build (unsigned release) |
-| Version / Code | 1.0 / 1 |
-| Build date | 2026-08-23 |
-| API endpoint | Production server URL embedded (`car-rental-system.fly.dev`) |
-| Validation | Unit tests passed; login/bootstrap/vehicles/reservations/maintenance/notifications verified in code and tests; Room read cache included; no Flutter components |
-| SHA-256 | `a7ebebce1788346127c1325642687d8d8614f4fd2567ea017c1634290e568286` |
-| Signing | EXTERNAL SIGNING REQUIRED — release keystore passwords exist only in the project's CI secrets; a release APK must be produced through the configured CI pipeline or by the client's signing authority |
+| File | `ATELIER_BERLIN_LOCATION_CAR_7aec46e.apk` |
+| Type | debug-signed (`debugConfig`) — release-signed APK/AAB must come from `.github/workflows/android-release.yml` on a `v*` tag |
+| Size | 23,548,352 bytes |
+| SHA256 | `50eb12b1d391e8590ce14d42d54d0d852ae8dccd6e5d007ac144eff73d28434d` |
+| Contains | `RevenueEngine.kt` (pro-rata), `LoginResponseDto` without phantom `user`, split login error taxonomy |
 
-## Backend Status
+## Windows
 
-- FastAPI backend: healthy (`/health` → ok), all domains present:
-  authentication, clients, vehicles, reservations (`rentals`), maintenance,
-  notifications, dashboard, synchronization, realtime events.
-- Realtime endpoints require authenticated sessions; missing, invalid,
-  expired, malformed, forged and refresh tokens are rejected.
-- Verified against a locally rebuilt container from this exact source.
-
-## Database / Migration Status
-
-- PostgreSQL is the single authoritative store.
-- Alembic: exactly one head (`c8e41a7b2d95`); production database is at head.
-- Full migration chain applied cleanly to a fresh database (verification run).
-- Double-booking exclusion constraint active; production data preserved and untouched.
-
-## Test Status
-
-| Suite | Result |
+| Field | Value |
 |---|---|
-| Backend pytest | 73 passed, 1 skipped |
-| Desktop pytest | 41 passed, 1 skipped |
-| Realtime authentication tests | 19/19 PASS |
-| Offline pending upload tests | 17/17 PASS |
-| Double-booking protection | PASS |
-| Client synchronization | PASS |
-| Android unit tests | 11/11 PASS |
-| Clients canonical report tests | 6/6 PASS + live container probe PASS |
-| Android debug build | PASS |
-| Android release compilation (no signing) | PASS |
-| Docker rebuild verification | PASS |
-| Delivery package secret audit | CLEAN |
+| ZIP | `ATELIER_BERLIN_LOCATION_CAR_WINDOWS_7aec46e.zip` |
+| ZIP size | 61,944,236 bytes (902 files) |
+| ZIP SHA256 | `71ee4af2d27cca4800a1dd69a3100ca81a19b3ff197f5138717a84787713a96e` |
+| EXE | `ATELIER_BERLIN_LOCATION_CAR/ATELIER_BERLIN_LOCATION_CAR.exe` |
+| EXE size | 9,143,963 bytes |
+| EXE SHA256 | `f01578fb89fb11fdf399595053fd281d2e2eaa843ffdeb30fdcdc11e0941f961` |
+| Contains | `auth_client.py` (one auth client), rebuilt revenue widget, `shared/money_time.py` + `shared/revenue_reference.py` bundled |
 
-## Known External Requirements
+## Backend
 
-1. **Production deployment** — deploy current verified source through the
-   normal pipeline (Fly.io). Not performed here (no authorization).
-   Until deployed, the running server image predates the realtime
-   authentication enforcement.
-2. **Android release signing** — EXTERNAL SIGNING REQUIRED (CI secrets).
-3. **Windows physical validation** — recommended one interactive launch on a
-   real Windows machine (Wine validation already performed).
+Not yet deployed — `git push origin main && fly deploy` required (both blocked for the automated session). Prod is still at fly release v24 (pre-pro-rata).
 
-## Final Status
+## Supersedes
 
-CLIENT DELIVERY READY — EXTERNAL SIGNING/DEPLOYMENT REQUIRED
-
-
-## Version 1.0.1 (Verification Build)
-
-- **Build date**: 2026-08-26 21:42
-- **Commit hash**: `1eada32a46aca77528ac9963462ea073ef48abec`
-- **Reason**: Live re-verification of reservation availability fix
-
-### Artifacts
-
-| Component | Hash / Identifier | Details |
-|---|---|---|
-| **Backend Docker** | `sha256:f87fadf687b46a16e451332d099759997845d8ae95fa4a617844145eca1d4485` | `docker/Dockerfile.backend`, verified via `/health` |
-| **Windows Desktop** | `2879b0f73c3e05ac594794b2a2c09e9474524aa86e1bcd32df61fc1f1b3daeb5` | 61,440,979 bytes |
+Prior artifacts built from `7de8ece` (pre-forensic): `ATELIER_BERLIN_LOCATION_CAR_WINDOWS.zip` @ 03:47, `app-debug.apk` @ 03:41, `atelier-berlin-location-car-mobile-security-e447da7.zip`. Do not distribute those.
