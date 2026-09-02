@@ -131,8 +131,19 @@ class ClientsWidget(QWidget):
     # ── Data loading ──────────────────────────────────────────────
 
     def refresh_data(self):
-        """Refresh clients: API via background thread when authenticated,
-        otherwise the labeled local cache. Never blocks the UI thread."""
+        """Refresh clients from the canonical DomainStore snapshot. Never blocks UI."""
+        try:
+            from app.state.domain_store import get_domain_store
+            store = get_domain_store()
+            snap = store.snapshot
+            if snap and hasattr(snap, "clients") and snap.clients:
+                self._clients = list(snap.clients)
+                self._set_mode_label(live=True)
+                self._render()
+                return
+        except Exception as e:
+            logger.debug("DomainStore client load note: %s", e)
+
         if self._api is not None and getattr(self._api, "_access_token", ""):
             fetcher = ClientsFetcher(self._api, parent=self)
             fetcher.clients_ready.connect(self._on_clients_fetched)

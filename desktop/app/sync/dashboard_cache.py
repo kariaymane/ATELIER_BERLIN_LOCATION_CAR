@@ -161,7 +161,7 @@ def compute_overview_rows(reservation_rows, fleet_counts, now=None):
         fd, td = _named_period_date_bounds(name, now)
         rev, _days = revenue_between_rows(rows, fd, td, now)
         out[f"{key}_rentals"] = _rentals_started(rows, fd, td)
-        out[f"{key}_revenue"] = rev if rows else None
+        out[f"{key}_revenue"] = float(rev) if rev is not None else 0.0
     return out
 
 

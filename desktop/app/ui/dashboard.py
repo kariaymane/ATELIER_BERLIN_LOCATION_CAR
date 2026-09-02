@@ -405,7 +405,8 @@ class DashboardWidget(QWidget):
             t("dashboard.rev_range", frm=f.strftime("%d/%m/%Y"),
               to=t_incl.strftime("%d/%m/%Y"))
         )
-        self._revenue_value_lbl.setText("…")
+        if not self._revenue_value_lbl.text() or self._revenue_value_lbl.text() in ("—", ""):
+            self._revenue_value_lbl.setText("…")
         if self._revenue_provider is None:
             return
         from PySide6.QtWidgets import QApplication

@@ -186,14 +186,6 @@ class VehicleService:
         if not vehicle:
             return {"error": get_message("vehicle.not_found", lang)}
 
-        await self._audit.create(
-            entity_type="vehicle",
-            action="DELETED",
-            entity_id=vehicle.id,
-            user_id=deleted_by,
-            old_values={"registration": vehicle.registration},
-        )
-
         from sqlalchemy import select
         from app.models.reservation import Reservation
         from app.models.maintenance import Maintenance
@@ -207,9 +199,25 @@ class VehicleService:
 
         if reservations.first() or maintenances.first():
             vehicle.status = "INACTIVE"
+            vehicle.version += 1
             await self._session.commit()
+            await self._audit.create(
+                entity_type="vehicle",
+                action="DEACTIVATED",
+                entity_id=vehicle.id,
+                user_id=deleted_by,
+                old_values={"registration": vehicle.registration, "status": "AVAILABLE"},
+                new_values={"status": "INACTIVE"},
+            )
             return {"message": "Véhicule désactivé car il possède un historique de location ou de maintenance."}
 
+        await self._audit.create(
+            entity_type="vehicle",
+            action="DELETED",
+            entity_id=vehicle.id,
+            user_id=deleted_by,
+            old_values={"registration": vehicle.registration},
+        )
         await self._repo.delete_entity(vehicle)
         return {"message": get_message("vehicle.deleted", lang)}
 

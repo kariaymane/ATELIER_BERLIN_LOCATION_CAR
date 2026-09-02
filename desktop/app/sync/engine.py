@@ -245,10 +245,12 @@ class SyncEngine:
                 if response.status_code == 200:
                     data = response.json()
                     from app.utils.datetime_utils import parse_datetime_utc
+                    items = data.get("items", [])
+                    success = self.apply_pulled_items(items)
+                    if not success:
+                        return {"status": "error", "message": "Failed to apply pulled items into SQLite"}
                     self._last_sync = parse_datetime_utc(data["server_time"])
                     self._is_online = True
-                    items = data.get("items", [])
-                    self.apply_pulled_items(items)
                     return {"status": "ok", "items": items}
                 else:
                     return {"status": "error", "message": f"Server error: {response.status_code}"}
@@ -257,10 +259,10 @@ class SyncEngine:
             self._is_online = False
             return {"status": "offline", "message": str(e)}
 
-    def apply_pulled_items(self, items: list):
+    def apply_pulled_items(self, items: list) -> bool:
         """Merge pulled server items directly into local SQLite database."""
         if not items:
-            return
+            return True
 
         session = get_local_session()
         try:
@@ -466,9 +468,11 @@ class SyncEngine:
                             session.add(local_part)
 
             session.commit()
+            return True
         except Exception as e:
             session.rollback()
             logger.error("Failed to merge pulled items into SQLite: %s", e)
+            return False
         finally:
             session.close()
 
