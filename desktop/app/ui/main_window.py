@@ -534,15 +534,10 @@ class MainWindow(QMainWindow):
             if not reentrant_render_done:
                 # We are inside the fan-out (or nothing changed): render now.
                 overview = dict(self._store.snapshot.overview or {})
-                prev = getattr(self, "_last_server_overview", None) or {}
                 for key in ("today_revenue", "week_revenue", "month_revenue", "year_revenue"):
                     if overview.get(key) is None:
-                        overview[key] = prev.get(key, 0.0)
-                # Top-5: prefer the server's (/dashboard/vehicle-performance),
-                # fall back to the CANONICAL local computation so the panel is
-                # never blank just because the server is unreachable.
-                top = getattr(self, "_last_server_top_vehicles", None) \
-                    or [dict(v) for v in self._store.snapshot.top_vehicles]
+                        overview[key] = 0.0
+                top = [dict(v) for v in self._store.snapshot.top_vehicles]
                 self._dashboard.refresh_data(overview, top, request_revenue=request_revenue)
             elif not fetch_server:
                 return  # reload()'s fan-out already re-rendered the dashboard
@@ -662,14 +657,11 @@ class MainWindow(QMainWindow):
                 push_res = report.get("push", {})
                 pull_res = report.get("pull", {})
                 upload_res = report.get("uploads", {})
-                has_changes = (
-                    push_res.get("pushed", 0) > 0
-                    or len(pull_res.get("items", [])) > 0
-                    or upload_res.get("uploaded", 0) > 0
-                    or push_res.get("conflicts")
-                )
-                if has_changes:
-                    get_event_bus().data_refreshed.emit()
+                # Unconditionally trigger global data_refreshed on sync completion:
+                # Guarantees that DomainStore reloads and fans out to all views
+                # (Vehicles, Reservations, Maintenance, Clients, Dashboard) so no stale state lingers.
+                get_event_bus().data_refreshed.emit()
+
                 # Surface server-rejected reservations visibly (never silent).
                 for conflict in push_res.get("conflicts") or []:
                     if conflict.get("entity_type") == "reservation":
@@ -678,10 +670,6 @@ class MainWindow(QMainWindow):
 
                 status_text = t("sync.reconnected") if was_offline else t("sync.online")
                 self.statusBar().showMessage(status_text, 4000)
-                
-                # Safe to fetch dashboard stats now that push/pull have stabilized state.
-                # request_revenue=True on manual refresh or when server data changed.
-                self._refresh_dashboard(fetch_server=True, request_revenue=has_changes)
             else:
                 self._is_online = False
                 self.statusBar().showMessage(t("sync.offline"))
@@ -696,29 +684,28 @@ class MainWindow(QMainWindow):
 
         The sync thread pulls server deltas, then ``_on_sync_finished``
         triggers ``DomainStore.reload()`` which fans out to every view.
-        We do NOT emit ``data_refreshed`` here: doing so before the sync
-        thread has finished would reload from stale SQLite and cause the
-        dashboard to flicker to pre-sync values (the root cause of the
-        Chef/DarPra dashboard corruption bug).
+        If a sync is already in flight, mark it pending so a single follow-up
+        cycle executes immediately upon completion — never drops clicks or races.
         """
-        # Debounce: if a sync is already in-flight, ignore repeated clicks
+        self._refresh_btn.setEnabled(False)
+        self._refresh_btn.setText(t("topbar.refreshing"))
+
         thread = getattr(self, "_sync_thread", None)
         try:
             if thread is not None and thread.isRunning():
-                return  # sync already in progress — don't stack another
+                self._sync_pending = True
+                return  # sync already running — follow-up is scheduled
         except RuntimeError:
             pass
 
-        self._refresh_btn.setEnabled(False)
-        self._refresh_btn.setText(t("topbar.refreshing"))
         self._run_sync()
-        # _on_sync_finished restores the button text via _restore_refresh_btn
 
     def _restore_refresh_btn(self):
         """Restore the topbar refresh button after a sync cycle completes."""
         try:
             self._refresh_btn.setEnabled(True)
-            self._refresh_btn.setText(t("topbar.updated"))
+            status_text = t("topbar.updated") if self._is_online else t("sync.offline")
+            self._refresh_btn.setText(status_text)
             QTimer.singleShot(2000, lambda: self._refresh_btn.setText(t("topbar.refresh")))
         except RuntimeError:
             pass  # widget already destroyed during shutdown

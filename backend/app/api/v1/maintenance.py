@@ -494,6 +494,16 @@ async def delete_maintenance(
             detail="Impossible de supprimer une maintenance en cours. Veuillez la terminer ou l'annuler d'abord."
         )
 
+    from app.repositories.audit_repository import AuditRepository
+    user_id = UUID(current_user["sub"]) if "sub" in current_user else None
+    await AuditRepository(db).create(
+        entity_type="maintenance",
+        action="DELETED",
+        entity_id=maintenance_id,
+        user_id=user_id,
+        old_values={"vehicle_id": str(m.vehicle_id), "type": m.type},
+    )
+
     await db.delete(m)
     await db.commit()
 

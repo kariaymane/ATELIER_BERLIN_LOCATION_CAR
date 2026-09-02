@@ -71,6 +71,7 @@ class DomainSnapshot:
     vehicles: tuple = ()
     reservations: tuple = ()
     maintenances: tuple = ()
+    clients: tuple = ()
     effective: dict = field(default_factory=dict)      # vehicle_id -> effective status
     fleet_counts: dict = field(default_factory=dict)   # canonical mutually-exclusive buckets
     overview: dict = field(default_factory=dict)       # dashboard overview (compute_local_overview)
@@ -81,6 +82,12 @@ class DomainSnapshot:
         for v in self.vehicles:
             if str(v.get("id")) == str(vehicle_id):
                 return v
+        return None
+
+    def client(self, client_id: str) -> Optional[dict]:
+        for c in self.clients:
+            if str(c.get("id")) == str(client_id):
+                return c
         return None
 
     def effective_status(self, vehicle_id: str) -> Optional[str]:
@@ -159,6 +166,10 @@ class DomainStore:
                 session = get_local_session()
             try:
                 snap = self._build_snapshot(session, self._revision + 1, self.now())
+                if not self._validate_snapshot(snap):
+                    logger.error("DomainStore: snapshot validation failed at revision %s, keeping previous valid state (revision %s)",
+                                 snap.revision, self._revision)
+                    return self._snapshot
             finally:
                 if own:
                     session.close()
@@ -170,6 +181,30 @@ class DomainStore:
         finally:
             self._reloading = False
         return self._snapshot
+
+    @staticmethod
+    def _validate_snapshot(snap: DomainSnapshot) -> bool:
+        """Validate critical snapshot invariants before publishing to UI.
+        Guarantees that no corrupted or physically impossible state is published.
+        """
+        try:
+            fc = snap.fleet_counts or {}
+            for k in ("total_vehicles", "available", "rented", "reserved", "maintenance"):
+                val = fc.get(k, 0)
+                if val < 0:
+                    logger.error("Snapshot validation failed: negative count for %s = %s", k, val)
+                    return False
+
+            ov = snap.overview or {}
+            for k in ("today_revenue", "week_revenue", "month_revenue", "year_revenue"):
+                val = ov.get(k)
+                if val is not None and (not isinstance(val, (int, float)) or val < 0):
+                    logger.error("Snapshot validation failed: invalid revenue %s = %s", k, val)
+                    return False
+            return True
+        except Exception as e:
+            logger.error("Snapshot validation encountered error: %s", e)
+            return False
 
     def mutate(self, fn: Callable[[object], None]) -> DomainSnapshot:
         """Run ``fn(session)`` inside a single SQLite transaction.
@@ -200,6 +235,7 @@ class DomainStore:
         from app.models.vehicle import LocalVehicle
         from app.models.reservation import LocalReservation
         from app.models.maintenance import LocalMaintenance
+        from app.models.client import LocalClient
         from app.utils.fleet_status import (
             compute_fleet_sets, effective_status as _eff, compute_fleet_counts,
         )
@@ -208,6 +244,7 @@ class DomainStore:
         vehicles = session.query(LocalVehicle).all()
         reservations = session.query(LocalReservation).all()
         maintenances = session.query(LocalMaintenance).all()
+        clients = session.query(LocalClient).order_by(LocalClient.last_name).all()
 
         rented_vids, reserved_vids, maint_vids, _total = compute_fleet_sets(session, now=now)
 
@@ -280,10 +317,32 @@ class DomainStore:
                 "version": m.version,
             }
 
+        def _client_dict(c) -> dict:
+            return {
+                "id": str(c.id),
+                "first_name": c.first_name or "",
+                "last_name": c.last_name or "",
+                "phone": c.phone or "",
+                "email": c.email or "",
+                "cin_number": getattr(c, "cin_number", "") or "",
+                "license_number": getattr(c, "license_number", "") or "",
+                "status": getattr(c, "status", "ACTIVE"),
+                "photo_url": getattr(c, "photo_url", None),
+                "identity_card_image": getattr(c, "identity_card_image", None),
+                "identity_card_image_back": getattr(c, "identity_card_image_back", None),
+                "driving_license_image": getattr(c, "driving_license_image", None),
+                "driving_license_image_back": getattr(c, "driving_license_image_back", None),
+                "notes": getattr(c, "notes", None),
+                "version": getattr(c, "version", 1),
+                "created_at": getattr(c, "created_at", None),
+                "updated_at": getattr(c, "updated_at", None),
+            }
+
         fleet_counts = compute_fleet_counts(session, now=now)
 
         res_dicts = tuple(_res_dict(r) for r in reservations)
         maint_dicts = tuple(_maint_dict(m) for m in maintenances)
+        client_dicts = tuple(_client_dict(c) for c in clients)
 
         try:
             from app.sync.dashboard_cache import compute_overview_rows, compute_top_vehicles_rows
@@ -307,6 +366,7 @@ class DomainStore:
             vehicles=tuple(vehicle_dicts),
             reservations=res_dicts,
             maintenances=maint_dicts,
+            clients=client_dicts,
             effective=effective,
             fleet_counts=fleet_counts,
             overview=overview,
@@ -366,6 +426,7 @@ class DomainStore:
                 vehicles=new_vehicles,
                 reservations=base.reservations,
                 maintenances=base.maintenances,
+                clients=base.clients,
                 effective=new_effective,
                 fleet_counts=new_counts,
                 overview=new_overview,
