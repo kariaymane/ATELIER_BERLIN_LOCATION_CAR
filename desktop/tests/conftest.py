@@ -4,6 +4,20 @@ import pytest
 
 
 @pytest.fixture(autouse=True)
+def _no_network_warmup(monkeypatch):
+    """The login screen fires a /health warmup ping on open. In tests that
+    must never touch the real network (or block on a DNS/connect timeout)."""
+    try:
+        monkeypatch.setattr(
+            "app.services.auth_client.AuthClient.warmup",
+            lambda self: None,
+            raising=False,
+        )
+    except Exception:
+        pass
+
+
+@pytest.fixture(autouse=True)
 def _reset_domain_store():
     """Give every test a fresh DomainStore singleton with no leftover
     subscribers from a previous test's (now-destroyed) MainWindow."""

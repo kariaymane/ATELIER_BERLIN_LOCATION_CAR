@@ -191,9 +191,11 @@ def test_local_midnight_rolls_the_dashboard_period_cards():
     store = DomainStore(now_fn=lambda: holder["now"])
     store.reload()
 
-    assert store.snapshot.overview["today_revenue"] == 500.0
+    # PRO-RATA: at 23:59:59 only day 0 of the 5-day rental has elapsed -> 1 day
+    # of revenue (100), not the whole 500.
+    assert store.snapshot.overview["today_revenue"] == 100.0
     assert store.snapshot.overview["today_rentals"] == 1
-    assert store.snapshot.overview["week_revenue"] == 500.0
+    assert store.snapshot.overview["week_revenue"] == 100.0
     # the store armed the next boundary at local midnight
     assert store.snapshot.next_boundary == next_local_midnight(holder["now"])
     rev = store.revision
@@ -204,10 +206,11 @@ def test_local_midnight_rolls_the_dashboard_period_cards():
     assert published is True
     assert store.revision == rev + 1
 
-    assert store.snapshot.overview["today_revenue"] == 0.0   # new day, no rentals started today
+    # New calendar day: the one realised day (Aug 26) is no longer "today".
+    assert store.snapshot.overview["today_revenue"] == 0.0
     assert store.snapshot.overview["today_rentals"] == 0
-    assert store.snapshot.overview["week_revenue"] == 500.0  # still the same week
-    assert store.snapshot.overview["month_revenue"] == 500.0
+    assert store.snapshot.overview["week_revenue"] == 100.0   # Aug 26 still this week
+    assert store.snapshot.overview["month_revenue"] == 100.0  # and still this month
 
     # a second recompute at the same instant changes nothing
     assert store.recompute_effective() is False

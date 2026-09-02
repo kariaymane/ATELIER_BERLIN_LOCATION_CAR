@@ -215,6 +215,18 @@ class ApiClient:
         r = self._request("get", f"/api/v1/dashboard/{period}")
         return r.json() if r and r.status_code == 200 else None
 
+    def get_revenue_range(self, from_iso: str, to_iso: str) -> Optional[dict]:
+        """Canonical custom-range chiffre d'affaires. `from`/`to` are ISO
+        YYYY-MM-DD; `to` is inclusive (the UI 'Au' date counts in full)."""
+        r = self._request(
+            "get", f"/api/v1/dashboard/revenue?from={from_iso}&to={to_iso}", retries=2
+        )
+        return r.json() if r and r.status_code == 200 else None
+
+    def get_period_revenue(self, name: str) -> Optional[dict]:
+        r = self._request("get", f"/api/v1/dashboard/period/{name}", retries=2)
+        return r.json() if r and r.status_code == 200 else None
+
     def get_vehicle_performance(self) -> Optional[list]:
         r = self._request("get", "/api/v1/dashboard/vehicle-performance")
         return r.json() if r and r.status_code == 200 else None

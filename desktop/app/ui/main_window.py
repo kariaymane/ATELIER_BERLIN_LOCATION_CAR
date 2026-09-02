@@ -5,7 +5,7 @@ Offline-first architecture with automatic background synchronization and full lo
 import uuid
 import logging
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta, date
 from pathlib import Path
 
 from PySide6.QtWidgets import (
@@ -60,30 +60,29 @@ class DashboardFetcher(QThread):
         top_vehicles = []
         try:
             headers = {"Authorization": f"Bearer {self._access_token}"}
+            # 25s read timeout: the Fly machine can cold-start (a 5s timeout
+            # here made the dashboard show its empty 0-state after any idle
+            # period — same failure class as the old login timeout).
             resp_stats = requests.get(
                 f"{API_BASE_URL}/api/{API_VERSION}/dashboard/stats",
-                headers=headers, timeout=5,
+                headers=headers, timeout=(5, 25),
             )
             resp_perf = requests.get(
                 f"{API_BASE_URL}/api/{API_VERSION}/dashboard/vehicle-performance",
-                headers=headers, timeout=5,
+                headers=headers, timeout=(5, 25),
             )
             if resp_stats.status_code == 200:
                 data = resp_stats.json()
-                overview = {
-                    "total_vehicles": data.get("total_vehicles", 0),
-                    "available": data.get("available", 0),
-                    "rented": data.get("rented", 0),
-                    "reserved": data.get("reserved", 0),
-                    "maintenance": data.get("maintenance", 0),
-                    "active_maintenances": data.get("active_maintenance_tickets", 0),
-                    "day_locations": data.get("today_rentals", 0),
-                    "today_revenue": data.get("today_revenue", 0.0),
-                    "week_locations": data.get("week_rentals", 0),
-                    "week_revenue": data.get("week_revenue", 0.0),
-                    "month_locations": data.get("month_rentals", 0),
-                    "month_revenue": data.get("month_revenue", 0.0),
-                }
+                # Pass the WHOLE canonical payload through (no key cherry-pick
+                # that silently drops year_* — FORENSIC_ROOT_CAUSE_ANALYSIS.md
+                # §4 C1). Add the aliases the widget also accepts.
+                overview = dict(data)
+                overview.setdefault("active_maintenances", data.get("active_maintenance_tickets", 0))
+                overview.setdefault("active_maintenance_tickets", data.get("active_maintenances", 0))
+                overview["day_locations"] = data.get("today_rentals", 0)
+                overview["week_locations"] = data.get("week_rentals", 0)
+                overview["month_locations"] = data.get("month_rentals", 0)
+                overview["year_locations"] = data.get("year_rentals", 0)
                 top_vehicles = resp_perf.json() if resp_perf.status_code == 200 else []
         except Exception as e:
             logger.info("Dashboard fetch failed (offline?): %s", e)
@@ -336,6 +335,7 @@ class MainWindow(QMainWindow):
 
         # 1. Dashboard
         self._dashboard = DashboardWidget()
+        self._dashboard.set_revenue_provider(self._revenue_provider)
         self._add_page("dashboard", self._dashboard)
 
         # 2. Vehicles
@@ -554,6 +554,30 @@ class MainWindow(QMainWindow):
             fetcher.finished.connect(fetcher.deleteLater)
             self._dashboard_fetcher = fetcher  # keep reference
             fetcher.start()
+
+    def _revenue_provider(self, from_date: date, to_date_inclusive: date):
+        """(revenue, source) for the dashboard revenue panel. Canonical
+        backend endpoint first; offline -> the SAME pro-rata rule over the
+        DomainStore snapshot. Runs on a worker thread (never the UI thread)."""
+        f_iso = from_date.isoformat()
+        t_iso = to_date_inclusive.isoformat()
+        if self._is_online and self._access_token:
+            try:
+                data = self._api.get_revenue_range(f_iso, t_iso)
+                if data and data.get("revenue") is not None:
+                    return float(data["revenue"]), "server"
+            except Exception as e:
+                logger.info("revenue range fetch failed, using local: %s", e)
+        try:
+            from app.sync.dashboard_cache import revenue_between_rows
+            rows = list(self._store.snapshot.reservations or [])
+            rev, _days = revenue_between_rows(
+                rows, from_date, to_date_inclusive + timedelta(days=1)
+            )
+            return rev, "local"
+        except Exception as e:
+            logger.error("local revenue computation failed: %s", e)
+            return None, "error"
 
     def _on_dashboard_stats(self, overview: dict, top_vehicles: list, generation: int = 0):
         """Apply API dashboard results (delivered on the UI thread)."""
