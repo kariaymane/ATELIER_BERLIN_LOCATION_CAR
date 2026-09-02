@@ -3,36 +3,33 @@
 | Field | Value |
 |---|---|
 | Git branch | `main` |
-| Git SHA | `7aec46e` (merge: one auth system · one pro-rata revenue engine · one date/time contract · Postgres CI) |
-| Build date (UTC) | 2026-09-02 ~20:33 |
+| Git SHA | `7a59534` (fix(sync): unified refresh pipeline, eliminate dashboard corruption and harden mobile cold-start timeouts) |
+| Build date (UTC) | 2026-09-02 ~21:40 |
 | Tree state | clean (committed) |
 
 ## Android
 
 | Field | Value |
 |---|---|
-| File | `ATELIER_BERLIN_LOCATION_CAR_7aec46e.apk` |
-| Type | debug-signed (`debugConfig`) — release-signed APK/AAB must come from `.github/workflows/android-release.yml` on a `v*` tag |
-| Size | 23,548,352 bytes |
-| SHA256 | `50eb12b1d391e8590ce14d42d54d0d852ae8dccd6e5d007ac144eff73d28434d` |
-| Contains | `RevenueEngine.kt` (pro-rata), `LoginResponseDto` without phantom `user`, split login error taxonomy |
+| File | `ATELIER_BERLIN_LOCATION_CAR_7a59534.apk` |
+| Type | debug-signed (`debugConfig`) |
+| Size | 23,374,417 bytes |
+| SHA256 | `a16cac75cd924cb5d8addd38413b6ee25514028c3d7ec62fba27b5d4d313ed39` |
+| Contains | Cold-start resilient connection timeouts (20s connect, 30s read, 20s WS), `RevenueEngine.kt` (pro-rata), `BoundaryTicker.kt` |
 
 ## Windows
 
 | Field | Value |
 |---|---|
-| ZIP | `ATELIER_BERLIN_LOCATION_CAR_WINDOWS_7aec46e.zip` |
-| ZIP size | 61,944,236 bytes (902 files) |
-| ZIP SHA256 | `71ee4af2d27cca4800a1dd69a3100ca81a19b3ff197f5138717a84787713a96e` |
+| ZIP | `ATELIER_BERLIN_LOCATION_CAR_WINDOWS_7a59534.zip` |
+| ZIP size | 61,945,053 bytes |
+| ZIP SHA256 | `08050b3ce5549aca469f6c973d0d850d9090715df62cf12be3f4e72affd71596` |
 | EXE | `ATELIER_BERLIN_LOCATION_CAR/ATELIER_BERLIN_LOCATION_CAR.exe` |
 | EXE size | 9,143,963 bytes |
-| EXE SHA256 | `f01578fb89fb11fdf399595053fd281d2e2eaa843ffdeb30fdcdc11e0941f961` |
-| Contains | `auth_client.py` (one auth client), rebuilt revenue widget, `shared/money_time.py` + `shared/revenue_reference.py` bundled |
-
-## Backend
-
-Not yet deployed — `git push origin main && fly deploy` required (both blocked for the automated session). Prod is still at fly release v24 (pre-pro-rata).
+| EXE SHA256 | `652e87d7054e5af18ebba8d51df28ebe1f2e7bf3a342bf57de74dd937122e5d9` |
+| Contains | Single canonical refresh pipeline (auto-sync + manual sync convergence), debounce protection, eliminated dashboard zero-flicker, dedicated revenue request guard |
 
 ## Supersedes
 
-Prior artifacts built from `7de8ece` (pre-forensic): `ATELIER_BERLIN_LOCATION_CAR_WINDOWS.zip` @ 03:47, `app-debug.apk` @ 03:41, `atelier-berlin-location-car-mobile-security-e447da7.zip`. Do not distribute those.
+Prior artifacts: `ATELIER_BERLIN_LOCATION_CAR_7aec46e.apk`, `ATELIER_BERLIN_LOCATION_CAR_WINDOWS_7aec46e.zip`, and older builds.
+
