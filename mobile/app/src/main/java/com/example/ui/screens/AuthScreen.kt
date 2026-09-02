@@ -27,6 +27,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -48,6 +49,11 @@ fun AuthScreen(
     modifier: Modifier = Modifier
 ) {
     var email by remember { mutableStateOf("") }
+    // SECURITY: plaintext password lives ONLY in this transient composition
+    // state. Deliberately `remember` (never `rememberSaveable`) so it is never
+    // written to the saved-instance Bundle and cannot be restored after a
+    // configuration change or process death. It is wiped the instant login
+    // succeeds and again when this screen leaves composition (see below).
     var password by remember { mutableStateOf("") }
     var passwordVisible by remember { mutableStateOf(false) }
     var showServerConfig by remember { mutableStateOf(false) }
@@ -57,6 +63,32 @@ fun AuthScreen(
     val errorMessage by viewModel.errorMessage.collectAsState()
     val focusManager = LocalFocusManager.current
     val scrollState = rememberScrollState()
+
+    // SECURITY: drop the plaintext password (and the reveal toggle) the moment
+    // this screen is torn down — logout, navigation, or process teardown.
+    DisposableEffect(Unit) {
+        onDispose {
+            password = ""
+            passwordVisible = false
+        }
+    }
+
+    // Single place that fires a login attempt and guarantees the plaintext
+    // password is cleared from UI state as soon as authentication succeeds,
+    // BEFORE navigating away. From here on the app runs purely on the
+    // token/session held by TokenManager.
+    fun attemptLogin() {
+        focusManager.clearFocus()
+        if (email.isNotBlank() && password.isNotBlank()) {
+            viewModel.login(email, password) { success ->
+                if (success) {
+                    password = ""
+                    passwordVisible = false
+                    onLoginSuccess()
+                }
+            }
+        }
+    }
 
     Box(
         modifier = modifier
@@ -225,16 +257,11 @@ fun AuthScreen(
                             imeAction = ImeAction.Done
                         ),
                         keyboardActions = KeyboardActions(
-                            onDone = {
-                                focusManager.clearFocus()
-                                if (email.isNotBlank() && password.isNotBlank()) {
-                                    viewModel.login(email, password) { success ->
-                                        if (success) onLoginSuccess()
-                                    }
-                                }
-                            }
+                            onDone = { attemptLogin() }
                         ),
-                        modifier = Modifier.fillMaxWidth()
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("auth_password_field")
                     )
 
                     Spacer(modifier = Modifier.height(24.dp))
@@ -243,14 +270,7 @@ fun AuthScreen(
                     ExecutiveButton(
                         text = "Se connecter",
                         isLoading = isLoading,
-                        onClick = {
-                            focusManager.clearFocus()
-                            if (email.isNotBlank() && password.isNotBlank()) {
-                                viewModel.login(email, password) { success ->
-                                    if (success) onLoginSuccess()
-                                }
-                            }
-                        },
+                        onClick = { attemptLogin() },
                         modifier = Modifier.fillMaxWidth()
                     )
                 }
