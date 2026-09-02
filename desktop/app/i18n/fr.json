@@ -7,7 +7,14 @@
     "password_placeholder": "Mot de passe",
     "login_button": "Se connecter",
     "error": "Identifiants incorrects",
-    "offline_mode": "Mode hors ligne"
+    "offline_mode": "Mode hors ligne",
+    "err_invalid_credentials": "E-mail ou mot de passe incorrect.",
+    "err_account_locked": "Compte bloqué après plusieurs tentatives. Réessayez dans 15 minutes.",
+    "err_rate_limited": "Trop de tentatives. Patientez une minute avant de réessayer.",
+    "err_network": "Impossible de joindre le serveur. Vérifiez votre connexion Internet.",
+    "err_server": "Le serveur a rencontré une erreur. Réessayez dans un instant.",
+    "err_config": "Configuration du serveur invalide. Contactez le support.",
+    "offline_badge": "Mode hors-ligne — données locales"
   },
   "sidebar": {
     "dashboard": "Tableau de bord",
