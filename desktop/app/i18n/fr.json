@@ -34,6 +34,7 @@
     "today_reservations": "Réservations (Ce jour)",
     "week_reservations": "Réservations (Cette semaine)",
     "month_reservations": "Réservations (Ce mois)",
+    "year_reservations": "Réservations (Cette année)",
     "reservations_default": "Réservations",
     "active_maintenances": "Maintenances en cours",
     "available_fleet": "Prêts à louer",
@@ -46,6 +47,7 @@
     "period_today": "Ce jour",
     "period_week": "Cette semaine",
     "period_month": "Ce mois",
+    "period_year": "Cette année",
     "rentals_unit": "locations",
     "no_rentals": "Aucune location enregistrée pour le moment"
   },

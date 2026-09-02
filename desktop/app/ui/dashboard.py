@@ -172,6 +172,7 @@ class DashboardWidget(QWidget):
         self._period_combo.addItem(t("dashboard.period_today"), "today")
         self._period_combo.addItem(t("dashboard.period_week"), "week")
         self._period_combo.addItem(t("dashboard.period_month"), "month")
+        self._period_combo.addItem(t("dashboard.period_year"), "year")
         self._period_combo.setCurrentIndex(1)  # Default: week
         self._period_combo.currentIndexChanged.connect(self._on_period_changed)
 
@@ -210,7 +211,11 @@ class DashboardWidget(QWidget):
         fleet_layout.m_vSpace = 14
 
         self._card_available = ExecutiveFleetCard(t("dashboard.available_fleet"), "0")
-        self._card_rented = ExecutiveFleetCard(t("dashboard.rented_fleet"), "0", has_progress=True)
+        # "Véhicules en location" shows ONLY the count of vehicles currently in
+        # rental (canonical effective status RENTED) — no "/fleet" denominator,
+        # no capacity ratio, no progress bar. It is a live business figure, not
+        # a utilisation gauge.
+        self._card_rented = ExecutiveFleetCard(t("dashboard.rented_fleet"), "0")
         self._card_reserved = ExecutiveFleetCard(t("dashboard.reserved_fleet"), "0")
         self._card_fleet_maintenance = ExecutiveFleetCard(t("dashboard.maintenance_fleet"), "0")
 
@@ -256,6 +261,7 @@ class DashboardWidget(QWidget):
         self._period_combo.addItem(t("dashboard.period_today"), "today")
         self._period_combo.addItem(t("dashboard.period_week"), "week")
         self._period_combo.addItem(t("dashboard.period_month"), "month")
+        self._period_combo.addItem(t("dashboard.period_year"), "year")
         self._period_combo.setCurrentIndex(max(0, current_idx))
         self._period_combo.blockSignals(False)
 
@@ -302,6 +308,11 @@ class DashboardWidget(QWidget):
             rev = self._overview_data.get("month_revenue", 0.0)
             locs = self._overview_data.get("month_rentals", self._overview_data.get("month_locations", 0))
             self._card_day.set_title(t("dashboard.month_reservations"))
+        elif period_data == "year":
+            self._current_period = "year"
+            rev = self._overview_data.get("year_revenue", 0.0)
+            locs = self._overview_data.get("year_rentals", self._overview_data.get("year_locations", 0))
+            self._card_day.set_title(t("dashboard.year_reservations"))
         else:
             self._current_period = "week"
             rev = self._overview_data.get("today_revenue", 0.0)
@@ -319,10 +330,9 @@ class DashboardWidget(QWidget):
         rented = self._overview_data.get("rented", 0)
         reserved = self._overview_data.get("reserved", 0)
         maint = self._overview_data.get("maintenance", 0)
-        total = avail + rented + reserved + maint
 
         self._card_available.set_count(str(avail))
-        self._card_rented.set_count(str(rented), current=rented, total=total)
+        self._card_rented.set_count(str(rented))
         self._card_reserved.set_count(str(reserved))
         self._card_fleet_maintenance.set_count(str(maint))
 

@@ -529,11 +529,15 @@ class MainWindow(QMainWindow):
                 # We are inside the fan-out (or nothing changed): render now.
                 overview = dict(self._store.snapshot.overview or {})
                 prev = getattr(self, "_last_server_overview", None) or {}
-                for key in ("today_revenue", "week_revenue", "month_revenue"):
+                for key in ("today_revenue", "week_revenue", "month_revenue", "year_revenue"):
                     if overview.get(key) is None:
                         overview[key] = prev.get(key, 0.0)
-                self._dashboard.refresh_data(
-                    overview, getattr(self, "_last_server_top_vehicles", []))
+                # Top-5: prefer the server's (/dashboard/vehicle-performance),
+                # fall back to the CANONICAL local computation so the panel is
+                # never blank just because the server is unreachable.
+                top = getattr(self, "_last_server_top_vehicles", None) \
+                    or [dict(v) for v in self._store.snapshot.top_vehicles]
+                self._dashboard.refresh_data(overview, top)
             elif not fetch_server:
                 return  # reload()'s fan-out already re-rendered the dashboard
         except Exception as e:
@@ -557,8 +561,15 @@ class MainWindow(QMainWindow):
             return
             
         self._last_server_overview = dict(overview)
-        self._last_server_top_vehicles = top_vehicles
-        self._dashboard.refresh_data(overview, top_vehicles or [])
+        # An empty list here can mean "the vehicle-performance call failed while
+        # /stats succeeded" — don't let that wipe a good Top-5. Keep the last
+        # non-empty server result, else the canonical local computation.
+        if top_vehicles:
+            self._last_server_top_vehicles = top_vehicles
+        top = (top_vehicles
+               or getattr(self, "_last_server_top_vehicles", None)
+               or [dict(v) for v in self._store.snapshot.top_vehicles])
+        self._dashboard.refresh_data(overview, top)
 
     def _run_sync(self):
         """Execute the sync cycle in a background thread (never blocks UI)."""

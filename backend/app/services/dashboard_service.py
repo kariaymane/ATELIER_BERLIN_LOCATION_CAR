@@ -83,6 +83,14 @@ class DashboardService:
         month_rentals = await self._rental_repo.count_rentals_between(month_start, month_end)
         month_revenue = await self._rental_repo.get_revenue_between(month_start, month_end, now=now)
 
+        # Year-to-date — the same canonical recognition-at-start rule, just a
+        # wider window. Surfaces real turnover on a dashboard whose today/week/
+        # month cards are legitimately 0 when nothing started in that period.
+        year_start = now.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+        year_end = year_start.replace(year=now.year + 1)
+        year_rentals = await self._rental_repo.count_rentals_between(year_start, year_end)
+        year_revenue = await self._rental_repo.get_revenue_between(year_start, year_end, now=now)
+
         return {
             "total_vehicles": total_vehicles,
             "available": vehicle_counts.get("AVAILABLE", 0),
@@ -99,6 +107,8 @@ class DashboardService:
             "week_revenue": week_revenue,
             "month_rentals": month_rentals,
             "month_revenue": month_revenue,
+            "year_rentals": year_rentals,
+            "year_revenue": year_revenue,
         }
 
     async def get_period_stats(self, period: str) -> dict:
@@ -151,11 +161,20 @@ class DashboardService:
                 stat["registration"] = vehicle.registration
                 stat["brand"] = vehicle.brand
                 stat["model"] = vehicle.model
-                # Calculate utilization rate (days rented / days since first rental)
+                # Calculate utilization rate (days rented / days since first rental).
+                # `last_rental` may be serialized from a naive OR an aware
+                # datetime depending on how the column round-trips; normalise
+                # BOTH sides to aware-UTC so the subtraction can never raise
+                # "can't subtract offset-naive and offset-aware datetimes" — a
+                # crash here 500s the whole endpoint and blanks the desktop
+                # "Top 5 véhicules les plus loués" panel.
                 if stat["last_rental"]:
                     first_rental_dt = datetime.fromisoformat(stat["last_rental"])
+                    if first_rental_dt.tzinfo is None:
+                        first_rental_dt = first_rental_dt.replace(tzinfo=timezone.utc)
+                    now_utc = datetime.now(timezone.utc)
                     total_possible_days = max(
-                        1, (datetime.now(ZoneInfo('Africa/Casablanca')) - first_rental_dt).days
+                        1, (now_utc - first_rental_dt.astimezone(timezone.utc)).days
                     )
                     stat["utilization_rate"] = round(
                         (stat["total_days"] / total_possible_days) * 100, 1
