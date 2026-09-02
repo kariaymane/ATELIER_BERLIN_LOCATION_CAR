@@ -172,6 +172,14 @@ class AuthRepository(
         )
     }
 
+    /**
+     * SECURITY: `password` is used for exactly one thing — the request body of
+     * the `/auth/login` call. It is NOT stored: no field, no TokenManager key,
+     * no SharedPreferences, no Room, no log. The [LoginRequestDto] that carries
+     * it is a local value that becomes unreachable when this function returns;
+     * only the returned access/refresh tokens are persisted (by TokenManager).
+     * The plaintext password never leaves this method.
+     */
     suspend fun login(email: String, password: String): Result<UserSession> = withContext(Dispatchers.IO) {
         try {
             val response = apiClient.getService().login(
