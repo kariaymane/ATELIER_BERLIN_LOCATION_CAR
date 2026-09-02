@@ -11,19 +11,34 @@ from PySide6.QtGui import QFont
 
 from app.i18n import t, is_rtl, set_language, load_translations
 from app.config import get_saved_language, save_language, API_BASE_URL
+from app.services.auth_client import AuthClient, AuthOutcome
 import logging
 
 logger = logging.getLogger(__name__)
 
 
-class LoginWorker(QThread):
-    """Performs authentication off the UI thread.
+class WarmupWorker(QThread):
+    """Fire a /health ping so a suspended Fly machine is starting while the
+    operator is still typing their password (kills the cold-start login
+    failure — FORENSIC_ROOT_CAUSE_ANALYSIS.md §2)."""
 
-    Tries online authentication first; falls back automatically to the
-    local SQLite cache when the server is unreachable.
+    def run(self):
+        try:
+            AuthClient(API_BASE_URL).warmup()
+        except Exception:
+            pass
+
+
+class LoginWorker(QThread):
+    """Performs authentication off the UI thread through the ONE AuthClient.
+
+    Online first (typed outcome). Offline SQLite fallback is used ONLY when
+    the server could not be reached or errored — never when the server
+    actively rejected the credentials.
     """
+    # dict on success; on failure: (i18n_key, detail)
     succeeded = Signal(dict)
-    rejected = Signal(str)
+    rejected = Signal(str, str)
 
     def __init__(self, email: str, password: str, parent=None):
         super().__init__(parent)
@@ -32,9 +47,12 @@ class LoginWorker(QThread):
 
     def run(self):
         try:
-            user_data = self._authenticate_online()
-            if user_data is not None:
-                # Cache credentials locally so future logins work offline.
+            result = AuthClient(API_BASE_URL).login(self._email, self._password)
+
+            if result.ok:
+                user_data = self._shape(result.data)
+                user_data["email"] = self._email
+                user_data.setdefault("username", self._email.split("@")[0])
                 try:
                     self._cache_credentials_locally(
                         self._email, self._password, user_data
@@ -44,19 +62,35 @@ class LoginWorker(QThread):
                 self.succeeded.emit(user_data)
                 return
 
-            if getattr(self, '_server_rejected', False):
-                self.rejected.emit(t("login.error"))
+            if result.is_server_side_rejection:
+                # Wrong password / locked account — offline cache must NOT
+                # paper over it.
+                self.rejected.emit(result.i18n_key, result.detail or "")
                 return
 
+            # NETWORK_UNREACHABLE / SERVER_ERROR / RATE_LIMITED / CONFIG_ERROR
+            # -> try the local cache so the operator can still work offline.
             user_data = self._authenticate_offline()
             if user_data is not None:
+                user_data["offline"] = True
                 self.succeeded.emit(user_data)
             else:
-                # Network failed AND offline failed
-                self.rejected.emit(t("common.error_connection"))
+                self.rejected.emit(result.i18n_key, result.detail or "")
         except Exception as e:
             logger.exception("Unexpected error in login worker: %s", e)
-            self.rejected.emit(t("login.error"))
+            self.rejected.emit("login.err_server", str(e))
+
+    @staticmethod
+    def _shape(data: dict) -> dict:
+        return {
+            "user_id": data.get("user_id", data.get("id", "")),
+            "username": data.get("username", ""),
+            "full_name": data.get("full_name", data.get("name", "Utilisateur")),
+            "role": data.get("role", "EMPLOYEE"),
+            "access_token": data.get("access_token", ""),
+            "refresh_token": data.get("refresh_token", ""),
+            "offline": False,
+        }
 
     def _cache_credentials_locally(self, email, password, user_data):
         """Securely store Argon2 hashed password and metadata in SQLite."""
@@ -103,37 +137,6 @@ class LoginWorker(QThread):
             session.commit()
         finally:
             session.close()
-
-    def _authenticate_online(self):
-        """Returns user_data on success, None when offline fallback is needed."""
-        import httpx
-        try:
-            with httpx.Client(timeout=4.0) as client:
-                response = client.post(
-                    f"{API_BASE_URL}/api/v1/auth/login",
-                    json={"email": self._email, "password": self._password},
-                )
-                if response.status_code == 200:
-                    data = response.json()
-                    return {
-                        "user_id": data.get("user_id", data.get("id", "")),
-                        "email": self._email,
-                        "username": data.get("username", self._email.split("@")[0]),
-                        "full_name": data.get("full_name", data.get("name", "Utilisateur")),
-                        "role": data.get("role", "EMPLOYEE"),
-                        "access_token": data.get("access_token", ""),
-                        "refresh_token": data.get("refresh_token", ""),
-                        "offline": False,
-                    }
-                if response.status_code in (400, 401, 422):
-                    # Server explicitly rejected these credentials.
-                    self._server_rejected = True
-                else:
-                    self._server_rejected = False
-        except Exception as e:
-            logger.info("Server unreachable (%s), falling back to offline authentication", e)
-            self._server_rejected = False
-        return None
 
     def _authenticate_offline(self):
         from app.database import get_local_session
@@ -353,6 +356,15 @@ class LoginWindow(QWidget):
 
         outer_layout.addWidget(self._card, alignment=Qt.AlignmentFlag.AlignCenter)
 
+        # Start warming the (possibly suspended) backend machine now, while
+        # the operator is still typing — so the real login hits a warm server.
+        try:
+            self._warmup = WarmupWorker(self)
+            self._warmup.finished.connect(self._warmup.deleteLater)
+            self._warmup.start()
+        except Exception:
+            pass
+
     def _retranslate(self):
         self.setWindowTitle(f"ATELIER BERLIN LOCATION CAR — {t('login.title')}")
         self._sub_title.setText(t("app_subtitle"))
@@ -398,10 +410,13 @@ class LoginWindow(QWidget):
         self._login_btn.setText(t("login.login_button"))
         self.login_success.emit(user_data)
 
-    def _on_login_rejected(self, error_msg: str = None):
-        if not error_msg:
-            error_msg = t("login.error")
-        self._show_error(error_msg)
+    def _on_login_rejected(self, i18n_key: str = "", detail: str = ""):
+        """i18n_key is one of login.err_* — one message per real cause, so a
+        network failure never reads as 'identifiants incorrects'."""
+        msg = t(i18n_key) if i18n_key else t("login.err_invalid_credentials")
+        if i18n_key and msg == i18n_key:  # key missing from bundle
+            msg = t("login.error")
+        self._show_error(msg)
         self._login_btn.setEnabled(True)
         self._login_btn.setText(t("login.login_button"))
 
