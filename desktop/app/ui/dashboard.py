@@ -472,9 +472,16 @@ class DashboardWidget(QWidget):
     def _set_period(self, period: str):
         self._current_period = period
 
-    def refresh_data(self, overview: dict, top_vehicles: list = None):
-        """Apply the fleet/maintenance figures + Top-5. Revenue is fetched
-        independently by the panel (always the canonical rule)."""
+    def refresh_data(self, overview: dict, top_vehicles: list = None,
+                     request_revenue: bool = False):
+        """Apply the fleet/maintenance figures + Top-5.
+
+        Revenue is fetched independently by the panel. When ``request_revenue``
+        is True the chiffre d'affaires is re-fetched for the current date
+        range; otherwise the panel keeps its last known value. This avoids the
+        "…" flicker that occurred when every domain fan-out (auto-sync,
+        BoundaryClock, tab switch) unconditionally started a revenue worker.
+        """
         self._overview_data = overview or {}
         self._top_vehicles_data = top_vehicles or []
         self._last_refresh_lbl.setText(t("dashboard.last_refresh", time=datetime.now().strftime('%H:%M')))
@@ -488,7 +495,8 @@ class DashboardWidget(QWidget):
         # "réservations" card follows the revenue period selection
         self._render_reservations_card()
         self._render_fleet_cards()
-        self._request_revenue()
+        if request_revenue:
+            self._request_revenue()
         self._render_top_vehicles()
 
     def _render_reservations_card(self):

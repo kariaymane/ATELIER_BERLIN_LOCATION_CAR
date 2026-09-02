@@ -34,7 +34,7 @@ class RealtimeSyncManager(
     private val eventAdapter = moshi.adapter(WebSocketEventDto::class.java)
 
     private val okHttpClient: OkHttpClient = OkHttpClient.Builder()
-        .connectTimeout(10, TimeUnit.SECONDS)
+        .connectTimeout(20, TimeUnit.SECONDS)  // Fly.io cold-start resilience
         .readTimeout(0, TimeUnit.MILLISECONDS) // Keep-alive for WebSocket
         .writeTimeout(10, TimeUnit.SECONDS)
         .pingInterval(15, TimeUnit.SECONDS)

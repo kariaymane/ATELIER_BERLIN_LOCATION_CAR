@@ -398,7 +398,7 @@ class MainWindow(QMainWindow):
         if page_key == "vehicles":
             self._load_vehicles_from_local()
         elif page_key == "dashboard":
-            self._refresh_dashboard()
+            self._refresh_dashboard(request_revenue=True)
         elif page_key == "clients":
             self._clients_page.refresh_data()
         elif page_key == "reservations":
@@ -511,7 +511,7 @@ class MainWindow(QMainWindow):
         except Exception as e:
             logger.error("Failed to render vehicles from domain snapshot: %s", e, exc_info=True)
 
-    def _refresh_dashboard(self, fetch_server: bool = False):
+    def _refresh_dashboard(self, fetch_server: bool = False, request_revenue: bool = False):
         """Render instantly from local data, then refresh via API in background.
 
         Never performs network I/O on the UI thread. The offline snapshot uses
@@ -520,6 +520,12 @@ class MainWindow(QMainWindow):
         revenue = non-cancelled, started, start in [period_start, period_end),
         Africa/Casablanca) so cached values never contradict the server. On
         transient API errors the last known server values win.
+
+        ``request_revenue``: when True, the revenue panel re-fetches the
+        chiffre d'affaires for the currently selected date range. Set to True
+        only on explicit user action (manual refresh, period change) or when
+        server data changed — NOT on every domain fan-out, which would cause
+        the revenue value to flicker to "…" on every auto-sync tick.
         """
         rev_before = self._store.revision
         try:
@@ -537,7 +543,7 @@ class MainWindow(QMainWindow):
                 # never blank just because the server is unreachable.
                 top = getattr(self, "_last_server_top_vehicles", None) \
                     or [dict(v) for v in self._store.snapshot.top_vehicles]
-                self._dashboard.refresh_data(overview, top)
+                self._dashboard.refresh_data(overview, top, request_revenue=request_revenue)
             elif not fetch_server:
                 return  # reload()'s fan-out already re-rendered the dashboard
         except Exception as e:
@@ -601,7 +607,7 @@ class MainWindow(QMainWindow):
         top = (top_vehicles
                or getattr(self, "_last_server_top_vehicles", None)
                or [dict(v) for v in self._store.snapshot.top_vehicles])
-        self._dashboard.refresh_data(overview, top)
+        self._dashboard.refresh_data(overview, top, request_revenue=True)
 
     def _run_sync(self):
         """Execute the sync cycle in a background thread (never blocks UI)."""
@@ -651,12 +657,13 @@ class MainWindow(QMainWindow):
                 push_res = report.get("push", {})
                 pull_res = report.get("pull", {})
                 upload_res = report.get("uploads", {})
-                if (
+                has_changes = (
                     push_res.get("pushed", 0) > 0
                     or len(pull_res.get("items", [])) > 0
                     or upload_res.get("uploaded", 0) > 0
                     or push_res.get("conflicts")
-                ):
+                )
+                if has_changes:
                     get_event_bus().data_refreshed.emit()
                 # Surface server-rejected reservations visibly (never silent).
                 for conflict in push_res.get("conflicts") or []:
@@ -667,20 +674,49 @@ class MainWindow(QMainWindow):
                 status_text = t("sync.reconnected") if was_offline else t("sync.online")
                 self.statusBar().showMessage(status_text, 4000)
                 
-                # Safe to fetch dashboard stats now that push/pull have stabilized state
-                self._refresh_dashboard(fetch_server=True)
+                # Safe to fetch dashboard stats now that push/pull have stabilized state.
+                # request_revenue=True on manual refresh or when server data changed.
+                self._refresh_dashboard(fetch_server=True, request_revenue=has_changes)
             else:
                 self._is_online = False
                 self.statusBar().showMessage(t("sync.offline"))
         except Exception as e:
             logger.debug("Sync result handling note: %s", e)
+        finally:
+            # Always restore the refresh button, whether sync succeeded or not.
+            self._restore_refresh_btn()
 
     def _on_refresh_clicked(self):
+        """Single canonical manual refresh — same pipeline as auto-refresh.
+
+        The sync thread pulls server deltas, then ``_on_sync_finished``
+        triggers ``DomainStore.reload()`` which fans out to every view.
+        We do NOT emit ``data_refreshed`` here: doing so before the sync
+        thread has finished would reload from stale SQLite and cause the
+        dashboard to flicker to pre-sync values (the root cause of the
+        Chef/DarPra dashboard corruption bug).
+        """
+        # Debounce: if a sync is already in-flight, ignore repeated clicks
+        thread = getattr(self, "_sync_thread", None)
+        try:
+            if thread is not None and thread.isRunning():
+                return  # sync already in progress — don't stack another
+        except RuntimeError:
+            pass
+
+        self._refresh_btn.setEnabled(False)
         self._refresh_btn.setText(t("topbar.refreshing"))
         self._run_sync()
-        get_event_bus().data_refreshed.emit()
-        self._refresh_btn.setText(t("topbar.updated"))
-        QTimer.singleShot(2000, lambda: self._refresh_btn.setText(t("topbar.refresh")))
+        # _on_sync_finished restores the button text via _restore_refresh_btn
+
+    def _restore_refresh_btn(self):
+        """Restore the topbar refresh button after a sync cycle completes."""
+        try:
+            self._refresh_btn.setEnabled(True)
+            self._refresh_btn.setText(t("topbar.updated"))
+            QTimer.singleShot(2000, lambda: self._refresh_btn.setText(t("topbar.refresh")))
+        except RuntimeError:
+            pass  # widget already destroyed during shutdown
 
     def _show_profile(self):
         name = self._user_data.get('full_name', 'Utilisateur')
