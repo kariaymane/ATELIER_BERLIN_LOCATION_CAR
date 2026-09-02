@@ -34,6 +34,7 @@
     "today_reservations": "حجوزات (اليوم)",
     "week_reservations": "حجوزات (هذا الأسبوع)",
     "month_reservations": "حجوزات (هذا الشهر)",
+    "year_reservations": "حجوزات (هذا العام)",
     "reservations_default": "الحجوزات",
     "active_maintenances": "عمليات صيانة جارية",
     "available_fleet": "جاهزة للكراء",
@@ -46,6 +47,7 @@
     "period_today": "اليوم",
     "period_week": "هذا الأسبوع",
     "period_month": "هذا الشهر",
+    "period_year": "هذا العام",
     "rentals_unit": "إيجار",
     "no_rentals": "لا توجد إيجارات مسجلة حالياً"
   },

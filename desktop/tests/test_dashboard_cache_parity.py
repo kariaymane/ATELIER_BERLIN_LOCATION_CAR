@@ -45,23 +45,29 @@ def seeded():
         start_datetime=now, status="ACTIVE", step="EN COURS",
         created_at=now, updated_at=now, version=1))
 
-    tznow = datetime.now(TZ)
-    def local_iso(dt):
-        return dt.replace(tzinfo=None).isoformat()  # naive local wall time
+    # The desktop parses stored datetimes as UTC (app.utils.datetime_utils.
+    # parse_datetime_utc) — exactly like the sync payloads from the backend.
+    # Seed in UTC so the fixture never depends on the wall-clock hour: the two
+    # "today" rentals start 30 min ago (guaranteed past AND same local day
+    # except the ~30-min band around Africa/Casablanca midnight).
+    now_utc = datetime.now(timezone.utc)
+    tznow = now_utc.astimezone(TZ)
+    def iso(dt):
+        return dt.astimezone(timezone.utc).replace(tzinfo=None).isoformat()
 
     rows = [
-        # (start_local, days, total, status)
-        (tznow.replace(hour=8), 2, 600.0, "COMPLETED"),    # today -> counted
-        (tznow.replace(hour=0, minute=0, second=0), 1, 250.0, "ACTIVE"), # today -> counted & currently active
-        (tznow - timedelta(days=3), 4, 999.0, "CANCELLED"),# excluded
-        (tznow - timedelta(days=10), 3, 750.0, "COMPLETED"),# this month only
+        # (start, days, total, status)
+        (now_utc - timedelta(minutes=30), 2, 600.0, "COMPLETED"),   # today, started -> counted
+        (now_utc - timedelta(minutes=30), 1, 250.0, "ACTIVE"),      # today, started, covers now
+        (now_utc - timedelta(days=3), 4, 999.0, "CANCELLED"),       # excluded
+        (now_utc - timedelta(days=10), 3, 750.0, "COMPLETED"),      # this month only
     ]
     for i, (start, days, total, status) in enumerate(rows):
         session.merge(LocalReservation(
             id=f"d-res-{i}", vehicle_id="d-veh-1" if i % 2 == 0 else "d-veh-2",
             customer_name="Parity Test", customer_phone="+212612345678",
-            start_datetime=local_iso(start),
-            end_datetime=local_iso(start + timedelta(days=days)),
+            start_datetime=iso(start),
+            end_datetime=iso(start + timedelta(days=days)),
             daily_price=100.0, num_days=days, total_price=total,
             deposit=0, status=status, payment_status="PENDING",
             created_at=now, updated_at=now, version=1))
@@ -110,13 +116,14 @@ def test_local_overview_matches_backend_rule(seeded):
     from app.database import get_local_session
     from app.models.reservation import LocalReservation
     session = get_local_session()
-    now_iso = datetime.now(timezone.utc).isoformat()
-    tznow = datetime.now(TZ)
+    now_utc2 = datetime.now(timezone.utc)
+    now_iso = now_utc2.isoformat()
+    prec_start = now_utc2 - timedelta(minutes=20)   # today, started (UTC, hour-independent)
     session.merge(LocalReservation(
         id="d-res-prec", vehicle_id="d-veh-1",
         customer_name="Parity", customer_phone="+212612345678",
-        start_datetime=tznow.replace(hour=11).replace(tzinfo=None).isoformat(),
-        end_datetime=(tznow + timedelta(days=1)).replace(tzinfo=None).isoformat(),
+        start_datetime=prec_start.replace(tzinfo=None).isoformat(),
+        end_datetime=(prec_start + timedelta(days=1)).replace(tzinfo=None).isoformat(),
         daily_price=0.15, num_days=1, total_price=0.1 + 0.2,
         deposit=0, status="COMPLETED", payment_status="PENDING",
         created_at=now_iso, updated_at=now_iso, version=1))

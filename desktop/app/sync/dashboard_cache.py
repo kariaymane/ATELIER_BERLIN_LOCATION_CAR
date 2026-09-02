@@ -53,7 +53,10 @@ def _period_bounds(now=None):
         month_end = month_start.replace(year=now.year + 1, month=1)
     else:
         month_end = month_start.replace(month=now.month + 1)
-    return (today_start, today_end), (week_start, week_end), (month_start, month_end)
+    year_start = now.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+    year_end = year_start.replace(year=now.year + 1)
+    return ((today_start, today_end), (week_start, week_end),
+            (month_start, month_end), (year_start, year_end))
 
 
 def compute_overview_rows(reservation_rows, fleet_counts, now=None):
@@ -67,15 +70,15 @@ def compute_overview_rows(reservation_rows, fleet_counts, now=None):
 
     now = now or datetime.now(TZ)
     now = now.astimezone(TZ) if now.tzinfo is not None else now.replace(tzinfo=TZ)
-    (t0, t1), (w0, w1), (m0, m1) = _period_bounds(now)
+    (t0, t1), (w0, w1), (m0, m1), (y0, y1) = _period_bounds(now)
 
     def in_period(dt, start, end):
-        # all three are timezone-aware -> Python compares absolute instants
+        # all are timezone-aware -> Python compares absolute instants
         return dt is not None and start <= dt < end
 
-    totals_revenue = {"today": 0.0, "week": 0.0, "month": 0.0}
-    totals_rentals = {"today": 0, "week": 0, "month": 0}
-    bounds = {"today": (t0, t1), "week": (w0, w1), "month": (m0, m1)}
+    totals_revenue = {"today": 0.0, "week": 0.0, "month": 0.0, "year": 0.0}
+    totals_rentals = {"today": 0, "week": 0, "month": 0, "year": 0}
+    bounds = {"today": (t0, t1), "week": (w0, w1), "month": (m0, m1), "year": (y0, y1)}
 
     rows = list(reservation_rows)
     for r in rows:
@@ -103,7 +106,81 @@ def compute_overview_rows(reservation_rows, fleet_counts, now=None):
         "week_revenue": round(totals_revenue["week"], 2) if rows else None,
         "month_rentals": totals_rentals["month"],
         "month_revenue": round(totals_revenue["month"], 2) if rows else None,
+        "year_rentals": totals_rentals["year"],
+        "year_revenue": round(totals_revenue["year"], 2) if rows else None,
     }
+
+
+def compute_top_vehicles_rows(reservation_rows, vehicle_rows, now=None, limit=5):
+    """PURE — "Top N véhicules les plus loués" from already-loaded rows.
+
+    CANONICAL — identical eligibility to revenue / backend
+    ``RentalRepository.get_vehicle_stats``: every reservation that is
+    ``status != 'CANCELLED'`` AND has started (``start_datetime <= now``).
+    Grouped by vehicle, ranked by total revenue desc. Used offline so the
+    Top-5 panel is never blank just because the server is unreachable; the
+    server response (``/dashboard/vehicle-performance``) is preferred when
+    available and returns the same ordering for the same data.
+    """
+    from app.utils.fleet_status import _get
+
+    now = now or datetime.now(TZ)
+    now = now.astimezone(TZ) if now.tzinfo is not None else now.replace(tzinfo=TZ)
+
+    vmeta = {}
+    for v in (vehicle_rows or []):
+        vid = str(_get(v, "id") or _get(v, "vehicle_id") or "")
+        if vid:
+            vmeta[vid] = {
+                "registration": _get(v, "registration") or "",
+                "brand": _get(v, "brand") or "",
+                "model": _get(v, "model") or "",
+            }
+
+    agg: dict[str, dict] = {}
+    for r in (reservation_rows or []):
+        if (_get(r, "status") or "").upper() == "CANCELLED":
+            continue
+        start_dt = _parse_dt(_get(r, "start_datetime"))
+        if start_dt is None or start_dt > now:
+            continue
+        vid = str(_get(r, "vehicle_id") or "")
+        if not vid:
+            continue
+        a = agg.setdefault(vid, {"vehicle_id": vid, "rental_count": 0,
+                                 "total_days": 0, "total_revenue": 0.0,
+                                 "last_rental": None})
+        a["rental_count"] += 1
+        a["total_days"] += int(_get(r, "num_days") or 0)
+        a["total_revenue"] += float(_get(r, "total_price") or 0)
+        iso = start_dt.isoformat()
+        if a["last_rental"] is None or iso > a["last_rental"]:
+            a["last_rental"] = iso
+
+    ranked = sorted(agg.values(), key=lambda x: x["total_revenue"], reverse=True)[:limit]
+    for a in ranked:
+        a.update(vmeta.get(a["vehicle_id"], {"registration": "", "brand": "", "model": ""}))
+    return ranked
+
+
+def compute_local_top_vehicles(session=None, now=None, limit=5):
+    """``compute_top_vehicles_rows`` fed from the local SQLite cache."""
+    from app.database import get_local_session
+    from app.models.reservation import LocalReservation
+    from app.models.vehicle import LocalVehicle
+
+    own_session = session is None
+    if own_session:
+        session = get_local_session()
+    try:
+        return compute_top_vehicles_rows(
+            session.query(LocalReservation).all(),
+            session.query(LocalVehicle).all(),
+            now=now, limit=limit,
+        )
+    finally:
+        if own_session:
+            session.close()
 
 
 def compute_local_overview(session=None, now=None):

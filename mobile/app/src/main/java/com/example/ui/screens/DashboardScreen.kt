@@ -169,6 +169,12 @@ fun DashboardScreen(
                     subtitle = "chiffre d'affaires",
                     modifier = Modifier.width(145.dp)
                 )
+                OperationalStatCard(
+                    label = "Cette année",
+                    value = "${String.format("%.0f", metrics?.yearRevenue ?: 0.0)} DH",
+                    subtitle = "chiffre d'affaires",
+                    modifier = Modifier.width(150.dp)
+                )
             }
 
             Spacer(modifier = Modifier.height(28.dp))

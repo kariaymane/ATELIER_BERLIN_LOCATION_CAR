@@ -74,6 +74,7 @@ class DomainSnapshot:
     effective: dict = field(default_factory=dict)      # vehicle_id -> effective status
     fleet_counts: dict = field(default_factory=dict)   # canonical mutually-exclusive buckets
     overview: dict = field(default_factory=dict)       # dashboard overview (compute_local_overview)
+    top_vehicles: tuple = ()                           # "Top 5 les plus loués" (canonical, offline)
     next_boundary: Optional[datetime] = None           # earliest future time-driven transition
 
     def vehicle(self, vehicle_id: str) -> Optional[dict]:
@@ -285,11 +286,15 @@ class DomainStore:
         maint_dicts = tuple(_maint_dict(m) for m in maintenances)
 
         try:
-            from app.sync.dashboard_cache import compute_overview_rows
+            from app.sync.dashboard_cache import compute_overview_rows, compute_top_vehicles_rows
             overview = compute_overview_rows(res_dicts, fleet_counts, now=now)
+            top_vehicles = tuple(
+                compute_top_vehicles_rows(res_dicts, vehicle_dicts, now=now, limit=5)
+            )
         except Exception as e:
             logger.error("DomainStore: local overview computation failed: %s", e, exc_info=True)
             overview = dict(fleet_counts)
+            top_vehicles = ()
 
         from app.utils.fleet_status import next_boundary_rows
         # include local midnight so the dashboard period (today/week/month)
@@ -305,6 +310,7 @@ class DomainStore:
             effective=effective,
             fleet_counts=fleet_counts,
             overview=overview,
+            top_vehicles=top_vehicles,
             next_boundary=nb,
         )
 
@@ -363,6 +369,7 @@ class DomainStore:
                 effective=new_effective,
                 fleet_counts=new_counts,
                 overview=new_overview,
+                top_vehicles=base.top_vehicles,  # ranking is all-time, unaffected by a midnight rollover
                 next_boundary=new_boundary,
             )
             self._notify()

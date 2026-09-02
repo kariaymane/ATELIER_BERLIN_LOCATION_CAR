@@ -158,9 +158,9 @@ class FleetRepository(
         )
         PerformanceMetrics(
             todayBookings = ov.todayBookings, weekBookings = ov.weekBookings,
-            monthBookings = ov.monthBookings,
+            monthBookings = ov.monthBookings, yearBookings = ov.yearBookings,
             todayRevenue = ov.todayRevenue, weekRevenue = ov.weekRevenue,
-            monthRevenue = ov.monthRevenue,
+            monthRevenue = ov.monthRevenue, yearRevenue = ov.yearRevenue,
             readyVehicles = ov.available, rentedVehicles = ov.rented,
             reservedVehicles = ov.reserved, maintenanceVehicles = ov.maintenance,
         )
@@ -818,9 +818,11 @@ class FleetRepository(
                     todayBookings = stats.todayRentals,
                     weekBookings = stats.weekRentals,
                     monthBookings = stats.monthRentals,
+                    yearBookings = stats.yearRentals,
                     todayRevenue = stats.todayRevenue,
                     weekRevenue = stats.weekRevenue,
                     monthRevenue = stats.monthRevenue,
+                    yearRevenue = stats.yearRevenue,
                     readyVehicles = stats.available,
                     rentedVehicles = stats.rented,
                     reservedVehicles = stats.reserved,

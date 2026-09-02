@@ -222,7 +222,9 @@ data class DashboardStatsDto(
     @Json(name = "week_rentals") val weekRentals: Int = 0,
     @Json(name = "week_revenue") val weekRevenue: Double = 0.0,
     @Json(name = "month_rentals") val monthRentals: Int = 0,
-    @Json(name = "month_revenue") val monthRevenue: Double = 0.0
+    @Json(name = "month_revenue") val monthRevenue: Double = 0.0,
+    @Json(name = "year_rentals") val yearRentals: Int = 0,
+    @Json(name = "year_revenue") val yearRevenue: Double = 0.0
 )
 
 @JsonClass(generateAdapter = true)
