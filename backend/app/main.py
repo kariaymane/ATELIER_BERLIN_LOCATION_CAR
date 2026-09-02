@@ -35,7 +35,7 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     """Application lifecycle — startup and shutdown."""
     settings = get_settings()
-    init_engine(settings.DATABASE_URL, echo=settings.DEBUG)
+    init_engine(settings.DATABASE_URL, echo=settings.DEBUG, settings=settings)
     logger.info("Application started")
 
     # Create initial admin if configured
@@ -162,10 +162,48 @@ def create_app() -> FastAPI:
             logger.warning("WebSocket exception: %s", e)
             await broadcaster.disconnect_socket(websocket)
 
-    # Health check
+    # ── Health: liveness vs readiness ──────────────────────────────────────
+    # LIVENESS (/health, /health/live): the ASGI process can answer. It NEVER
+    # touches the database, so a database outage does NOT make Fly kill the
+    # machine — the app stays up and can keep serving cached-friendly 503s and
+    # its readiness signal. `database` is explicitly reported as "not_checked"
+    # so no caller can read a liveness 200 as a database-ready signal — clients
+    # that need to know the DB is usable must call /health/ready.
+    def _liveness_payload():
+        return {
+            "status": "alive",
+            "service": "car-rental-api",
+            "version": "1.0.0",
+            "database": "not_checked",
+        }
+
     @app.get("/health")
     async def health_check():
-        return {"status": "healthy", "version": "1.0.0"}
+        return _liveness_payload()
+
+    @app.get("/health/live")
+    async def health_live():
+        return _liveness_payload()
+
+    # READINESS (/health/ready): can we actually serve authenticated traffic?
+    # Runs a lightweight `SELECT 1`. 200 when the database answers, 503 when it
+    # does not. The failure body carries only an exception *class name*
+    # (`error_category`) and pool counters — no DSN, host, or credentials.
+    @app.get("/health/ready")
+    async def health_ready():
+        from app.database import check_database_connection, get_pool_status
+        ok, err = await check_database_connection()
+        body = {
+            "status": "ready" if ok else "not_ready",
+            "service": "car-rental-api",
+            "version": "1.0.0",
+            "database": "connected" if ok else "unavailable",
+            "pool": get_pool_status(),
+        }
+        if not ok:
+            body["error_category"] = err
+            return JSONResponse(status_code=503, content=body)
+        return body
 
     return app
 

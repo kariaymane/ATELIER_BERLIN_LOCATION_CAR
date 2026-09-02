@@ -1,6 +1,7 @@
 package com.example.data.api
 
 import android.util.Log
+import com.example.BuildConfig
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import kotlinx.coroutines.runBlocking
@@ -88,8 +89,17 @@ class ApiClient(private val tokenManager: TokenManager) {
         .add(KotlinJsonAdapterFactory())
         .build()
 
+    // SECURITY: HTTP logging is line-level only (method + URL + status + timing)
+    // and is disabled entirely in release builds. Even so, sensitive headers are
+    // redacted so that a future bump to HEADERS/BODY can never leak a bearer
+    // token or a Set-Cookie. Request BODIES (which include the /auth/login
+    // password) are never logged at BASIC level.
     private val loggingInterceptor = HttpLoggingInterceptor().apply {
-        level = HttpLoggingInterceptor.Level.BASIC
+        level = if (BuildConfig.DEBUG) HttpLoggingInterceptor.Level.BASIC
+                else HttpLoggingInterceptor.Level.NONE
+        redactHeader("Authorization")
+        redactHeader("Cookie")
+        redactHeader("Set-Cookie")
     }
 
     private val okHttpClient: OkHttpClient = OkHttpClient.Builder()

@@ -141,3 +141,6 @@ dist_final/
 # Forensic backups
 .backups/
 *.bak.*
+
+# mobile security release bundle (build output — not source)
+atelier-berlin-location-car-mobile-security-*.zip
