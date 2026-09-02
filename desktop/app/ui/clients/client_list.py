@@ -96,10 +96,6 @@ class ClientsWidget(QWidget):
         self._search.setFixedHeight(38)
         self._search.textChanged.connect(self._apply_filter)
         search_row.addWidget(self._search, 1)
-        self._refresh_btn = QPushButton(t("topbar.refresh"))
-        self._refresh_btn.setFixedHeight(38)
-        self._refresh_btn.clicked.connect(self.refresh_data)
-        search_row.addWidget(self._refresh_btn)
         layout.addLayout(search_row)
 
         self._table = QTableWidget()
@@ -258,7 +254,6 @@ class ClientsWidget(QWidget):
         )
         self._title_lbl.setText(t("sidebar.clients"))
         self._search.setPlaceholderText(t("clients.search_ph"))
-        self._refresh_btn.setText(t("topbar.refresh"))
         self._headers = ["Client", "Téléphone", "Email", "CIN", t("vehicles.status"), ""]
         self._table.setHorizontalHeaderLabels(self._headers)
         self._empty_lbl.setText(t("clients.no_data") if t("clients.no_data") != "clients.no_data" else "Aucun client trouvé")
