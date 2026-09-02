@@ -560,6 +560,14 @@ class MainWindow(QMainWindow):
         if generation > 0 and getattr(self, "_dashboard_generation", 0) > generation:
             return
             
+        overview = dict(overview)
+        # An older backend build (pre year-revenue) omits year_* — fill it from
+        # the CANONICAL local snapshot so "Cette année" is never wrongly 0 until
+        # the server is redeployed. Same rule, same numbers.
+        local_ov = self._store.snapshot.overview or {}
+        for key in ("year_revenue", "year_rentals"):
+            if overview.get(key) is None:
+                overview[key] = local_ov.get(key, 0)
         self._last_server_overview = dict(overview)
         # An empty list here can mean "the vehicle-performance call failed while
         # /stats succeeded" — don't let that wipe a good Top-5. Keep the last
