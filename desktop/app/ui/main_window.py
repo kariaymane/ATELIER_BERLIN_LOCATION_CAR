@@ -98,11 +98,12 @@ class SyncThread(QThread):
     """
     sync_finished = Signal(dict)
 
-    def __init__(self, device_id: str, access_token: str, refresh_token: str, parent=None):
+    def __init__(self, device_id: str, access_token: str, refresh_token: str, force_bootstrap: bool = False, parent=None):
         super().__init__(parent)
         self._device_id = device_id
         self._access_token = access_token
         self._refresh_token = refresh_token
+        self._force_bootstrap = force_bootstrap
 
     def run(self):
         from app.sync.engine import SyncEngine
@@ -112,8 +113,15 @@ class SyncThread(QThread):
             connected = asyncio.run(engine.check_connection())
             report["is_online"] = connected
             if connected and self._access_token:
+                if self._force_bootstrap:
+                    try:
+                        asyncio.run(engine.bootstrap())
+                    except Exception as eb:
+                        logger.warning("Bootstrap note: %s", eb)
                 result = asyncio.run(engine.sync())
-                report.update(result)
+                if "is_online" in result:
+                    report["is_online"] = result["is_online"]
+                report.update({k: v for k, v in result.items() if k != "is_online"})
                 report["access_token"] = engine._access_token
                 report["refresh_token"] = engine._refresh_token
         except Exception as e:
@@ -169,6 +177,12 @@ class MainWindow(QMainWindow):
 
         self._setup_ui()
         self._apply_theme(self._current_theme)
+
+        # Authoritative Live Server Dashboard State
+        self._authoritative_server_overview = None
+        self._authoritative_server_top_vehicles = None
+        self._has_server_dashboard = False
+        self._dashboard_generation = 0
 
         # Setup Real-time WebSocket Client
         try:
@@ -512,45 +526,37 @@ class MainWindow(QMainWindow):
             logger.error("Failed to render vehicles from domain snapshot: %s", e, exc_info=True)
 
     def _refresh_dashboard(self, fetch_server: bool = False, request_revenue: bool = False):
-        """Render instantly from local data, then refresh via API in background.
+        """Render dashboard ensuring live server data is never overwritten by local cache.
 
-        Never performs network I/O on the UI thread. The offline snapshot uses
-        EXACTLY the backend canonical rule (time-derived: a reservation whose
-        window covers now is "en location" whatever its RESERVED/ACTIVE status;
-        revenue = non-cancelled, started, start in [period_start, period_end),
-        Africa/Casablanca) so cached values never contradict the server. On
-        transient API errors the last known server values win.
-
-        ``request_revenue``: when True, the revenue panel re-fetches the
-        chiffre d'affaires for the currently selected date range. Set to True
-        only on explicit user action (manual refresh, period change) or when
-        server data changed — NOT on every domain fan-out, which would cause
-        the revenue value to flicker to "…" on every auto-sync tick.
+        Strict Server Authority Invariant:
+        When online and authoritative server data is available, renders from the
+        server state with is_live=True.
+        Local SQLite snapshot is used ONLY when truly offline or before the first
+        server response arrives (marked is_live=False).
         """
-        rev_before = self._store.revision
-        try:
-            self._store.reload()
-            reentrant_render_done = self._store.revision != rev_before
-            if not reentrant_render_done:
-                # We are inside the fan-out (or nothing changed): render now.
-                overview = dict(self._store.snapshot.overview or {})
-                for key in ("today_revenue", "week_revenue", "month_revenue", "year_revenue"):
-                    if overview.get(key) is None:
-                        overview[key] = 0.0
-                top = [dict(v) for v in self._store.snapshot.top_vehicles]
-                self._dashboard.refresh_data(overview, top, request_revenue=request_revenue)
-            elif not fetch_server:
-                return  # reload()'s fan-out already re-rendered the dashboard
-        except Exception as e:
-            logger.error("Local dashboard snapshot failed: %s", e)
+        snap = self._store.snapshot
+        is_live = snap.is_live or (self._is_online and getattr(self, "_has_server_dashboard", False))
 
-        self._dashboard_generation = getattr(self, "_dashboard_generation", 0) + 1
-        current_generation = self._dashboard_generation
+        if is_live and getattr(self, "_has_server_dashboard", False):
+            overview = dict(self._authoritative_server_overview or snap.overview or {})
+            top = list(getattr(self, "_authoritative_server_top_vehicles", []) or snap.top_vehicles or [])
+        else:
+            overview = dict(snap.overview or {})
+            for key in ("today_revenue", "week_revenue", "month_revenue", "year_revenue"):
+                if overview.get(key) is None:
+                    overview[key] = 0.0
+            top = [dict(v) for v in snap.top_vehicles]
 
+        self._dashboard.refresh_data(overview, top, request_revenue=request_revenue, is_live=is_live)
+
+        # 2. Asynchronously query FastAPI ONLY when explicitly requested (Async Race Protection)
         if fetch_server and self._is_online and self._access_token:
+            self._dashboard_generation = getattr(self, "_dashboard_generation", 0) + 1
+            current_generation = self._dashboard_generation
+
             fetcher = DashboardFetcher(self._access_token, parent=self)
             fetcher.stats_ready.connect(
-                lambda overview, top, gen=current_generation: self._on_dashboard_stats(overview, top, gen)
+                lambda ov, tv, gen=current_generation: self._on_dashboard_stats(ov, tv, gen)
             )
             fetcher.finished.connect(fetcher.deleteLater)
             self._dashboard_fetcher = fetcher  # keep reference
@@ -567,21 +573,28 @@ class MainWindow(QMainWindow):
             try:
                 data = self._api.get_revenue_range(f_iso, t_iso)
                 if data and data.get("revenue") is not None:
-                    return float(data["revenue"]), "server"
+                    rev = float(data["revenue"])
+                    self._last_server_revenue = rev
+                    return rev, "server"
             except ServerContractMismatchError as e:
                 logger.error("Server contract mismatch on revenue range: %s", e)
-                try:
-                    from app.sync.dashboard_cache import revenue_between_rows
-                    rows = list(self._store.snapshot.reservations or [])
-                    rev, _days = revenue_between_rows(
-                        rows, from_date, to_date_inclusive + timedelta(days=1)
-                    )
-                    return rev, "mismatch"
-                except Exception as ex:
-                    logger.error("local fallback after mismatch failed: %s", ex)
-                    return None, "error"
             except Exception as e:
-                logger.info("revenue range fetch failed, using local: %s", e)
+                logger.info("revenue range fetch failed: %s", e)
+
+        # Authoritative server fallback: if we already hold live server metrics
+        # for today / week / month / year, use the server figure instead of 0.00 DH local!
+        ov = getattr(self._store, "_server_overview", None) or getattr(self, "_authoritative_server_overview", None)
+        today = date.today()
+        if ov and getattr(self, "_has_server_dashboard", False):
+            if from_date == today and to_date_inclusive == today and ov.get("today_revenue") is not None:
+                return float(ov["today_revenue"]), "server"
+            if from_date == (today - timedelta(days=today.weekday())) and ov.get("week_revenue") is not None:
+                return float(ov["week_revenue"]), "server"
+            if from_date == today.replace(day=1) and ov.get("month_revenue") is not None:
+                return float(ov["month_revenue"]), "server"
+            if hasattr(self, "_last_server_revenue") and self._last_server_revenue is not None:
+                return self._last_server_revenue, "server"
+
         try:
             from app.sync.dashboard_cache import revenue_between_rows
             rows = list(self._store.snapshot.reservations or [])
@@ -595,29 +608,35 @@ class MainWindow(QMainWindow):
 
     def _on_dashboard_stats(self, overview: dict, top_vehicles: list, generation: int = 0):
         """Apply API dashboard results (delivered on the UI thread)."""
-        if generation > 0 and getattr(self, "_dashboard_generation", 0) > generation:
+        current_gen = getattr(self, "_dashboard_generation", 0)
+        if current_gen > 0 and generation < current_gen:
+            logger.info("Dropping stale dashboard stats generation %s (current: %s)",
+                        generation, current_gen)
             return
-            
+
         overview = dict(overview)
-        # An older backend build (pre year-revenue) omits year_* — fill it from
-        # the CANONICAL local snapshot so "Cette année" is never wrongly 0 until
-        # the server is redeployed. Same rule, same numbers.
         local_ov = self._store.snapshot.overview or {}
         for key in ("year_revenue", "year_rentals"):
             if overview.get(key) is None:
                 overview[key] = local_ov.get(key, 0)
+
+        self._authoritative_server_overview = dict(overview)
         self._last_server_overview = dict(overview)
-        # An empty list here can mean "the vehicle-performance call failed while
-        # /stats succeeded" — don't let that wipe a good Top-5. Keep the last
-        # non-empty server result, else the canonical local computation.
         if top_vehicles:
-            self._last_server_top_vehicles = top_vehicles
+            self._authoritative_server_top_vehicles = list(top_vehicles)
+            self._last_server_top_vehicles = list(top_vehicles)
+        self._has_server_dashboard = True
+
+        # Commit to DomainStore — enforces server authority over all local snapshots
+        self._store.update_server_dashboard(overview, top_vehicles, generation=generation)
+
         top = (top_vehicles
+               or getattr(self, "_authoritative_server_top_vehicles", None)
                or getattr(self, "_last_server_top_vehicles", None)
                or [dict(v) for v in self._store.snapshot.top_vehicles])
-        self._dashboard.refresh_data(overview, top, request_revenue=True)
+        self._dashboard.refresh_data(overview, top, request_revenue=True, is_live=True)
 
-    def _run_sync(self):
+    def _run_sync(self, force_bootstrap: bool = False):
         """Execute the sync cycle in a background thread (never blocks UI)."""
         thread = getattr(self, "_sync_thread", None)
         if thread is not None:
@@ -630,7 +649,8 @@ class MainWindow(QMainWindow):
             self._sync_thread = None
         self._sync_pending = False
         thread = SyncThread(
-            self._device_id, self._access_token, self._refresh_token, parent=self
+            self._device_id, self._access_token, self._refresh_token,
+            force_bootstrap=force_bootstrap, parent=self
         )
         thread.sync_finished.connect(self._on_sync_finished)
         thread.finished.connect(self._on_sync_thread_finished)
@@ -689,8 +709,8 @@ class MainWindow(QMainWindow):
             else:
                 self._is_online = False
                 self.statusBar().showMessage(t("sync.offline"))
-                if getattr(self, "_current_page_key", "dashboard") == "dashboard":
-                    self._refresh_dashboard(fetch_server=False, request_revenue=True)
+                # Strict Server Authority: DO NOT clobber live server state on offline/glitch.
+                # DomainStore and Dashboard retain their latest authoritative server figures.
         except Exception as e:
             logger.debug("Sync result handling note: %s", e)
         finally:
@@ -709,6 +729,10 @@ class MainWindow(QMainWindow):
         self._refresh_btn.setEnabled(False)
         self._refresh_btn.setText(t("topbar.refreshing"))
 
+        # Immediately fetch authoritative live server metrics without blocking on background sync
+        if getattr(self, "_current_page_key", "dashboard") == "dashboard":
+            self._refresh_dashboard(fetch_server=True, request_revenue=True)
+
         thread = getattr(self, "_sync_thread", None)
         try:
             if thread is not None and thread.isRunning():
@@ -717,7 +741,10 @@ class MainWindow(QMainWindow):
         except RuntimeError:
             pass
 
-        self._run_sync()
+        try:
+            self._run_sync(force_bootstrap=True)
+        except TypeError:
+            self._run_sync()
 
     def _restore_refresh_btn(self):
         """Restore the topbar refresh button after a sync cycle completes."""

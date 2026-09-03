@@ -669,6 +669,7 @@ class SyncService:
                         "autres_expiry": v.autres_expiry.isoformat() if v.autres_expiry else None,
                         "autres_label": v.autres_label,
                         "image_url": v.image_url,
+                        "created_at": v.created_at.isoformat() if v.created_at else None,
                     },
                     "version": v.version,
                     "updated_at": v.updated_at.isoformat() if v.updated_at else server_time.isoformat(),
@@ -688,6 +689,7 @@ class SyncService:
                         "num_days": r.num_days, "total_price": float(r.total_price), "deposit": float(r.deposit),
                         "payment_status": r.payment_status, "status": r.status,
                         "cancellation_reason": r.cancellation_reason,
+                        "created_at": r.created_at.isoformat() if r.created_at else None,
                     },
                     "version": r.version, "updated_at": r.updated_at.isoformat()
                 })
@@ -704,6 +706,7 @@ class SyncService:
                         "actual_end_datetime": m.actual_end_datetime.isoformat() if m.actual_end_datetime else None,
                         "estimated_cost": float(m.estimated_cost) if m.estimated_cost else 0,
                         "step": m.step, "status": m.status,
+                        "created_at": m.created_at.isoformat() if m.created_at else None,
                     },
                     "version": m.version, "updated_at": m.updated_at.isoformat()
                 })
@@ -722,6 +725,7 @@ class SyncService:
                         "driving_license_image": c.driving_license_image,
                         "driving_license_image_back": c.driving_license_image_back,
                         "photo_url": c.photo_url, "notes": c.notes, "status": c.status,
+                        "created_at": c.created_at.isoformat() if c.created_at else None,
                     },
                     "version": c.version, "updated_at": c.updated_at.isoformat()
                 })

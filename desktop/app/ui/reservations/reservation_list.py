@@ -533,6 +533,7 @@ class ReservationWidget(QWidget):
         ])
 
         header = self._table.horizontalHeader()
+        header.setMinimumSectionSize(120)
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
@@ -540,8 +541,8 @@ class ReservationWidget(QWidget):
         header.setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)
         self._table.setColumnWidth(4, 130)
         header.setSectionResizeMode(5, QHeaderView.ResizeMode.Fixed)
-        self._table.setColumnWidth(5, 200)
-        self._table.verticalHeader().setDefaultSectionSize(42)
+        self._table.setColumnWidth(5, 290)
+        self._table.verticalHeader().setDefaultSectionSize(48)
 
         self._table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self._table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
@@ -684,10 +685,15 @@ class ReservationWidget(QWidget):
             # 0. Client
             c_name = r.get("customer_name") or "—"
             c_phone = f" ({r.get('customer_phone')})" if r.get("customer_phone") else ""
-            self._table.setItem(i, 0, QTableWidgetItem(f"{c_name}{c_phone}"))
+            client_text = f"{c_name}{c_phone}"
+            client_item = QTableWidgetItem(client_text)
+            client_item.setToolTip(client_text)
+            self._table.setItem(i, 0, client_item)
 
             # 1. Véhicule
-            self._table.setItem(i, 1, QTableWidgetItem(v_name))
+            vehicle_item = QTableWidgetItem(v_name)
+            vehicle_item.setToolTip(v_name)
+            self._table.setItem(i, 1, vehicle_item)
 
             # 2. Dates
             start_dt_obj = self._parse_dt(r.get("start_datetime"))

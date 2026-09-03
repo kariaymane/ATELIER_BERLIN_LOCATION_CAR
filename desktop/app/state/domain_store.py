@@ -77,6 +77,8 @@ class DomainSnapshot:
     overview: dict = field(default_factory=dict)       # dashboard overview (compute_local_overview)
     top_vehicles: tuple = ()                           # "Top 5 les plus loués" (canonical, offline)
     next_boundary: Optional[datetime] = None           # earliest future time-driven transition
+    is_live: bool = False                              # True when overview reflects authoritative server data
+    server_timestamp: Optional[datetime] = None        # timestamp of server response
 
     def vehicle(self, vehicle_id: str) -> Optional[dict]:
         for v in self.vehicles:
@@ -103,6 +105,11 @@ class DomainStore:
         self._revision: int = 0
         self._subscribers: list[Subscriber] = []
         self._reloading: bool = False
+        # Authoritative server dashboard state (Server Authority Invariant)
+        self._server_overview: Optional[dict] = None
+        self._server_top_vehicles: Optional[list] = None
+        self._server_generation: int = 0
+        self._server_timestamp: Optional[datetime] = None
         # Injectable clock source — the SAME one the BoundaryClock uses, so a
         # temporal recompute at `now` is consistent with the snapshot built at
         # `now`. Defaults to the real wall clock.
@@ -113,6 +120,51 @@ class DomainStore:
 
     def now(self) -> datetime:
         return self._now_fn()
+
+    # ── server authority methods ─────────────────────────────────────────
+    def update_server_dashboard(self, overview: dict, top_vehicles: Optional[list] = None, generation: int = 0) -> DomainSnapshot:
+        """Apply authoritative live server dashboard data to the DomainStore.
+
+        Strict server authority invariant: Once authoritative server data is
+        received, it takes permanent precedence over local SQLite projections.
+        Subsequent SQLite reloads will preserve this server state unless offline.
+        """
+        if self._server_generation > 0 and generation < self._server_generation:
+            logger.info("DomainStore: Dropping stale server dashboard update gen %s (current %s)",
+                        generation, self._server_generation)
+            return self._snapshot
+
+        self._server_overview = dict(overview)
+        if top_vehicles is not None:
+            self._server_top_vehicles = list(top_vehicles)
+        self._server_generation = max(self._server_generation, generation)
+        self._server_timestamp = self.now()
+
+        # Update current snapshot with server authoritative metrics
+        if self._snapshot is not _EMPTY:
+            self._snapshot = DomainSnapshot(
+                revision=self._revision,
+                generated_at=self._snapshot.generated_at,
+                vehicles=self._snapshot.vehicles,
+                reservations=self._snapshot.reservations,
+                maintenances=self._snapshot.maintenances,
+                clients=self._snapshot.clients,
+                effective=self._snapshot.effective,
+                fleet_counts=self._snapshot.fleet_counts,
+                overview=dict(self._server_overview),
+                top_vehicles=tuple(self._server_top_vehicles or self._snapshot.top_vehicles),
+                next_boundary=self._snapshot.next_boundary,
+                is_live=True,
+                server_timestamp=self._server_timestamp,
+            )
+        return self._snapshot
+
+    def clear_server_dashboard(self) -> None:
+        """Clear authoritative server dashboard state (used on explicit logout/disconnect)."""
+        self._server_overview = None
+        self._server_top_vehicles = None
+        self._server_generation = 0
+        self._server_timestamp = None
 
     # ── read side ────────────────────────────────────────────────────────
     @property
@@ -230,8 +282,7 @@ class DomainStore:
         return self._snapshot
 
     # ── snapshot construction (single canonical derivation) ─────────────
-    @staticmethod
-    def _build_snapshot(session, revision: int, now: Optional[datetime] = None) -> DomainSnapshot:
+    def _build_snapshot(self, session, revision: int, now: Optional[datetime] = None) -> DomainSnapshot:
         from app.models.vehicle import LocalVehicle
         from app.models.reservation import LocalReservation
         from app.models.maintenance import LocalMaintenance
@@ -345,16 +396,22 @@ class DomainStore:
         maint_dicts = tuple(_maint_dict(m) for m in maintenances)
         client_dicts = tuple(_client_dict(c) for c in clients)
 
-        try:
-            from app.sync.dashboard_cache import compute_overview_rows, compute_top_vehicles_rows
-            overview = compute_overview_rows(res_dicts, fleet_counts, maintenances=maint_dicts, now=now)
-            top_vehicles = tuple(
-                compute_top_vehicles_rows(res_dicts, vehicle_dicts, now=now, limit=5)
-            )
-        except Exception as e:
-            logger.error("DomainStore: local overview computation failed: %s", e, exc_info=True)
-            overview = dict(fleet_counts)
-            top_vehicles = ()
+        if self._server_overview is not None:
+            overview = dict(self._server_overview)
+            top_vehicles = tuple(self._server_top_vehicles or ())
+            is_live = True
+        else:
+            try:
+                from app.sync.dashboard_cache import compute_overview_rows, compute_top_vehicles_rows
+                overview = compute_overview_rows(res_dicts, fleet_counts, maintenances=maint_dicts, now=now)
+                top_vehicles = tuple(
+                    compute_top_vehicles_rows(res_dicts, vehicle_dicts, now=now, limit=5)
+                )
+            except Exception as e:
+                logger.error("DomainStore: local overview computation failed: %s", e, exc_info=True)
+                overview = dict(fleet_counts)
+                top_vehicles = ()
+            is_live = False
 
         from app.utils.fleet_status import next_boundary_rows
         # include local midnight so the dashboard period (today/week/month)
@@ -373,6 +430,8 @@ class DomainStore:
             overview=overview,
             top_vehicles=top_vehicles,
             next_boundary=nb,
+            is_live=is_live,
+            server_timestamp=self._server_timestamp,
         )
 
     # ── temporal recompute (NO SQLite, NO network) ─────────────────────────
@@ -405,10 +464,12 @@ class DomainStore:
         except Exception:
             new_overview = dict(base.overview or {})
 
+        effective_overview = dict(self._server_overview) if self._server_overview is not None else new_overview
+
         changed = (
             new_effective != base.effective
             or new_counts != base.fleet_counts
-            or new_overview != base.overview   # period rollover at local midnight
+            or (self._server_overview is None and new_overview != base.overview)
         )
         if not changed:
             return False  # boundary reached but nothing changed — silent no-op
@@ -430,9 +491,11 @@ class DomainStore:
                 clients=base.clients,
                 effective=new_effective,
                 fleet_counts=new_counts,
-                overview=new_overview,
-                top_vehicles=base.top_vehicles,  # ranking is all-time, unaffected by a midnight rollover
+                overview=effective_overview,
+                top_vehicles=tuple(self._server_top_vehicles) if self._server_top_vehicles is not None else base.top_vehicles,
                 next_boundary=new_boundary,
+                is_live=self._server_overview is not None,
+                server_timestamp=self._server_timestamp,
             )
             self._notify()
         finally:

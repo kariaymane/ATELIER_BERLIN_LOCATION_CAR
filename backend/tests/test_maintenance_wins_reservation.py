@@ -53,7 +53,7 @@ async def _mk_maintenance(db, v_id, start, end, status="ACTIVE"):
     return m
 
 
-NOW = datetime(2026, 9, 1, 12, 0, tzinfo=timezone.utc)
+NOW = datetime.now(timezone.utc)
 
 
 @pytest.mark.asyncio
