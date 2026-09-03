@@ -569,7 +569,12 @@ class DashboardWidget(QWidget):
                 name_lbl = QLabel(f"{v.get('brand', '')} {v.get('model', '')} ({v.get('registration', '')})")
                 name_lbl.setStyleSheet(f"color: {p['TEXT_PRIMARY']};")
 
-                count_lbl = QLabel(f"{v.get('rental_count', 0)} {t('dashboard.rentals_unit')}")
+                rev = float(v.get("total_revenue", 0.0) or 0.0)
+                if rev > 0:
+                    count_text = f"{v.get('rental_count', 0)} {t('dashboard.rentals_unit')} • {rev:,.0f} DH".replace(",", " ")
+                else:
+                    count_text = f"{v.get('rental_count', 0)} {t('dashboard.rentals_unit')}"
+                count_lbl = QLabel(count_text)
                 count_lbl.setStyleSheet(f"color: {p['TEXT_SECONDARY']};")
 
                 bar = QFrame()

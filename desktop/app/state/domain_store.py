@@ -346,7 +346,7 @@ class DomainStore:
 
         try:
             from app.sync.dashboard_cache import compute_overview_rows, compute_top_vehicles_rows
-            overview = compute_overview_rows(res_dicts, fleet_counts, now=now)
+            overview = compute_overview_rows(res_dicts, fleet_counts, maintenances=maint_dicts, now=now)
             top_vehicles = tuple(
                 compute_top_vehicles_rows(res_dicts, vehicle_dicts, now=now, limit=5)
             )
@@ -400,7 +400,7 @@ class DomainStore:
         new_boundary = next_boundary_rows(
             list(base.reservations), list(base.maintenances), now, include_midnight=True)
         try:
-            new_overview = compute_overview_rows(list(base.reservations), new_counts, now=now)
+            new_overview = compute_overview_rows(list(base.reservations), new_counts, maintenances=list(base.maintenances), now=now)
         except Exception:
             new_overview = dict(base.overview or {})
 

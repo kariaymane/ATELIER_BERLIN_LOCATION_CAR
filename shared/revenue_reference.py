@@ -110,7 +110,11 @@ def _realised_day_dates(res: dict, now: datetime):
 
     start_dt = _as_datetime(res.get("start_datetime") or res.get("start_date"))
     start_d = start_dt.date()
-    realised = _realised_days(start_dt, num_days, now)
+    status = str(res.get("status") or "").strip().upper()
+    if status == "COMPLETED":
+        realised = num_days
+    else:
+        realised = _realised_days(start_dt, num_days, now)
     if realised <= 0:
         return Decimal("0"), None, 0
 

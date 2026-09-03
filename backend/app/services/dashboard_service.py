@@ -52,10 +52,14 @@ class DashboardService:
 
         rental_counts = await self._rental_repo.count_by_status()
 
-        # The dashboard shows ONE maintenance number everywhere: vehicles
-        # currently occupied by maintenance (== the fleet card). No second,
-        # differently-computed "open tickets" figure that could contradict it.
-        active_maintenances = maintenance
+        # Open maintenance tickets in total (excluding completed and cancelled)
+        from app.models.maintenance import Maintenance
+        open_tickets_res = await self._session.execute(
+            select(func.count(Maintenance.id)).where(
+                Maintenance.status.notin_(["COMPLETED", "CANCELLED"])
+            )
+        )
+        active_maintenance_tickets = open_tickets_res.scalar() or 0
 
         today_start, today_end = period_bounds("today", now)
 
@@ -63,12 +67,10 @@ class DashboardService:
         today_rentals = _today["rentals"]
         today_revenue = _today["revenue"]
 
-        # today_returns: any real (non-cancelled) rental ending today. A
-        # RESERVED reservation counts exactly like ACTIVE once it has covered
-        # `now` — see app/services/fleet_status.py's time-derived rule.
+        # today_returns: active or reserved rentals ending today (COMPLETED and CANCELLED excluded)
         tr_res = await self._session.execute(
             select(func.count(Reservation.id)).where(
-                Reservation.status != "CANCELLED",
+                Reservation.status.in_(["ACTIVE", "RESERVED"]),
                 Reservation.end_datetime >= today_start,
                 Reservation.end_datetime < today_end
             )
@@ -96,7 +98,7 @@ class DashboardService:
             "maintenance": vehicle_counts.get("MAINTENANCE", 0),
             "active_rentals": rental_counts.get("ACTIVE", 0),
             "reserved_rentals": rental_counts.get("RESERVED", 0),
-            "active_maintenance_tickets": active_maintenances,
+            "active_maintenance_tickets": active_maintenance_tickets,
             "today_rentals": today_rentals,
             "today_returns": today_returns,
             "today_revenue": today_revenue,
@@ -178,23 +180,16 @@ class DashboardService:
                 stat["registration"] = vehicle.registration
                 stat["brand"] = vehicle.brand
                 stat["model"] = vehicle.model
-                # Calculate utilization rate (days rented / days since first rental).
-                # `last_rental` may be serialized from a naive OR an aware
-                # datetime depending on how the column round-trips; normalise
-                # BOTH sides to aware-UTC so the subtraction can never raise
-                # "can't subtract offset-naive and offset-aware datetimes" — a
-                # crash here 500s the whole endpoint and blanks the desktop
-                # "Top 5 véhicules les plus loués" panel.
-                if stat["last_rental"]:
-                    first_rental_dt = datetime.fromisoformat(stat["last_rental"])
-                    if first_rental_dt.tzinfo is None:
-                        first_rental_dt = first_rental_dt.replace(tzinfo=timezone.utc)
+                # Operational lifetime: days since vehicle was registered in the fleet
+                created_dt = vehicle.created_at
+                if created_dt:
+                    if created_dt.tzinfo is None:
+                        created_dt = created_dt.replace(tzinfo=timezone.utc)
                     now_utc = datetime.now(timezone.utc)
-                    total_possible_days = max(
-                        1, (now_utc - first_rental_dt.astimezone(timezone.utc)).days
-                    )
-                    stat["utilization_rate"] = round(
-                        (stat["total_days"] / total_possible_days) * 100, 1
+                    operational_days = max(1, (now_utc.date() - created_dt.astimezone(timezone.utc).date()).days + 1)
+                    stat["utilization_rate"] = min(
+                        100.0,
+                        round((stat["total_days"] / operational_days) * 100.0, 1)
                     )
                 else:
                     stat["utilization_rate"] = 0.0

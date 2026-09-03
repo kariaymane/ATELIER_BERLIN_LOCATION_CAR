@@ -102,9 +102,14 @@ object RevenueEngine {
     private fun realisedWindowDays(
         r: Rental, fromEpochDay: Long, toEpochDay: Long, nowMillis: Long, zone: TimeZone,
     ): Int {
-        if ((r.status ?: "").trim().uppercase(Locale.US) == "CANCELLED") return 0
+        val status = (r.status ?: "").trim().uppercase(Locale.US)
+        if (status == "CANCELLED") return 0
         if (r.numDays <= 0 || r.startMillis == null) return 0
-        val realised = realisedDays(r.startMillis, r.numDays, nowMillis)
+        val realised = if (status == "COMPLETED") {
+            r.numDays
+        } else {
+            realisedDays(r.startMillis, r.numDays, nowMillis)
+        }
         if (realised <= 0) return 0
         val startDay = bizEpochDay(r.startMillis, zone)
         val lo = maxOf(startDay, fromEpochDay)
