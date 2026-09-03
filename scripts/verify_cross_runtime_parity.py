@@ -65,8 +65,11 @@ def mobile_calc_revenue(reservations: list[dict], from_iso: str, to_iso: str, no
             continue
 
         s_biz = s_dt.astimezone(BIZ_TZ) if s_dt.tzinfo else s_dt.replace(tzinfo=BIZ_TZ)
-        n = math.floor((now_biz - s_biz).total_seconds() / 86400.0) + 1
-        realised = max(0, min(num_days, n))
+        if st == "COMPLETED":
+            realised = num_days
+        else:
+            n = math.floor((now_biz - s_biz).total_seconds() / 86400.0) + 1
+            realised = max(0, min(num_days, n))
         if realised <= 0:
             continue
 
