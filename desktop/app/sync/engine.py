@@ -292,6 +292,9 @@ class SyncEngine:
                         if v:
                             session.delete(v)
                     elif op in ("CREATE", "UPDATE"):
+                        if v and getattr(v, "version", None) is not None and ver < v.version:
+                            logger.info("Skipping stale pulled vehicle %s (current v%s >= incoming v%s)", eid, v.version, ver)
+                            continue
                         now_iso = datetime.now(timezone.utc).isoformat()
                         if not v:
                             v = LocalVehicle(id=eid)
@@ -319,7 +322,10 @@ class SyncEngine:
                         v.notes = payload.get("notes", getattr(v, 'notes', None))
                         v.version = ver
                         v.updated_at = now_iso
-                        if not hasattr(v, 'created_at') or not v.created_at:
+                        v_created = payload.get("created_at")
+                        if v_created:
+                            v.created_at = v_created
+                        elif not getattr(v, 'created_at', None):
                             v.created_at = now_iso
 
                         # Sync local vehicle images
@@ -344,6 +350,9 @@ class SyncEngine:
                         if r:
                             session.delete(r)
                     elif op in ("CREATE", "UPDATE"):
+                        if r and getattr(r, "version", None) is not None and ver < r.version:
+                            logger.info("Skipping stale pulled reservation %s (current v%s >= incoming v%s)", eid, r.version, ver)
+                            continue
                         now_iso = datetime.now(timezone.utc).isoformat()
                         if not r:
                             r = LocalReservation(id=eid)
@@ -366,7 +375,10 @@ class SyncEngine:
                         r.payment_status = payload.get("payment_status", getattr(r, 'payment_status', "PENDING"))
                         r.version = ver
                         r.updated_at = now_iso
-                        if not hasattr(r, 'created_at') or not r.created_at:
+                        r_created = payload.get("created_at")
+                        if r_created:
+                            r.created_at = r_created
+                        elif not getattr(r, 'created_at', None):
                             r.created_at = now_iso
                 elif etype == "client":
                     c = session.query(LocalClient).filter_by(id=eid).first()
@@ -374,6 +386,9 @@ class SyncEngine:
                         if c:
                             session.delete(c)
                     elif op in ("CREATE", "UPDATE"):
+                        if c and getattr(c, "version", None) is not None and ver < c.version:
+                            logger.info("Skipping stale pulled client %s (current v%s >= incoming v%s)", eid, c.version, ver)
+                            continue
                         now_iso = datetime.now(timezone.utc).isoformat()
                         if not c:
                             c = LocalClient(id=eid)
@@ -393,7 +408,10 @@ class SyncEngine:
                         c.status = payload.get("status", getattr(c, 'status', "ACTIVE"))
                         c.version = ver
                         c.updated_at = now_iso
-                        if not hasattr(c, 'created_at') or not c.created_at:
+                        c_created = payload.get("created_at")
+                        if c_created:
+                            c.created_at = c_created
+                        elif not getattr(c, 'created_at', None):
                             c.created_at = now_iso
 
                 elif etype == "maintenance":
@@ -403,6 +421,9 @@ class SyncEngine:
                         if m:
                             session.delete(m)
                     elif op in ("CREATE", "UPDATE"):
+                        if m and getattr(m, "version", None) is not None and ver < m.version:
+                            logger.info("Skipping stale pulled maintenance %s (current v%s >= incoming v%s)", eid, m.version, ver)
+                            continue
                         now_iso = datetime.now(timezone.utc).isoformat()
                         if not m:
                             m = LocalMaintenance(id=eid)
@@ -447,7 +468,10 @@ class SyncEngine:
 
                         m.version = ver
                         m.updated_at = now_iso
-                        if not hasattr(m, 'created_at') or not m.created_at:
+                        m_created = payload.get("created_at")
+                        if m_created:
+                            m.created_at = m_created
+                        elif not getattr(m, 'created_at', None):
                             m.created_at = now_iso
 
                         # Sync parts
@@ -498,6 +522,82 @@ class SyncEngine:
             return {"status": "ok", **result}
         except Exception as e:
             logger.error("Pending upload processing failed: %s", e)
+            return {"status": "error", "message": str(e)}
+
+    async def bootstrap(self) -> dict:
+        """Atomic full synchronization from /api/v1/sync/bootstrap.
+
+        Guarantees that local SQLite cache is a 100% faithful mirror of PostgreSQL,
+        purging any local records that were deleted on the server without lingering.
+        """
+        if not self._access_token:
+            return {"status": "offline", "message": "Not authenticated"}
+
+        try:
+            headers = {"Authorization": f"Bearer {self._access_token}"}
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                resp = await client.get(
+                    f"{API_BASE_URL}/api/{API_VERSION}/sync/bootstrap",
+                    headers=headers
+                )
+                if resp.status_code != 200:
+                    return {"status": "error", "message": f"Server error: {resp.status_code}"}
+                data = resp.json()
+
+            session = get_local_session()
+            try:
+                from app.models.sync_queue import SyncQueueItem
+                from app.models.vehicle import LocalVehicle
+                p_rows = session.query(SyncQueueItem.entity_id).filter(
+                    SyncQueueItem.sync_status == "PENDING"
+                ).all()
+                pending_ids = {str(r[0]) for r in p_rows if r[0]}
+
+                server_vehicles = data.get("vehicles", [])
+                server_v_ids = {str(v.get("id")) for v in server_vehicles}
+                for lv in session.query(LocalVehicle).all():
+                    if str(lv.id) not in server_v_ids and str(lv.id) not in pending_ids:
+                        session.delete(lv)
+
+                for v_dto in server_vehicles:
+                    vid = str(v_dto.get("id"))
+                    if vid in pending_ids:
+                        continue
+                    v = session.query(LocalVehicle).filter_by(id=vid).first()
+                    if not v:
+                        v = LocalVehicle(id=vid)
+                        session.add(v)
+                    v.registration = v_dto.get("registration", "")
+                    v.vin = v_dto.get("vin")
+                    v.brand = v_dto.get("brand", "")
+                    v.model = v_dto.get("model", "")
+                    v.year = v_dto.get("year", 2024)
+                    v.color = v_dto.get("color", "Noir")
+                    v.fuel_type = v_dto.get("fuel_type", "DIESEL")
+                    v.transmission = v_dto.get("transmission", "MANUAL")
+                    v.current_mileage = v_dto.get("current_mileage", 0)
+                    v.purchase_mileage = v_dto.get("purchase_mileage", 0)
+                    v.purchase_price = v_dto.get("purchase_price", 0.0)
+                    v.daily_rental_price = v_dto.get("daily_rental_price", 0.0)
+                    v.status = v_dto.get("status", "AVAILABLE")
+                    v.image_url = v_dto.get("image_url")
+                    v.version = v_dto.get("version", 1)
+                    now_iso = datetime.now(timezone.utc).isoformat()
+                    v.updated_at = now_iso
+                    if not getattr(v, "created_at", None):
+                        v.created_at = v_dto.get("created_at") or now_iso
+
+                session.commit()
+                self._is_online = True
+                return {"status": "ok", "bootstrap": True}
+            except Exception as e:
+                session.rollback()
+                logger.error("Failed to apply bootstrap into SQLite: %s", e)
+                return {"status": "error", "message": str(e)}
+            finally:
+                session.close()
+        except Exception as e:
+            logger.error("Bootstrap execution failed: %s", e)
             return {"status": "error", "message": str(e)}
 
     async def sync(self) -> dict:

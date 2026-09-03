@@ -214,17 +214,16 @@ class DashboardWidget(QWidget):
         # Header: Title (Tableau de bord) + Dernière actualisation
         # ─────────────────────────────────────────────────────────────
         header_layout = QHBoxLayout()
-        header_layout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
         self._title_lbl = QLabel(t("dashboard.title"))
         self._title_lbl.setFont(QFont("Libre Caslon Text", 20, QFont.Weight.Bold))
         self._title_lbl.setStyleSheet("color: #1E4D38;")
-        header_layout.addWidget(self._title_lbl)
+        header_layout.addWidget(self._title_lbl, alignment=Qt.AlignmentFlag.AlignVCenter)
         header_layout.addStretch()
 
         self._last_refresh_lbl = QLabel(t("dashboard.last_refresh", time=datetime.now().strftime('%H:%M')))
         self._last_refresh_lbl.setFont(QFont("Hanken Grotesk", 10))
         self._last_refresh_lbl.setStyleSheet("color: #6B7264;")
-        header_layout.addWidget(self._last_refresh_lbl)
+        header_layout.addWidget(self._last_refresh_lbl, alignment=Qt.AlignmentFlag.AlignVCenter)
         layout.addLayout(header_layout)
 
         # ─────────────────────────────────────────────────────────────
@@ -411,11 +410,13 @@ class DashboardWidget(QWidget):
             return
         from PySide6.QtWidgets import QApplication
         self._revenue_req_id = getattr(self, "_revenue_req_id", 0) + 1
+        current_req_id = self._revenue_req_id
+
         # Parent to the QApplication (not this widget) so a widget teardown can
         # never destroy a still-running QThread; the bound-method connection is
         # auto-severed by Qt when this widget is destroyed.
         w = RevenueRangeWorker(
-            self._revenue_provider, f, t_incl, self._revenue_req_id,
+            self._revenue_provider, f, t_incl, current_req_id,
             parent=QApplication.instance(),
         )
         w.done.connect(self._on_revenue_done)
@@ -436,6 +437,9 @@ class DashboardWidget(QWidget):
         # Ignore results from a superseded request (rapid combo / date changes).
         if req_id and req_id != getattr(self, "_revenue_req_id", 0):
             return
+        # Strict Server Authority: Never let a local fallback downgrade an authoritative live server revenue!
+        if source == "local" and getattr(self, "_is_live_revenue", False):
+            return
         if revenue < 0 or source == "error":
             self._revenue_value_lbl.setText(t("dashboard.rev_unavailable"))
             self._rev_updated_lbl.setText("")
@@ -443,10 +447,12 @@ class DashboardWidget(QWidget):
         self._revenue_value_lbl.setText(f"{revenue:,.2f} DH".replace(",", " "))
         stamp = datetime.now().strftime("%H:%M:%S")
         if source == "server":
+            self._is_live_revenue = True
             self._rev_updated_lbl.setText(t("dashboard.rev_updated", time=stamp))
             self._rev_updated_lbl.setStyleSheet("color: #909C8E;")
             self._rev_updated_lbl.setToolTip("")
         elif source == "mismatch":
+            self._is_live_revenue = False
             self._rev_updated_lbl.setText(f"⚠ Serveur non synchronisé ({stamp})")
             self._rev_updated_lbl.setStyleSheet("color: #DC2626; font-weight: bold;")
             self._rev_updated_lbl.setToolTip(
@@ -454,6 +460,7 @@ class DashboardWidget(QWidget):
                 "Le chiffre affiché est calculé localement selon la règle canonique."
             )
         else:
+            self._is_live_revenue = False
             self._rev_updated_lbl.setText(t("dashboard.rev_updated_local", time=stamp))
             self._rev_updated_lbl.setStyleSheet("color: #909C8E;")
             self._rev_updated_lbl.setToolTip("")
@@ -492,7 +499,7 @@ class DashboardWidget(QWidget):
         self._current_period = period
 
     def refresh_data(self, overview: dict, top_vehicles: list = None,
-                     request_revenue: bool = False):
+                     request_revenue: bool = False, is_live: bool = True):
         """Apply the fleet/maintenance figures + Top-5.
 
         Revenue is fetched independently by the panel. When ``request_revenue``
@@ -503,7 +510,15 @@ class DashboardWidget(QWidget):
         """
         self._overview_data = overview or {}
         self._top_vehicles_data = top_vehicles or []
-        self._last_refresh_lbl.setText(t("dashboard.last_refresh", time=datetime.now().strftime('%H:%M')))
+        self._is_live_data = is_live
+        time_str = datetime.now().strftime('%H:%M')
+        base_text = t("dashboard.last_refresh", time=time_str)
+        if is_live:
+            self._last_refresh_lbl.setText(f"{base_text} (En direct)")
+            self._last_refresh_lbl.setStyleSheet("color: #1E4D38; font-weight: 500;")
+        else:
+            self._last_refresh_lbl.setText(f"{base_text} (Hors ligne / Cache)")
+            self._last_refresh_lbl.setStyleSheet("color: #909C8E;")
 
         maint = self._overview_data.get(
             "active_maintenance_tickets",
@@ -514,6 +529,18 @@ class DashboardWidget(QWidget):
         # "réservations" card follows the revenue period selection
         self._render_reservations_card()
         self._render_fleet_cards()
+
+        # Immediate authoritative live revenue from server overview (prevents blank/stale revenue flicker)
+        name = self._period_combo.currentData() or "month"
+        rev_key = f"{name}_revenue"
+        if is_live and rev_key in self._overview_data and self._overview_data[rev_key] is not None:
+            rev_val = float(self._overview_data[rev_key] or 0.0)
+            self._revenue_value_lbl.setText(f"{rev_val:,.2f} DH".replace(",", " "))
+            self._is_live_revenue = True
+            self._rev_updated_lbl.setText(t("dashboard.rev_updated", time=datetime.now().strftime("%H:%M:%S")))
+            self._rev_updated_lbl.setStyleSheet("color: #909C8E;")
+            self._rev_updated_lbl.setToolTip("")
+
         if request_revenue:
             self._request_revenue()
         self._render_top_vehicles()

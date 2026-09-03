@@ -27,6 +27,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.*
+import java.util.concurrent.atomic.AtomicLong
 
 /**
  * The server was reached but explicitly reported its database as unavailable
@@ -166,10 +167,12 @@ class FleetRepository(
         )
     }.distinctUntilChanged()
 
-    // Local canonical metrics are authoritative & time-live; the API result is
-    // the warm fallback before the first local computation (mirrors Desktop).
+    // Authoritative Live Server Data Authority (Increment 6):
+    // Server API result (_liveMetrics) is the permanent authoritative source of truth.
+    // Local Room derivation (localMetricsFlow) is strictly the offline cache fallback
+    // when no server response is available yet (api == null).
     val performanceMetricsFlow: Flow<PerformanceMetrics?> =
-        combine(localMetricsFlow, _liveMetrics) { local, api -> local ?: api }
+        combine(localMetricsFlow, _liveMetrics) { local, api -> api ?: local }
 
     private val _syncStatus = MutableStateFlow(SyncStatus())
     val syncStatusFlow: StateFlow<SyncStatus> = _syncStatus.asStateFlow()
@@ -809,9 +812,16 @@ class FleetRepository(
         }
     }
 
+    private val dashboardRequestId = AtomicLong(0)
+
     suspend fun refreshDashboard(): Result<Unit> = withContext(Dispatchers.IO) {
+        val reqId = dashboardRequestId.incrementAndGet()
         try {
             val response = apiClient.getService().getDashboardStats()
+            if (reqId < dashboardRequestId.get()) {
+                Log.i("DASHBOARD", "Dropping stale dashboard response #$reqId (latest: ${dashboardRequestId.get()})")
+                return@withContext Result.success(Unit)
+            }
             if (response.isSuccessful && response.body() != null) {
                 val stats = response.body()!!
                 _liveMetrics.value = PerformanceMetrics(
