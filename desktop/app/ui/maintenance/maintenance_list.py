@@ -20,6 +20,7 @@ from app.database import get_local_session
 from app.models.vehicle import LocalVehicle
 from app.models.maintenance import LocalMaintenance
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from app.sync.queue import SyncQueue
 from app.state.domain_store import get_domain_store
 
@@ -153,8 +154,8 @@ class MaintenanceFormDialog(QDialog):
             "vehicle_id": v_id,
             "type": self._type.currentData() or self._type.currentText(),
             "description": self._desc.toPlainText(),
-            "start_datetime": start.toPython().astimezone(timezone.utc).isoformat(),
-            "expected_end_datetime": end.toPython().astimezone(timezone.utc).isoformat(),
+            "start_datetime": start.toPython().replace(tzinfo=ZoneInfo("Africa/Casablanca")).astimezone(timezone.utc).isoformat(),
+            "expected_end_datetime": end.toPython().replace(tzinfo=ZoneInfo("Africa/Casablanca")).astimezone(timezone.utc).isoformat(),
             "estimated_cost": self._cost.value(),
             "step": "DIAGNOSTIC",
             "status": "ACTIVE",

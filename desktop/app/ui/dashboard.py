@@ -442,8 +442,21 @@ class DashboardWidget(QWidget):
             return
         self._revenue_value_lbl.setText(f"{revenue:,.2f} DH".replace(",", " "))
         stamp = datetime.now().strftime("%H:%M:%S")
-        key = "dashboard.rev_updated" if source == "server" else "dashboard.rev_updated_local"
-        self._rev_updated_lbl.setText(t(key, time=stamp))
+        if source == "server":
+            self._rev_updated_lbl.setText(t("dashboard.rev_updated", time=stamp))
+            self._rev_updated_lbl.setStyleSheet("color: #909C8E;")
+            self._rev_updated_lbl.setToolTip("")
+        elif source == "mismatch":
+            self._rev_updated_lbl.setText(f"⚠ Serveur non synchronisé ({stamp})")
+            self._rev_updated_lbl.setStyleSheet("color: #DC2626; font-weight: bold;")
+            self._rev_updated_lbl.setToolTip(
+                "Le serveur distant ne dispose pas des routes de calcul requises.\n"
+                "Le chiffre affiché est calculé localement selon la règle canonique."
+            )
+        else:
+            self._rev_updated_lbl.setText(t("dashboard.rev_updated_local", time=stamp))
+            self._rev_updated_lbl.setStyleSheet("color: #909C8E;")
+            self._rev_updated_lbl.setToolTip("")
 
     def retranslate_ui(self):
         """Live update all strings when application language changes."""

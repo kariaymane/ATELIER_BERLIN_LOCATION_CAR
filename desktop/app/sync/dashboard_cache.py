@@ -29,8 +29,18 @@ NON_REVENUE_STATUSES = ("CANCELLED",)
 def _parse_dt(value):
     if not value:
         return None
-    from app.utils.datetime_utils import parse_datetime_utc
-    return parse_datetime_utc(value)
+    if isinstance(value, datetime):
+        return _to_biz(value)
+    if isinstance(value, date):
+        return datetime(value.year, value.month, value.day, tzinfo=TZ)
+    s = str(value).strip().replace("Z", "+00:00").replace("z", "+00:00")
+    try:
+        dt = datetime.fromisoformat(s)
+        return _to_biz(dt)
+    except Exception:
+        from app.utils.datetime_utils import parse_datetime_utc
+        res = parse_datetime_utc(value)
+        return _to_biz(res) if res is not None else None
 
 
 def _to_biz(dt: datetime) -> datetime:

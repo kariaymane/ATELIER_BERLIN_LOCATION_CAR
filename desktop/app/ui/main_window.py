@@ -560,6 +560,7 @@ class MainWindow(QMainWindow):
         """(revenue, source) for the dashboard revenue panel. Canonical
         backend endpoint first; offline -> the SAME pro-rata rule over the
         DomainStore snapshot. Runs on a worker thread (never the UI thread)."""
+        from app.services.api_client import ServerContractMismatchError
         f_iso = from_date.isoformat()
         t_iso = to_date_inclusive.isoformat()
         if self._is_online and self._access_token:
@@ -567,6 +568,18 @@ class MainWindow(QMainWindow):
                 data = self._api.get_revenue_range(f_iso, t_iso)
                 if data and data.get("revenue") is not None:
                     return float(data["revenue"]), "server"
+            except ServerContractMismatchError as e:
+                logger.error("Server contract mismatch on revenue range: %s", e)
+                try:
+                    from app.sync.dashboard_cache import revenue_between_rows
+                    rows = list(self._store.snapshot.reservations or [])
+                    rev, _days = revenue_between_rows(
+                        rows, from_date, to_date_inclusive + timedelta(days=1)
+                    )
+                    return rev, "mismatch"
+                except Exception as ex:
+                    logger.error("local fallback after mismatch failed: %s", ex)
+                    return None, "error"
             except Exception as e:
                 logger.info("revenue range fetch failed, using local: %s", e)
         try:
