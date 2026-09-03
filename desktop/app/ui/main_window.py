@@ -398,7 +398,7 @@ class MainWindow(QMainWindow):
         if page_key == "vehicles":
             self._load_vehicles_from_local()
         elif page_key == "dashboard":
-            self._refresh_dashboard(request_revenue=True)
+            self._refresh_dashboard(fetch_server=True, request_revenue=True)
         elif page_key == "clients":
             self._clients_page.refresh_data()
         elif page_key == "reservations":
@@ -683,9 +683,14 @@ class MainWindow(QMainWindow):
 
                 status_text = t("sync.reconnected") if was_offline else t("sync.online")
                 self.statusBar().showMessage(status_text, 4000)
+
+                if getattr(self, "_current_page_key", "dashboard") == "dashboard":
+                    self._refresh_dashboard(fetch_server=True, request_revenue=True)
             else:
                 self._is_online = False
                 self.statusBar().showMessage(t("sync.offline"))
+                if getattr(self, "_current_page_key", "dashboard") == "dashboard":
+                    self._refresh_dashboard(fetch_server=False, request_revenue=True)
         except Exception as e:
             logger.debug("Sync result handling note: %s", e)
         finally:
@@ -700,6 +705,7 @@ class MainWindow(QMainWindow):
         If a sync is already in flight, mark it pending so a single follow-up
         cycle executes immediately upon completion — never drops clicks or races.
         """
+        self._manual_refresh_requested = True
         self._refresh_btn.setEnabled(False)
         self._refresh_btn.setText(t("topbar.refreshing"))
 

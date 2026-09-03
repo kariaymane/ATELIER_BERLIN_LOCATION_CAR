@@ -721,10 +721,10 @@ def run():
         "now": "2026-09-03T01:19:00+01:00",
         "reservations": prod_reservations,
         "queries": [
-            {"from": "2026-09-03", "to": "2026-09-04", "expected_revenue": 0.0, "expected_days": 0},
-            {"from": "2026-08-31", "to": "2026-09-07", "expected_revenue": 9650.0, "expected_days": 25},
-            {"from": "2026-09-01", "to": "2026-10-01", "expected_revenue": 6650.0, "expected_days": 17},
-            {"from": "2026-01-01", "to": "2027-01-01", "expected_revenue": 19750.0, "expected_days": 51}
+            {"from": "2026-09-03", "to": "2026-09-04", "expected_revenue": 2050.0, "expected_days": 5},
+            {"from": "2026-08-31", "to": "2026-09-07", "expected_revenue": 13050.0, "expected_days": 33},
+            {"from": "2026-09-01", "to": "2026-10-01", "expected_revenue": 20850.0, "expected_days": 49},
+            {"from": "2026-01-01", "to": "2027-01-01", "expected_revenue": 50150.0, "expected_days": 119}
         ]
     })
 

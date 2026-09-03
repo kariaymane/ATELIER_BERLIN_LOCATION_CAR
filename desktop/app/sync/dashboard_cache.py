@@ -60,7 +60,11 @@ def _reservation_revenue(r_get, start_dt, from_d: date, to_d: date, now: datetim
     if num_days <= 0 or start_dt is None:
         return Decimal("0")
     start_dt = _to_biz(start_dt)
-    realised = _realised_days(start_dt, num_days, now)
+    status = str(r_get("status") or "").strip().upper()
+    if status == "COMPLETED":
+        realised = num_days
+    else:
+        realised = _realised_days(start_dt, num_days, now)
     if realised <= 0:
         return Decimal("0")
     total_price = r_get("total_price")
@@ -131,7 +135,11 @@ def revenue_between_rows(reservation_rows, from_d: date, to_d: date, now=None):
         if start_dt is not None:
             sd = _to_biz(start_dt).date()
             nd = int(_get(r, "num_days") or 0)
-            realised = _realised_days(_to_biz(start_dt), nd, now) if nd else 0
+            status = (_get(r, "status") or "").strip().upper()
+            if status == "COMPLETED":
+                realised = nd
+            else:
+                realised = _realised_days(_to_biz(start_dt), nd, now) if nd else 0
             lo = max(sd, from_d)
             hi = min(sd + timedelta(days=realised), to_d)
             days_total += max(0, (hi - lo).days)
@@ -150,21 +158,41 @@ def _rentals_started(reservation_rows, from_d: date, to_d: date):
     return n
 
 
-def compute_overview_rows(reservation_rows, fleet_counts, now=None):
+def compute_overview_rows(reservation_rows, fleet_counts, maintenances=None, now=None):
     """PURE — dashboard overview (pro-rata revenue) from loaded reservation
     rows + a canonical fleet_counts dict. Recompute after local midnight
     rolls the cards with no SQLite read and no network."""
+    from app.utils.fleet_status import _get
     now = _now_biz(now)
     rows = list(reservation_rows or [])
+    maint_rows = list(maintenances or [])
+
+    open_tickets = 0
+    for m in maint_rows:
+        mst = (_get(m, "status") or "").strip().upper()
+        if mst not in ("COMPLETED", "CANCELLED"):
+            open_tickets += 1
+
+    today_start, today_end = _named_period_date_bounds("today", now)
+    returns_today = 0
+    for r in rows:
+        rst = (_get(r, "status") or "").strip().upper()
+        if rst in ("ACTIVE", "RESERVED"):
+            end_dt = _parse_dt(_get(r, "end_datetime"))
+            if end_dt:
+                end_biz = _to_biz(end_dt)
+                if today_start <= end_biz.date() < today_end:
+                    returns_today += 1
+
     out = {
         "total_vehicles": fleet_counts["total_vehicles"],
         "available": fleet_counts["available"],
         "rented": fleet_counts["rented"],
         "reserved": fleet_counts["reserved"],
         "maintenance": fleet_counts["maintenance"],
-        # keep BOTH keys so the UI's key lookup can never miss (C1)
         "active_maintenances": fleet_counts["maintenance"],
-        "active_maintenance_tickets": fleet_counts["maintenance"],
+        "active_maintenance_tickets": open_tickets if maint_rows else fleet_counts["maintenance"],
+        "today_returns": returns_today,
     }
     for key, name in (("today", "today"), ("week", "week"),
                       ("month", "month"), ("year", "year")):
@@ -178,13 +206,11 @@ def compute_overview_rows(reservation_rows, fleet_counts, now=None):
 def compute_top_vehicles_rows(reservation_rows, vehicle_rows, now=None, limit=5):
     """PURE — "Top N véhicules les plus loués" from already-loaded rows.
 
-    CANONICAL — identical eligibility to revenue / backend
-    ``RentalRepository.get_vehicle_stats``: every reservation that is
-    ``status != 'CANCELLED'`` AND has started (``start_datetime <= now``).
-    Grouped by vehicle, ranked by total revenue desc. Used offline so the
-    Top-5 panel is never blank just because the server is unreachable; the
-    server response (``/dashboard/vehicle-performance``) is preferred when
-    available and returns the same ordering for the same data.
+    CANONICAL — identical eligibility and ranking to backend
+    ``RentalRepository.get_vehicle_stats``:
+    1) rental_count DESC (most rented = rental count)
+    2) realised_revenue DESC (pro-rata realised revenue)
+    3) vehicle_id ASC (deterministic tiebreaker)
     """
     from app.utils.fleet_status import _get
 
@@ -201,6 +227,9 @@ def compute_top_vehicles_rows(reservation_rows, vehicle_rows, now=None, limit=5)
                 "model": _get(v, "model") or "",
             }
 
+    all_time_start = date(2000, 1, 1)
+    all_time_end = date(9999, 12, 31)
+
     agg: dict[str, dict] = {}
     for r in (reservation_rows or []):
         if (_get(r, "status") or "").upper() == "CANCELLED":
@@ -215,14 +244,31 @@ def compute_top_vehicles_rows(reservation_rows, vehicle_rows, now=None, limit=5)
                                  "total_days": 0, "total_revenue": 0.0,
                                  "last_rental": None})
         a["rental_count"] += 1
-        a["total_days"] += int(_get(r, "num_days") or 0)
-        a["total_revenue"] += float(_get(r, "total_price") or 0)
+        
+        # Realised revenue for this reservation:
+        g = lambda k, _r=r: _get(_r, k)
+        contrib = _reservation_revenue(g, start_dt, all_time_start, all_time_end, now)
+        a["total_revenue"] += float(contrib)
+        
+        # Realised rental days:
+        rst = (_get(r, "status") or "").strip().upper()
+        if rst == "COMPLETED":
+            a["total_days"] += int(_get(r, "num_days") or 0)
+        else:
+            nd = int(_get(r, "num_days") or 0)
+            a["total_days"] += _realised_days(_to_biz(start_dt), nd, now) if nd else 0
+
         iso = start_dt.isoformat()
         if a["last_rental"] is None or iso > a["last_rental"]:
             a["last_rental"] = iso
 
-    ranked = sorted(agg.values(), key=lambda x: x["total_revenue"], reverse=True)[:limit]
+    # Sort strictly by rental_count DESC, total_revenue DESC, vehicle_id ASC
+    ranked = sorted(
+        agg.values(),
+        key=lambda x: (-x["rental_count"], -round(x["total_revenue"], 2), str(x["vehicle_id"]))
+    )[:limit]
     for a in ranked:
+        a["total_revenue"] = round(a["total_revenue"], 2)
         a.update(vmeta.get(a["vehicle_id"], {"registration": "", "brand": "", "model": ""}))
     return ranked
 

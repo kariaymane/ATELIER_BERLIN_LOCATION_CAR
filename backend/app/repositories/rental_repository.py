@@ -194,10 +194,8 @@ class RentalRepository(BaseRepository[Reservation]):
         return list(result.scalars().all())
 
     async def get_today_returns(self) -> list[Reservation]:
-        """Get rentals ending today. Canonical rule: any non-cancelled
-        reservation counts as a real physical rental (RESERVED-covering-now
-        is "en location" exactly like ACTIVE — see fleet_status.py), so a
-        return due today is any non-CANCELLED reservation ending today."""
+        """Get rentals ending today. A pending return due today is any active or
+        reserved reservation ending today (COMPLETED and CANCELLED excluded)."""
         today_start = datetime.now(ZoneInfo('Africa/Casablanca')).replace(hour=0, minute=0, second=0, microsecond=0)
         today_end = today_start.replace(hour=23, minute=59, second=59)
         result = await self._session.execute(
@@ -205,7 +203,7 @@ class RentalRepository(BaseRepository[Reservation]):
             .where(
                 Reservation.end_datetime >= today_start,
                 Reservation.end_datetime <= today_end,
-                Reservation.status != "CANCELLED",
+                Reservation.status.in_(["ACTIVE", "RESERVED"]),
             )
             .order_by(Reservation.end_datetime)
         )
@@ -256,35 +254,76 @@ class RentalRepository(BaseRepository[Reservation]):
         return int(result.scalar())
 
     async def get_vehicle_stats(self, now: Optional[datetime] = None) -> list[dict]:
-        """Get per-vehicle performance stats. Same eligibility rule as
-        revenue: any non-cancelled reservation that has started (see
-        get_revenue_between) — a RESERVED reservation covering `now` already
-        represents a real rental, not just a booking."""
-        if now is None:
-            now = datetime.now(ZoneInfo('Africa/Casablanca'))
+        """Get per-vehicle performance stats. Canonical ranking:
+        1) rental_count DESC (most rented = rental count)
+        2) realised_revenue DESC (canonical pro-rata realised revenue)
+        3) vehicle_id ASC (deterministic tiebreaker)
+        """
+        from datetime import date
+        from shared.revenue_reference import reservation_period_revenue, _realised_days
+        from shared.money_time import now_business, to_business
+        from decimal import Decimal, ROUND_HALF_UP
+
+        now = to_business(now) if now is not None else now_business()
         result = await self._session.execute(
-            select(
-                Reservation.vehicle_id,
-                func.count(Reservation.id).label("rental_count"),
-                func.coalesce(func.sum(Reservation.num_days), 0).label("total_days"),
-                func.coalesce(func.sum(Reservation.total_price), 0).label("total_revenue"),
-                func.max(Reservation.start_datetime).label("last_rental"),
-            )
-            .where(
+            select(Reservation).where(
                 Reservation.status != "CANCELLED",
                 Reservation.start_datetime <= now,
             )
-            .group_by(Reservation.vehicle_id)
-            .order_by(func.sum(Reservation.total_price).desc())
         )
-        rows = result.all()
+        reservations = result.scalars().all()
+
+        all_time_start = date(2000, 1, 1)
+        all_time_end = date(9999, 12, 31)
+
+        agg: dict[str, dict] = {}
+        for r in reservations:
+            vid = str(r.vehicle_id)
+            a = agg.setdefault(vid, {
+                "vehicle_id": vid,
+                "rental_count": 0,
+                "total_days": 0,
+                "total_revenue": Decimal("0.00"),
+                "last_rental": None,
+                "first_rental": None,
+            })
+            a["rental_count"] += 1
+
+            r_dict = {
+                "status": r.status,
+                "start_datetime": to_business(r.start_datetime),
+                "num_days": int(r.num_days or 0),
+                "total_price": r.total_price,
+                "daily_price": r.daily_price,
+            }
+            rev = reservation_period_revenue(r_dict, all_time_start, all_time_end, now)
+            a["total_revenue"] += rev
+
+            st = (r.status or "").strip().upper()
+            if st == "COMPLETED":
+                realised_d = int(r.num_days or 0)
+            else:
+                realised_d = _realised_days(to_business(r.start_datetime), int(r.num_days or 0), now)
+            a["total_days"] += realised_d
+
+            start_iso = to_business(r.start_datetime).isoformat()
+            if a["last_rental"] is None or start_iso > a["last_rental"]:
+                a["last_rental"] = start_iso
+            if a["first_rental"] is None or start_iso < a["first_rental"]:
+                a["first_rental"] = start_iso
+
+        ranked = sorted(
+            agg.values(),
+            key=lambda x: (-x["rental_count"], -x["total_revenue"], str(x["vehicle_id"]))
+        )
         return [
             {
-                "vehicle_id": str(r.vehicle_id),
-                "rental_count": r.rental_count,
-                "total_days": int(r.total_days),
-                "total_revenue": float(r.total_revenue),
-                "last_rental": r.last_rental.isoformat() if r.last_rental else None,
+                "vehicle_id": a["vehicle_id"],
+                "rental_count": a["rental_count"],
+                "total_days": a["total_days"],
+                "total_revenue": float(a["total_revenue"].quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)),
+                "last_rental": a["last_rental"],
+                "first_rental": a["first_rental"],
             }
-            for r in rows
+            for a in ranked
         ]

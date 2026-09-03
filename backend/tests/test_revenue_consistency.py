@@ -205,3 +205,80 @@ class TestRevenueSemantics:
             headers={"Authorization": f"Bearer {admin_token}"},
         )).json()
         assert data["year_revenue"] == 0
+
+    async def test_completed_reservation_with_nominal_future_end_realizes_all_days(
+        self, client: AsyncClient, admin_token, db_session
+    ):
+        """A reservation marked COMPLETED has completed its contract:
+        all contractual days are realised, even if its original nominal
+        end_datetime was in the future."""
+        now = datetime.now(TZ)
+        v = await _make_vehicle(db_session)
+        # Started yesterday, 10 days nominal duration @ 200/day = 2000 total_price, marked COMPLETED
+        await _make_reservation(
+            db_session, v,
+            now - timedelta(days=1), num_days=10, daily=200.0, status="COMPLETED",
+        )
+        h = {"Authorization": f"Bearer {admin_token}"}
+        data = (await client.get("/api/v1/dashboard/stats", headers=h)).json()
+        # All 10 days (2000 DH) are recognised in year_revenue, not just 2 days
+        assert data["year_revenue"] == pytest.approx(2000.0)
+
+    async def test_today_returns_excludes_completed_and_cancelled(
+        self, client: AsyncClient, admin_token, db_session
+    ):
+        now = datetime.now(TZ)
+        v1 = await _make_vehicle(db_session)
+        v2 = await _make_vehicle(db_session)
+        v3 = await _make_vehicle(db_session)
+        # Active returning today -> counts in today_returns
+        await _make_reservation(
+            db_session, v1,
+            now - timedelta(days=2), num_days=2, daily=100.0, status="ACTIVE",
+        )
+        # Completed ending today -> EXCLUDED from pending returns
+        await _make_reservation(
+            db_session, v2,
+            now - timedelta(days=2), num_days=2, daily=100.0, status="COMPLETED",
+        )
+        # Cancelled ending today -> EXCLUDED from pending returns
+        await _make_reservation(
+            db_session, v3,
+            now - timedelta(days=2), num_days=2, daily=100.0, status="CANCELLED",
+        )
+        h = {"Authorization": f"Bearer {admin_token}"}
+        data = (await client.get("/api/v1/dashboard/stats", headers=h)).json()
+        assert data["today_returns"] == 1
+
+    async def test_vehicle_performance_ranking_and_utilization_rate(
+        self, client: AsyncClient, admin_token, db_session
+    ):
+        now = datetime.now(TZ)
+        v_high_rentals = await _make_vehicle(db_session)
+        v_high_price = await _make_vehicle(db_session)
+        
+        # v_high_rentals: 3 short rentals of 100 DH each = 3 rentals, 300 DH
+        for i in range(3):
+            await _make_reservation(
+                db_session, v_high_rentals,
+                now - timedelta(days=10 - i * 2), num_days=1, daily=100.0, status="COMPLETED",
+            )
+        # v_high_price: 1 rental of 5000 DH = 1 rental, 5000 DH
+        await _make_reservation(
+            db_session, v_high_price,
+            now - timedelta(days=5), num_days=5, daily=1000.0, status="COMPLETED",
+        )
+
+        h = {"Authorization": f"Bearer {admin_token}"}
+        perf = (await client.get("/api/v1/dashboard/vehicle-performance", headers=h)).json()
+        
+        # Most rented (rental_count) must be ranked FIRST:
+        assert len(perf) >= 2
+        assert perf[0]["vehicle_id"] == str(v_high_rentals.id)
+        assert perf[0]["rental_count"] == 3
+        assert perf[1]["vehicle_id"] == str(v_high_price.id)
+        assert perf[1]["rental_count"] == 1
+        
+        # Utilization rate must be mathematically bound <= 100.0%
+        for p in perf:
+            assert 0.0 <= p["utilization_rate"] <= 100.0
