@@ -93,6 +93,9 @@ def test_vehicules_en_location_shows_only_the_count_no_denominator(qapp):
 
     init_local_db()
     s = get_local_session()
+    s.query(LocalReservation).delete()
+    s.query(LocalVehicle).delete()
+    s.commit()
     now = datetime.now(timezone.utc)
     for i in range(5):
         s.add(LocalVehicle(

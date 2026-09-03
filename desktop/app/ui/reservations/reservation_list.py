@@ -212,12 +212,13 @@ class ReservationFormDialog(QDialog):
         self._calculated_days = days
         self._calculated_total = total
         
-        # Immediate local availability check. The QDateTimeEdit holds local
+        # Immediate local availability check. The QDateTimeEdit holds Casablanca
         # wall time — CONVERT it to the UTC instant (same as `_on_save`), never
-        # let parse_datetime_utc relabel a naive local value as UTC (that skewed
-        # the pre-check ~1 h vs. what the reservation actually persists).
-        req_start = parse_datetime_utc(start.toPython().astimezone(timezone.utc))
-        req_end = parse_datetime_utc(end.toPython().astimezone(timezone.utc))
+        # let astimezone assume the host OS local timezone.
+        dt_start = start.toPython().replace(tzinfo=ZoneInfo("Africa/Casablanca")).astimezone(timezone.utc)
+        dt_end = end.toPython().replace(tzinfo=ZoneInfo("Africa/Casablanca")).astimezone(timezone.utc)
+        req_start = parse_datetime_utc(dt_start)
+        req_end = parse_datetime_utc(dt_end)
         
         if not req_start or not req_end or req_start >= req_end:
             self._avail_lbl.setText(t("reservations.err_date_order"))
@@ -580,9 +581,11 @@ class ReservationWidget(QWidget):
         start_dt = self._filter_start_dt.dateTime()
         end_dt = self._filter_end_dt.dateTime()
 
-        # Parse to canonical UTC — CONVERT the local wall time, do not relabel it.
-        req_start = parse_datetime_utc(start_dt.toPython().astimezone(timezone.utc))
-        req_end = parse_datetime_utc(end_dt.toPython().astimezone(timezone.utc))
+        # Parse to canonical UTC — CONVERT the Casablanca wall time, do not assume host OS timezone.
+        dt_start = start_dt.toPython().replace(tzinfo=ZoneInfo("Africa/Casablanca")).astimezone(timezone.utc)
+        dt_end = end_dt.toPython().replace(tzinfo=ZoneInfo("Africa/Casablanca")).astimezone(timezone.utc)
+        req_start = parse_datetime_utc(dt_start)
+        req_end = parse_datetime_utc(dt_end)
 
         while self._grid.count():
             item = self._grid.takeAt(0)

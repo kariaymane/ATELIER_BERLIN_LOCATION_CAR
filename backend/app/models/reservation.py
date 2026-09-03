@@ -27,6 +27,7 @@ class Reservation(Base, TimestampMixin, VersionMixin):
     )
     customer_id = Column(
         UUID(as_uuid=True),
+        ForeignKey("clients.id", ondelete="SET NULL"),
         nullable=True,
         index=True,
     )

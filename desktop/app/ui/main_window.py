@@ -538,6 +538,13 @@ class MainWindow(QMainWindow):
         is_live = snap.is_live or (self._is_online and getattr(self, "_has_server_dashboard", False))
 
         if is_live and getattr(self, "_has_server_dashboard", False):
+            if snap.overview:
+                if getattr(self, "_authoritative_server_overview", None):
+                    for k in ("total_vehicles", "available", "rented", "reserved", "maintenance", "today_revenue", "today_rentals", "today_returns"):
+                        if k in snap.overview:
+                            self._authoritative_server_overview[k] = snap.overview[k]
+                else:
+                    self._authoritative_server_overview = dict(snap.overview)
             overview = dict(self._authoritative_server_overview or snap.overview or {})
             top = list(getattr(self, "_authoritative_server_top_vehicles", []) or snap.top_vehicles or [])
         else:

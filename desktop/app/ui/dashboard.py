@@ -389,13 +389,25 @@ class DashboardWidget(QWidget):
         return _preset_date_bounds(name, today)
 
     def _on_period_changed(self, *_):
-        is_custom = (self._period_combo.currentData() == "custom")
+        name = self._period_combo.currentData() or "month"
+        is_custom = (name == "custom")
         self._custom_row.setVisible(is_custom)
+        rev_key = f"{name}_revenue"
+        if not is_custom and rev_key in self._overview_data and self._overview_data[rev_key] is not None and getattr(self, "_is_live_data", True):
+            rev_val = float(self._overview_data[rev_key] or 0.0)
+            self._revenue_value_lbl.setText(f"{rev_val:,.2f} DH".replace(",", " "))
+            self._is_live_revenue = True
+            self._rev_updated_lbl.setText(t("dashboard.rev_updated", time=datetime.now().strftime("%H:%M:%S")))
+            self._rev_updated_lbl.setStyleSheet("color: #909C8E;")
+            self._rev_updated_lbl.setToolTip("")
+        else:
+            self._is_live_revenue = False
         self._render_reservations_card()
         self._request_revenue()
 
     def _on_custom_dates_changed(self, *_):
         if self._period_combo.currentData() == "custom":
+            self._is_live_revenue = False
             self._request_revenue()
 
     def _request_revenue(self):
@@ -411,6 +423,7 @@ class DashboardWidget(QWidget):
         from PySide6.QtWidgets import QApplication
         self._revenue_req_id = getattr(self, "_revenue_req_id", 0) + 1
         current_req_id = self._revenue_req_id
+        self._revenue_request_date = f
 
         # Parent to the QApplication (not this widget) so a widget teardown can
         # never destroy a still-running QThread; the bound-method connection is
@@ -448,6 +461,7 @@ class DashboardWidget(QWidget):
         stamp = datetime.now().strftime("%H:%M:%S")
         if source == "server":
             self._is_live_revenue = True
+            self._live_revenue_date = getattr(self, "_revenue_request_date", None)
             self._rev_updated_lbl.setText(t("dashboard.rev_updated", time=stamp))
             self._rev_updated_lbl.setStyleSheet("color: #909C8E;")
             self._rev_updated_lbl.setToolTip("")

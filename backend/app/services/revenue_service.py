@@ -39,7 +39,10 @@ async def _load_candidate_reservations(
     rows = (
         await session.execute(
             select(Reservation).where(
-                Reservation.status != "CANCELLED",
+                (
+                    (Reservation.status != "CANCELLED")
+                    | (Reservation.cancellation_reason == "MAINTENANCE")
+                ),
                 Reservation.start_datetime < end_dt,
             )
         )
@@ -50,7 +53,9 @@ async def _load_candidate_reservations(
         out.append(
             {
                 "status": r.status,
+                "cancellation_reason": r.cancellation_reason,
                 "start_datetime": to_business(r.start_datetime),
+                "end_datetime": to_business(r.end_datetime) if r.end_datetime else None,
                 "num_days": int(r.num_days or 0),
                 "total_price": r.total_price,  # Decimal from NUMERIC — exact
                 "daily_price": r.daily_price,
