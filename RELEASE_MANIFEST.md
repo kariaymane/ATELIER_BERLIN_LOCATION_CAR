@@ -3,33 +3,34 @@
 | Field | Value |
 |---|---|
 | Git branch | `main` |
-| Git SHA | `725fed5` (fix(dashboard): compute vehicle utilization via overlap-safe interval union) |
-| Build date (UTC) | 2026-09-03 ~03:55 |
+| Git SHA | `be6eff2` (fix(core): resolve P1/P2 release gate defects across desktop, mobile, backend) |
+| Build date (UTC) | 2026-09-03 ~23:32 |
 | Tree state | clean (committed) |
 
 ## Android
 
 | Field | Value |
 |---|---|
-| File | `ATELIER_BERLIN_LOCATION_CAR_725fed5.apk` |
+| File | `ATELIER_BERLIN_LOCATION_CAR_be6eff2.apk` |
 | Type | debug-signed (`debugConfig`) |
-| Size | 23,398,519 bytes |
-| SHA256 | `e3391dc220d621e794ed631a672f56c20a0c8c95a9a7b686f0262a7094956ea2` |
-| Contains | Overlap-safe interval union utilization calculation, COMPLETED revenue realization, Canonical Top 5 ranking, cross-runtime parity against 33 golden vectors |
+| Size | 23,566,504 bytes |
+| SHA256 | `92b6458ba5aec871bc7d71278575d604c81f2baab66ec2d74a3a3d24ac620058` |
+| Contains | Strict server authority with time-liveness fleet updates, midnight rollovers, maintenance-over-active-rental protections, 33-vector revenue parity, and full offline Room sync |
 
 ## Windows
 
 | Field | Value |
 |---|---|
-| ZIP | `ATELIER_BERLIN_LOCATION_CAR_WINDOWS_725fed5.zip` |
-| ZIP size | 62,014,942 bytes |
-| ZIP SHA256 | `70eba01cea3f80ede6b72774aa18a0d6dea2623a6b8f2fe13148923719a9ef46` |
+| ZIP | `ATELIER_BERLIN_LOCATION_CAR_WINDOWS_be6eff2.zip` |
+| ZIP size | 61,972,538 bytes |
+| ZIP SHA256 | `220dcfe9b5d3c681319ee6689b930ffffd7baf51f2f056bafbd694676c1d469b` |
 | EXE | `ATELIER_BERLIN_LOCATION_CAR/ATELIER_BERLIN_LOCATION_CAR.exe` |
-| EXE size | 9,152,488 bytes |
-| EXE SHA256 | `743b25e3fff023185fdb7114435a1e08aff82a8365330257c6733b99c4794c6e` |
-| Contains | Overlap-safe interval union vehicle utilization, reconciled dashboard data pipeline, full server fetching on manual refresh, COMPLETED revenue realization, Top 5 ranking by rental count |
+| EXE size | 9,161,033 bytes |
+| EXE SHA256 | `2a6be3f034cfbbf19af768b38de987b2461d26e9b31dab2f08a2faafeb02d0a7` |
+| Contains | Full multi-domain SQLite bootstrap reconciliation, 15s sync rewind margin, Africa/Casablanca timezone conversion, temporal dashboard boundary evolution, and anti-downgrade revenue guards |
 
 ## Supersedes
 
-Prior artifacts: `ATELIER_BERLIN_LOCATION_CAR_c9cd50e.apk`, `ATELIER_BERLIN_LOCATION_CAR_WINDOWS_c9cd50e.zip`, `ATELIER_BERLIN_LOCATION_CAR_7ebde59.apk`, `ATELIER_BERLIN_LOCATION_CAR_WINDOWS_7ebde59.zip`, `ATELIER_BERLIN_LOCATION_CAR_20f29fb.apk`, `ATELIER_BERLIN_LOCATION_CAR_WINDOWS_20f29fb.zip`, `ATELIER_BERLIN_LOCATION_CAR_6ba055c.apk`, `ATELIER_BERLIN_LOCATION_CAR_WINDOWS_6ba055c.zip`.
+Prior artifacts: `ATELIER_BERLIN_LOCATION_CAR_725fed5.apk`, `ATELIER_BERLIN_LOCATION_CAR_WINDOWS_725fed5.zip`, `ATELIER_BERLIN_LOCATION_CAR_c9cd50e.apk`, `ATELIER_BERLIN_LOCATION_CAR_WINDOWS_c9cd50e.zip`, `ATELIER_BERLIN_LOCATION_CAR_7ebde59.apk`, `ATELIER_BERLIN_LOCATION_CAR_WINDOWS_7ebde59.zip`, `ATELIER_BERLIN_LOCATION_CAR_20f29fb.apk`, `ATELIER_BERLIN_LOCATION_CAR_WINDOWS_20f29fb.zip`.
+
 
