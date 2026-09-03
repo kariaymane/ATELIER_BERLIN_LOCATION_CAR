@@ -284,6 +284,7 @@ class DomainStore:
                 "autres_label": v.autres_label,
                 "autres_expiry": v.autres_expiry,
                 "notes": v.notes,
+                "created_at": getattr(v, "created_at", None),
             })
 
         def _res_dict(r) -> dict:
