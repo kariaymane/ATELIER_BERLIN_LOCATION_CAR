@@ -9,6 +9,35 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 
+class ApiClientError(Exception):
+    """Base exception for API client operations."""
+    pass
+
+
+class ServerContractMismatchError(ApiClientError):
+    """Raised when the server does not support the expected endpoint/contract (HTTP 404/405).
+
+    This signals an architectural version mismatch between the client and the deployed
+    backend, which must NEVER be silently treated as offline transport fallback.
+    """
+    def __init__(self, message: str, status_code: int = 404, path: str = ""):
+        super().__init__(message)
+        self.status_code = status_code
+        self.path = path
+
+
+class ServerError(ApiClientError):
+    """Raised on HTTP 5xx server errors."""
+    def __init__(self, message: str, status_code: int = 500):
+        super().__init__(message)
+        self.status_code = status_code
+
+
+class TransportError(ApiClientError):
+    """Raised on connection failure or timeout."""
+    pass
+
+
 class ApiClient:
     """Synchronous HTTP client for backend communication."""
 
@@ -208,8 +237,19 @@ class ApiClient:
     # ── Dashboard ──
 
     def get_dashboard(self) -> Optional[dict]:
-        r = self._request("get", "/api/v1/dashboard/stats")
-        return r.json() if r and r.status_code == 200 else None
+        path = "/api/v1/dashboard/stats"
+        r = self._request("get", path)
+        if r is None:
+            return None
+        if r.status_code == 200:
+            return r.json()
+        if r.status_code in (404, 405):
+            raise ServerContractMismatchError(
+                f"Endpoint {path} returned {r.status_code}. Server contract version mismatch.",
+                status_code=r.status_code,
+                path=path,
+            )
+        return None
 
     def get_stats(self, period: str) -> Optional[dict]:
         r = self._request("get", f"/api/v1/dashboard/{period}")
@@ -218,14 +258,38 @@ class ApiClient:
     def get_revenue_range(self, from_iso: str, to_iso: str) -> Optional[dict]:
         """Canonical custom-range chiffre d'affaires. `from`/`to` are ISO
         YYYY-MM-DD; `to` is inclusive (the UI 'Au' date counts in full)."""
-        r = self._request(
-            "get", f"/api/v1/dashboard/revenue?from={from_iso}&to={to_iso}", retries=2
-        )
-        return r.json() if r and r.status_code == 200 else None
+        path = f"/api/v1/dashboard/revenue?from={from_iso}&to={to_iso}"
+        r = self._request("get", path, retries=2)
+        if r is None:
+            return None
+        if r.status_code == 200:
+            return r.json()
+        if r.status_code in (404, 405):
+            raise ServerContractMismatchError(
+                f"Endpoint {path} returned {r.status_code}. Server contract version mismatch.",
+                status_code=r.status_code,
+                path=path,
+            )
+        if r.status_code >= 500:
+            raise ServerError(f"Server error {r.status_code} on {path}", status_code=r.status_code)
+        return None
 
     def get_period_revenue(self, name: str) -> Optional[dict]:
-        r = self._request("get", f"/api/v1/dashboard/period/{name}", retries=2)
-        return r.json() if r and r.status_code == 200 else None
+        path = f"/api/v1/dashboard/period/{name}"
+        r = self._request("get", path, retries=2)
+        if r is None:
+            return None
+        if r.status_code == 200:
+            return r.json()
+        if r.status_code in (404, 405):
+            raise ServerContractMismatchError(
+                f"Endpoint {path} returned {r.status_code}. Server contract version mismatch.",
+                status_code=r.status_code,
+                path=path,
+            )
+        if r.status_code >= 500:
+            raise ServerError(f"Server error {r.status_code} on {path}", status_code=r.status_code)
+        return None
 
     def get_vehicle_performance(self) -> Optional[list]:
         r = self._request("get", "/api/v1/dashboard/vehicle-performance")

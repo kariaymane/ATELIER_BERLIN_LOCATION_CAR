@@ -222,27 +222,10 @@ class RentalRepository(BaseRepository[Reservation]):
     async def get_revenue_between(
         self, start_dt: datetime, end_dt: datetime, now: Optional[datetime] = None
     ) -> float:
-        """Sum total_price for every non-cancelled rental that has STARTED,
-        whose start_datetime falls in [start_dt, end_dt).
-
-        Revenue is recognised when a rental starts (start_datetime <= now):
-        a car whose reservation window contains `now` is RENTED and its
-        revenue counts, whether its stored status is RESERVED, ACTIVE or
-        COMPLETED. Only CANCELLED rentals are excluded. See
-        backend/tests/test_revenue_consistency.py for the pinned semantics.
-        """
-        if now is None:
-            now = datetime.now(ZoneInfo('Africa/Casablanca'))
-        result = await self._session.execute(
-            select(func.coalesce(func.sum(Reservation.total_price), 0))
-            .where(
-                Reservation.status != "CANCELLED",
-                Reservation.start_datetime <= now,
-                Reservation.start_datetime >= start_dt,
-                Reservation.start_datetime < end_dt,
-            )
-        )
-        return float(result.scalar())
+        """Realised pro-rata revenue for [start_dt, end_dt) via the canonical engine."""
+        from app.services.revenue_service import revenue_between
+        res = await revenue_between(self._session, start_dt, end_dt, now=now)
+        return float(res["revenue"])
 
     async def count_rentals_between(
         self, start_dt: datetime, end_dt: datetime

@@ -50,13 +50,29 @@ CANCELLED = "CANCELLED"
 _BIZ_TZ = ZoneInfo("Africa/Casablanca")
 
 
+ELIGIBLE_STATUSES = ("PENDING", "CONFIRMED", "RESERVED", "ACTIVE", "COMPLETED")
+
+
+def is_revenue_eligible(res: dict) -> bool:
+    """Return True if reservation is eligible to contribute revenue.
+
+    CANCELLED reservations NEVER contribute. All active, completed, or booked
+    rentals (PENDING, CONFIRMED, RESERVED, ACTIVE, COMPLETED) are eligible,
+    contributing pro-rata for their elapsed/realised days once started.
+    """
+    status = str(res.get("status", "")).strip().upper()
+    if not status or status == CANCELLED:
+        return False
+    return True
+
+
 def _as_datetime(value) -> datetime:
     if isinstance(value, datetime):
         dt = value
     elif isinstance(value, date):
         dt = datetime(value.year, value.month, value.day)
     else:
-        s = str(value).replace("Z", "+00:00")
+        s = str(value).replace("Z", "+00:00").replace("z", "+00:00")
         dt = datetime.fromisoformat(s)
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=_BIZ_TZ)
@@ -86,7 +102,7 @@ def _q2(d: Decimal) -> Decimal:
 def _realised_day_dates(res: dict, now: datetime):
     """(per_day_rate: Decimal, first_date, count) for a reservation's realised
     days, or (0, None, 0) if it contributes nothing."""
-    if str(res.get("status", "")).upper() == CANCELLED:
+    if not is_revenue_eligible(res):
         return Decimal("0"), None, 0
     num_days = int(res.get("num_days") or 0)
     if num_days <= 0:
@@ -171,7 +187,7 @@ def rentals_started_between(
     """
     n = 0
     for res in reservations:
-        if str(res.get("status", "")).upper() == CANCELLED:
+        if not is_revenue_eligible(res):
             continue
         start_d = _as_date(res.get("start_date") or res.get("start_datetime"))
         if from_date <= start_d < to_date:

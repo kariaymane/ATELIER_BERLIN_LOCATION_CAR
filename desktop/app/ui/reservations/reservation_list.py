@@ -3,6 +3,7 @@ Reservation list and creation view.
 Fully localized for French and Arabic with RTL layout support.
 """
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 import logging
 import uuid
 import json
@@ -368,8 +369,8 @@ class ReservationFormDialog(QDialog):
             "identity_card_image_back": id_back_url,
             "driving_license_image": lic_url,
             "driving_license_image_back": lic_back_url,
-            "start_datetime": start.toPython().astimezone(timezone.utc).isoformat(),
-            "end_datetime": end.toPython().astimezone(timezone.utc).isoformat(),
+            "start_datetime": start.toPython().replace(tzinfo=ZoneInfo("Africa/Casablanca")).astimezone(timezone.utc).isoformat(),
+            "end_datetime": end.toPython().replace(tzinfo=ZoneInfo("Africa/Casablanca")).astimezone(timezone.utc).isoformat(),
             "daily_price": self.vehicle.get('daily_rental_price', 0),
             "num_days": self._calculated_days,
             "total_price": self._calculated_total,
