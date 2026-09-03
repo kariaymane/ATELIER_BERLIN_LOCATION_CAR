@@ -172,6 +172,11 @@ class DashboardService:
         """Get performance ranking for all vehicles."""
         stats = await self._rental_repo.get_vehicle_stats()
 
+        from shared.utilization_reference import calculate_vehicle_utilization
+        from shared.money_time import now_business
+
+        now_biz = now_business()
+
         # Enrich with vehicle info
         for stat in stats:
             from uuid import UUID
@@ -180,18 +185,16 @@ class DashboardService:
                 stat["registration"] = vehicle.registration
                 stat["brand"] = vehicle.brand
                 stat["model"] = vehicle.model
-                # Operational lifetime: days since vehicle was registered in the fleet
                 created_dt = vehicle.created_at
                 if created_dt:
-                    if created_dt.tzinfo is None:
-                        created_dt = created_dt.replace(tzinfo=timezone.utc)
-                    now_utc = datetime.now(timezone.utc)
-                    operational_days = max(1, (now_utc.date() - created_dt.astimezone(timezone.utc).date()).days + 1)
-                    stat["utilization_rate"] = min(
-                        100.0,
-                        round((stat["total_days"] / operational_days) * 100.0, 1)
-                    )
+                    v_res = stat.get("reservations", [])
+                    _, _, raw_pct, final_pct = calculate_vehicle_utilization(created_dt, v_res, now_biz)
+                    stat["utilization_rate"] = final_pct
                 else:
                     stat["utilization_rate"] = 0.0
+            else:
+                stat["utilization_rate"] = 0.0
+
+            stat.pop("reservations", None)
 
         return stats

@@ -225,6 +225,7 @@ def compute_top_vehicles_rows(reservation_rows, vehicle_rows, now=None, limit=5)
                 "registration": _get(v, "registration") or "",
                 "brand": _get(v, "brand") or "",
                 "model": _get(v, "model") or "",
+                "created_at": _get(v, "created_at"),
             }
 
     all_time_start = date(2000, 1, 1)
@@ -242,8 +243,9 @@ def compute_top_vehicles_rows(reservation_rows, vehicle_rows, now=None, limit=5)
             continue
         a = agg.setdefault(vid, {"vehicle_id": vid, "rental_count": 0,
                                  "total_days": 0, "total_revenue": 0.0,
-                                 "last_rental": None})
+                                 "last_rental": None, "reservations": []})
         a["rental_count"] += 1
+        a["reservations"].append(r)
         
         # Realised revenue for this reservation:
         g = lambda k, _r=r: _get(_r, k)
@@ -267,9 +269,21 @@ def compute_top_vehicles_rows(reservation_rows, vehicle_rows, now=None, limit=5)
         agg.values(),
         key=lambda x: (-x["rental_count"], -round(x["total_revenue"], 2), str(x["vehicle_id"]))
     )[:limit]
+    from shared.utilization_reference import calculate_vehicle_utilization
     for a in ranked:
         a["total_revenue"] = round(a["total_revenue"], 2)
-        a.update(vmeta.get(a["vehicle_id"], {"registration": "", "brand": "", "model": ""}))
+        meta = vmeta.get(a["vehicle_id"], {"registration": "", "brand": "", "model": "", "created_at": None})
+        a["registration"] = meta.get("registration", "")
+        a["brand"] = meta.get("brand", "")
+        a["model"] = meta.get("model", "")
+        c_at = meta.get("created_at")
+        v_res = a.get("reservations", [])
+        if c_at:
+            _, _, _, util = calculate_vehicle_utilization(c_at, v_res, now)
+            a["utilization_rate"] = util
+        else:
+            a["utilization_rate"] = 0.0
+        a.pop("reservations", None)
     return ranked
 
 

@@ -286,8 +286,10 @@ class RentalRepository(BaseRepository[Reservation]):
                 "total_revenue": Decimal("0.00"),
                 "last_rental": None,
                 "first_rental": None,
+                "reservations": [],
             })
             a["rental_count"] += 1
+            a["reservations"].append(r)
 
             r_dict = {
                 "status": r.status,
@@ -324,6 +326,7 @@ class RentalRepository(BaseRepository[Reservation]):
                 "total_revenue": float(a["total_revenue"].quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)),
                 "last_rental": a["last_rental"],
                 "first_rental": a["first_rental"],
+                "reservations": a["reservations"],
             }
             for a in ranked
         ]
