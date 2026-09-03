@@ -167,12 +167,29 @@ class FleetRepository(
         )
     }.distinctUntilChanged()
 
-    // Authoritative Live Server Data Authority (Increment 6):
-    // Server API result (_liveMetrics) is the permanent authoritative source of truth.
-    // Local Room derivation (localMetricsFlow) is strictly the offline cache fallback
-    // when no server response is available yet (api == null).
+    // Authoritative Live Server Data Authority with Time-Liveness (Increment 6 & P1-1):
+    // Server API result (_liveMetrics) is authoritative. When both local and server are present
+    // and hold the same vehicle pool, time-derived fleet counts and midnight counters evolve
+    // with boundary ticks so the dashboard never contradicts the vehicles list.
     val performanceMetricsFlow: Flow<PerformanceMetrics?> =
-        combine(localMetricsFlow, _liveMetrics) { local, api -> api ?: local }
+        combine(localMetricsFlow, _liveMetrics) { local, api ->
+            if (api == null) return@combine local
+            if (local == null) return@combine api
+            val totalLocal = local.readyVehicles + local.rentedVehicles + local.reservedVehicles + local.maintenanceVehicles
+            val totalApi = api.readyVehicles + api.rentedVehicles + api.reservedVehicles + api.maintenanceVehicles
+            if (totalLocal == totalApi && totalLocal > 0) {
+                api.copy(
+                    readyVehicles = local.readyVehicles,
+                    rentedVehicles = local.rentedVehicles,
+                    reservedVehicles = local.reservedVehicles,
+                    maintenanceVehicles = local.maintenanceVehicles,
+                    todayRevenue = if (local.todayBookings == 0 && local.todayRevenue == 0.0 && api.todayRevenue > 0) 0.0 else api.todayRevenue,
+                    todayBookings = if (local.todayBookings == 0 && api.todayBookings > 0) 0 else api.todayBookings,
+                )
+            } else {
+                api
+            }
+        }
 
     private val _syncStatus = MutableStateFlow(SyncStatus())
     val syncStatusFlow: StateFlow<SyncStatus> = _syncStatus.asStateFlow()

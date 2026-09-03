@@ -218,7 +218,8 @@ class SyncEngine:
         if not self._access_token:
             return {"status": "offline", "message": "Not authenticated"}
 
-        since = self._last_sync or datetime(2000, 1, 1, tzinfo=timezone.utc)
+        # Apply a 15-second rewind margin to eliminate any commit-race or clock-skew window.
+        since = (self._last_sync - timedelta(seconds=15)) if self._last_sync else datetime(2000, 1, 1, tzinfo=timezone.utc)
 
         try:
             async with httpx.AsyncClient(timeout=15.0) as client:
@@ -548,11 +549,17 @@ class SyncEngine:
             try:
                 from app.models.sync_queue import SyncQueueItem
                 from app.models.vehicle import LocalVehicle
+                from app.models.reservation import LocalReservation
+                from app.models.maintenance import LocalMaintenance, LocalMaintenancePart
+                from app.models.client import LocalClient
+
                 p_rows = session.query(SyncQueueItem.entity_id).filter(
                     SyncQueueItem.sync_status == "PENDING"
                 ).all()
                 pending_ids = {str(r[0]) for r in p_rows if r[0]}
+                now_iso = datetime.now(timezone.utc).isoformat()
 
+                # 1. Reconcile VEHICLES
                 server_vehicles = data.get("vehicles", [])
                 server_v_ids = {str(v.get("id")) for v in server_vehicles}
                 for lv in session.query(LocalVehicle).all():
@@ -577,15 +584,135 @@ class SyncEngine:
                     v.transmission = v_dto.get("transmission", "MANUAL")
                     v.current_mileage = v_dto.get("current_mileage", 0)
                     v.purchase_mileage = v_dto.get("purchase_mileage", 0)
-                    v.purchase_price = v_dto.get("purchase_price", 0.0)
-                    v.daily_rental_price = v_dto.get("daily_rental_price", 0.0)
+                    v.purchase_price = float(v_dto.get("purchase_price", 0.0) or 0.0)
+                    v.daily_rental_price = float(v_dto.get("daily_rental_price", 0.0) or 0.0)
                     v.status = v_dto.get("status", "AVAILABLE")
                     v.image_url = v_dto.get("image_url")
                     v.version = v_dto.get("version", 1)
-                    now_iso = datetime.now(timezone.utc).isoformat()
                     v.updated_at = now_iso
                     if not getattr(v, "created_at", None):
                         v.created_at = v_dto.get("created_at") or now_iso
+
+                # 2. Reconcile CLIENTS
+                server_clients = data.get("clients", [])
+                server_c_ids = {str(c.get("id")) for c in server_clients}
+                for lc in session.query(LocalClient).all():
+                    if str(lc.id) not in server_c_ids and str(lc.id) not in pending_ids:
+                        session.delete(lc)
+
+                for c_dto in server_clients:
+                    cid = str(c_dto.get("id"))
+                    if cid in pending_ids:
+                        continue
+                    c = session.query(LocalClient).filter_by(id=cid).first()
+                    if not c:
+                        c = LocalClient(id=cid)
+                        session.add(c)
+                    c.first_name = c_dto.get("first_name", "")
+                    c.last_name = c_dto.get("last_name", "")
+                    c.phone = c_dto.get("phone")
+                    c.email = c_dto.get("email")
+                    c.cin_number = c_dto.get("cin_number")
+                    c.license_number = c_dto.get("license_number")
+                    c.photo_url = c_dto.get("photo_url")
+                    c.identity_card_image = c_dto.get("identity_card_image")
+                    c.identity_card_image_back = c_dto.get("identity_card_image_back")
+                    c.driving_license_image = c_dto.get("driving_license_image")
+                    c.driving_license_image_back = c_dto.get("driving_license_image_back")
+                    c.notes = c_dto.get("notes")
+                    c.status = c_dto.get("status", "ACTIVE")
+                    c.version = c_dto.get("version", 1)
+                    c.updated_at = now_iso
+                    if not getattr(c, "created_at", None):
+                        c.created_at = c_dto.get("created_at") or now_iso
+
+                # 3. Reconcile RESERVATIONS
+                server_rentals = data.get("rentals", []) or data.get("reservations", [])
+                server_r_ids = {str(r.get("id")) for r in server_rentals}
+                for lr in session.query(LocalReservation).all():
+                    if str(lr.id) not in server_r_ids and str(lr.id) not in pending_ids:
+                        session.delete(lr)
+
+                for r_dto in server_rentals:
+                    rid = str(r_dto.get("id"))
+                    if rid in pending_ids:
+                        continue
+                    r = session.query(LocalReservation).filter_by(id=rid).first()
+                    if not r:
+                        r = LocalReservation(id=rid)
+                        session.add(r)
+                    r.vehicle_id = str(r_dto.get("vehicle_id", ""))
+                    r.customer_id = str(r_dto.get("customer_id")) if r_dto.get("customer_id") else None
+                    r.customer_name = r_dto.get("customer_name")
+                    r.customer_phone = r_dto.get("customer_phone")
+                    r.customer_email = r_dto.get("customer_email")
+                    r.identity_card_image = r_dto.get("identity_card_image")
+                    r.driving_license_image = r_dto.get("driving_license_image")
+                    r.start_datetime = str(r_dto.get("start_datetime", ""))
+                    r.end_datetime = str(r_dto.get("end_datetime", ""))
+                    r.daily_price = float(r_dto.get("daily_price", 0.0) or 0.0)
+                    r.num_days = int(r_dto.get("num_days", 1) or 1)
+                    r.total_price = float(r_dto.get("total_price", 0.0) or 0.0)
+                    r.deposit = float(r_dto.get("deposit", 0.0) or 0.0)
+                    r.status = r_dto.get("status", "RESERVED")
+                    r.cancellation_reason = r_dto.get("cancellation_reason")
+                    r.payment_status = r_dto.get("payment_status", "PENDING")
+                    r.notes = r_dto.get("notes")
+                    r.version = r_dto.get("version", 1)
+                    r.updated_at = now_iso
+                    if not getattr(r, "created_at", None):
+                        r.created_at = r_dto.get("created_at") or now_iso
+
+                # 4. Reconcile MAINTENANCE
+                server_maint = data.get("maintenance", [])
+                server_m_ids = {str(m.get("id")) for m in server_maint}
+                for lm in session.query(LocalMaintenance).all():
+                    if str(lm.id) not in server_m_ids and str(lm.id) not in pending_ids:
+                        session.query(LocalMaintenancePart).filter_by(maintenance_id=lm.id).delete()
+                        session.delete(lm)
+
+                for m_dto in server_maint:
+                    mid = str(m_dto.get("id"))
+                    if mid in pending_ids:
+                        continue
+                    m = session.query(LocalMaintenance).filter_by(id=mid).first()
+                    if not m:
+                        m = LocalMaintenance(id=mid)
+                        session.add(m)
+                    m.vehicle_id = str(m_dto.get("vehicle_id", ""))
+                    m.type = m_dto.get("type", "Entretien")
+                    m.title = m_dto.get("title")
+                    m.description = m_dto.get("description")
+                    m.diagnosis = m_dto.get("diagnosis")
+                    m.repair_description = m_dto.get("repair_description")
+                    m.start_datetime = str(m_dto.get("start_datetime", ""))
+                    m.expected_end_datetime = str(m_dto.get("expected_end_datetime")) if m_dto.get("expected_end_datetime") else None
+                    m.actual_end_datetime = str(m_dto.get("actual_end_datetime")) if m_dto.get("actual_end_datetime") else None
+                    m.mileage = float(m_dto.get("mileage") or 0.0) if m_dto.get("mileage") is not None else None
+                    m.location = m_dto.get("location")
+                    m.technician_name = m_dto.get("technician_name")
+                    m.invoice_number = m_dto.get("invoice_number")
+                    m.oil_brand = m_dto.get("oil_brand")
+                    m.oil_viscosity = m_dto.get("oil_viscosity")
+                    m.oil_quantity = float(m_dto.get("oil_quantity") or 0.0) if m_dto.get("oil_quantity") is not None else None
+                    m.oil_filter_changed = bool(m_dto.get("oil_filter_changed", False))
+                    m.air_filter_changed = bool(m_dto.get("air_filter_changed", False))
+                    m.fuel_filter_changed = bool(m_dto.get("fuel_filter_changed", False))
+                    m.cabin_filter_changed = bool(m_dto.get("cabin_filter_changed", False))
+                    m.estimated_cost = float(m_dto.get("estimated_cost") or 0.0) if m_dto.get("estimated_cost") is not None else None
+                    m.parts_cost = float(m_dto.get("parts_cost", 0.0) or 0.0)
+                    m.labor_cost = float(m_dto.get("labor_cost", 0.0) or 0.0)
+                    m.other_cost = float(m_dto.get("other_cost", 0.0) or 0.0)
+                    m.actual_cost = float(m_dto.get("actual_cost") or 0.0) if m_dto.get("actual_cost") is not None else None
+                    m.next_maintenance_date = str(m_dto.get("next_maintenance_date")) if m_dto.get("next_maintenance_date") else None
+                    m.next_maintenance_mileage = float(m_dto.get("next_maintenance_mileage") or 0.0) if m_dto.get("next_maintenance_mileage") is not None else None
+                    m.step = m_dto.get("step", "EN ATTENTE")
+                    m.status = m_dto.get("status", "ACTIVE")
+                    m.notes = m_dto.get("notes")
+                    m.version = m_dto.get("version", 1)
+                    m.updated_at = now_iso
+                    if not getattr(m, "created_at", None):
+                        m.created_at = m_dto.get("created_at") or now_iso
 
                 session.commit()
                 self._is_online = True

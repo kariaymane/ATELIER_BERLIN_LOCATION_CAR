@@ -62,6 +62,7 @@ class MaintenanceBase(BaseModel):
 
 class MaintenanceCreate(MaintenanceBase):
     parts: Optional[List[MaintenancePartCreate]] = None
+    confirm_interruption: bool = False
 
 class MaintenanceUpdate(BaseModel):
     # Same fields as Base but all optional for PATCH

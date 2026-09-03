@@ -56,12 +56,19 @@ ELIGIBLE_STATUSES = ("PENDING", "CONFIRMED", "RESERVED", "ACTIVE", "COMPLETED")
 def is_revenue_eligible(res: dict) -> bool:
     """Return True if reservation is eligible to contribute revenue.
 
-    CANCELLED reservations NEVER contribute. All active, completed, or booked
-    rentals (PENDING, CONFIRMED, RESERVED, ACTIVE, COMPLETED) are eligible,
+    CANCELLED reservations do not contribute UNLESS they were cancelled after start
+    due to maintenance or interruption, in which case days realised prior to
+    cancellation are preserved. All active, completed, or booked rentals
+    (PENDING, CONFIRMED, RESERVED, ACTIVE, COMPLETED) are eligible,
     contributing pro-rata for their elapsed/realised days once started.
     """
     status = str(res.get("status", "")).strip().upper()
-    if not status or status == CANCELLED:
+    if not status:
+        return False
+    if status == CANCELLED:
+        reason = str(res.get("cancellation_reason", "")).strip().upper()
+        if reason == "MAINTENANCE" or res.get("realised_revenue_preserved"):
+            return True
         return False
     return True
 
@@ -111,7 +118,14 @@ def _realised_day_dates(res: dict, now: datetime):
     start_dt = _as_datetime(res.get("start_datetime") or res.get("start_date"))
     start_d = start_dt.date()
     status = str(res.get("status") or "").strip().upper()
-    if status == "COMPLETED":
+    reason = str(res.get("cancellation_reason") or "").strip().upper()
+
+    if status == CANCELLED and (reason == "MAINTENANCE" or res.get("realised_revenue_preserved")):
+        # Interrupted rental: only days elapsed prior to the interruption are realised.
+        end_cap = _as_datetime(res.get("cancelled_at") or res.get("end_datetime")) if (res.get("cancelled_at") or res.get("end_datetime")) else None
+        effective_now = min(now, end_cap) if end_cap else now
+        realised = _realised_days(start_dt, num_days, effective_now)
+    elif status == "COMPLETED":
         realised = num_days
     else:
         realised = _realised_days(start_dt, num_days, now)

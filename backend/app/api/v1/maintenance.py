@@ -245,7 +245,20 @@ async def create_maintenance(
         from app.repositories.audit_repository import AuditRepository
         # None => open-ended; the helper applies FAR_FUTURE.
         maint_end = new_maint.expected_end_datetime or new_maint.actual_end_datetime
-        cancelled = await RentalRepository(db).cancel_overlapping_reservations(
+        rental_repo = RentalRepository(db)
+
+        # Policy B Guard: Active in-progress rental requires explicit operator confirmation
+        overlapping_active = await rental_repo.get_overlapping_active_rentals(
+            body.vehicle_id, new_maint.start_datetime, maint_end
+        )
+        if overlapping_active and not getattr(body, "confirm_interruption", False):
+            names = ", ".join(f"#{r.id} ({r.customer_name})" for r in overlapping_active)
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Vehicle currently has active in-progress rental(s): {names}. Confirmation required to interrupt active rental for maintenance (confirm_interruption=true).",
+            )
+
+        cancelled = await rental_repo.cancel_overlapping_reservations(
             body.vehicle_id, new_maint.start_datetime, maint_end
         )
         audit = AuditRepository(db)

@@ -464,12 +464,27 @@ class DomainStore:
         except Exception:
             new_overview = dict(base.overview or {})
 
-        effective_overview = dict(self._server_overview) if self._server_overview is not None else new_overview
+        if self._server_overview is not None:
+            # Time has advanced across a boundary while holding server metrics.
+            # Evolve the authoritative fleet counts to match current wall-clock reality,
+            # ensuring Dashboard and Vehicles pages are strictly coherent.
+            for k in self._FLEET_KEYS:
+                if k in new_counts:
+                    self._server_overview[k] = new_counts[k]
+            # If midnight rolled over, evolve period revenue counters
+            if base.generated_at and now.date() != base.generated_at.date():
+                for k in ("today_revenue", "today_rentals", "today_returns"):
+                    if k in new_overview:
+                        self._server_overview[k] = new_overview[k]
+            effective_overview = dict(self._server_overview)
+        else:
+            effective_overview = new_overview
 
         changed = (
             new_effective != base.effective
             or new_counts != base.fleet_counts
-            or (self._server_overview is None and new_overview != base.overview)
+            or effective_overview != base.overview
+            or new_overview != base.overview
         )
         if not changed:
             return False  # boundary reached but nothing changed — silent no-op

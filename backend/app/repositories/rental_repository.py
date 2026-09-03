@@ -147,6 +147,30 @@ class RentalRepository(BaseRepository[Reservation]):
             await self._session.flush()
         return affected
 
+    async def get_overlapping_active_rentals(
+        self,
+        vehicle_id: UUID,
+        maint_start: datetime,
+        maint_end: Optional[datetime],
+    ) -> list[Reservation]:
+        """Query currently active in-progress reservations overlapping the maintenance window."""
+        from app.services.fleet_status import FAR_FUTURE
+        if maint_end is None:
+            maint_end = FAR_FUTURE
+        if maint_end <= maint_start:
+            return []
+        query = (
+            select(Reservation)
+            .where(
+                Reservation.vehicle_id == vehicle_id,
+                Reservation.status == "ACTIVE",
+                Reservation.start_datetime < maint_end,
+                Reservation.end_datetime > maint_start,
+            )
+        )
+        result = await self._session.execute(query)
+        return list(result.scalars().all())
+
     async def get_by_vehicle(
         self,
         vehicle_id: UUID,
