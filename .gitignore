@@ -144,3 +144,6 @@ dist_final/
 
 # mobile security release bundle (build output — not source)
 atelier-berlin-location-car-mobile-security-*.zip
+artifacts_archive/
+ATELIER_BERLIN_LOCATION_CAR*.apk
+ATELIER_BERLIN_LOCATION_CAR*.zip
