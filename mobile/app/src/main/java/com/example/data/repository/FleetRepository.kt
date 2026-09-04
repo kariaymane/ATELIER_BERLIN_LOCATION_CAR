@@ -15,6 +15,7 @@ import com.example.data.local.*
 import com.example.data.model.*
 import com.example.data.fleet.BoundaryTicker
 import com.example.data.fleet.FleetStatus
+import com.example.data.fleet.RevenueEngine
 import com.example.util.ImageUrlResolver
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -56,6 +57,7 @@ class FleetRepository(
                 FleetStatus.ReservationRow(
                     it.vehicleId, it.status, it.startDatetimeIso, it.endDatetimeIso,
                     it.totalAmount.toDouble(), it.numDays,
+                    it.cancellationReason, it.cancelledAtIso,
                 )
             } to maint.map {
                 FleetStatus.MaintenanceRow(
@@ -139,6 +141,12 @@ class FleetRepository(
     val notificationsFlow: StateFlow<List<NotificationItem>> = _notifications.asStateFlow()
 
     private val _liveMetrics = MutableStateFlow<PerformanceMetrics?>(null)
+    // Wall-clock instant the current _liveMetrics snapshot was computed by the
+    // server. Used to detect that the local clock has since crossed a period
+    // boundary (midnight / Monday / 1st / Jan 1) — after which the server's
+    // figure for that period is stale and the local time-derived recompute
+    // wins for that period only.
+    private val _liveMetricsAt = MutableStateFlow(0L)
 
     /**
      * Dashboard metrics recomputed LOCALLY from Room against `now` + the
@@ -167,28 +175,53 @@ class FleetRepository(
         )
     }.distinctUntilChanged()
 
-    // Authoritative Live Server Data Authority with Time-Liveness (Increment 6 & P1-1):
-    // Server API result (_liveMetrics) is authoritative. When both local and server are present
-    // and hold the same vehicle pool, time-derived fleet counts and midnight counters evolve
-    // with boundary ticks so the dashboard never contradicts the vehicles list.
+    /** True when `now` is in a different named-period window than `refAt` was —
+     *  i.e. a period boundary has been crossed since the server figure was
+     *  computed, making the server's figure for that period stale. */
+    private fun boundaryCrossed(name: String, refAt: Long, now: Long): Boolean {
+        if (refAt <= 0L) return false
+        return RevenueEngine.namedPeriodBounds(name, refAt).first !=
+            RevenueEngine.namedPeriodBounds(name, now).first
+    }
+
+    // Authoritative Live Server Data Authority WITH time-liveness (P1-1 / P2-A/B/C):
+    //  * Fleet counts come from the local time-derived derivation (the canonical
+    //    FleetStatus port, boundary-live) so the Dashboard never contradicts the
+    //    Vehicles list — but only when the vehicle pool agrees, to avoid a torn
+    //    mid-sync state.
+    //  * Each period's revenue / bookings come from the server UNLESS the local
+    //    clock has crossed that period's boundary since the server response, in
+    //    which case the local recompute wins for that period only. No fragile
+    //    "local says 0" guessing.
     val performanceMetricsFlow: Flow<PerformanceMetrics?> =
-        combine(localMetricsFlow, _liveMetrics) { local, api ->
+        combine(localMetricsFlow, _liveMetrics, _liveMetricsAt) { local, api, apiAt ->
             if (api == null) return@combine local
             if (local == null) return@combine api
+            val now = nowMillis()
+
             val totalLocal = local.readyVehicles + local.rentedVehicles + local.reservedVehicles + local.maintenanceVehicles
             val totalApi = api.readyVehicles + api.rentedVehicles + api.reservedVehicles + api.maintenanceVehicles
-            if (totalLocal == totalApi && totalLocal > 0) {
-                api.copy(
-                    readyVehicles = local.readyVehicles,
-                    rentedVehicles = local.rentedVehicles,
-                    reservedVehicles = local.reservedVehicles,
-                    maintenanceVehicles = local.maintenanceVehicles,
-                    todayRevenue = if (local.todayBookings == 0 && local.todayRevenue == 0.0 && api.todayRevenue > 0) 0.0 else api.todayRevenue,
-                    todayBookings = if (local.todayBookings == 0 && api.todayBookings > 0) 0 else api.todayBookings,
-                )
-            } else {
-                api
-            }
+            val fleetFromLocal = totalLocal == totalApi && totalLocal > 0
+
+            fun pick(name: String, apiVal: Double, localVal: Double) =
+                if (boundaryCrossed(name, apiAt, now)) localVal else apiVal
+            fun pickI(name: String, apiVal: Int, localVal: Int) =
+                if (boundaryCrossed(name, apiAt, now)) localVal else apiVal
+
+            api.copy(
+                readyVehicles = if (fleetFromLocal) local.readyVehicles else api.readyVehicles,
+                rentedVehicles = if (fleetFromLocal) local.rentedVehicles else api.rentedVehicles,
+                reservedVehicles = if (fleetFromLocal) local.reservedVehicles else api.reservedVehicles,
+                maintenanceVehicles = if (fleetFromLocal) local.maintenanceVehicles else api.maintenanceVehicles,
+                todayRevenue = pick("today", api.todayRevenue, local.todayRevenue),
+                weekRevenue = pick("week", api.weekRevenue, local.weekRevenue),
+                monthRevenue = pick("month", api.monthRevenue, local.monthRevenue),
+                yearRevenue = pick("year", api.yearRevenue, local.yearRevenue),
+                todayBookings = pickI("today", api.todayBookings, local.todayBookings),
+                weekBookings = pickI("week", api.weekBookings, local.weekBookings),
+                monthBookings = pickI("month", api.monthBookings, local.monthBookings),
+                yearBookings = pickI("year", api.yearBookings, local.yearBookings),
+            )
         }
 
     private val _syncStatus = MutableStateFlow(SyncStatus())
@@ -315,7 +348,9 @@ class FleetRepository(
             lastUpdated = "Synchronisé",
             pickupLocation = "",
             returnLocation = "",
-            notes = dto.notes ?: ""
+            notes = dto.notes ?: "",
+            cancellationReason = dto.cancellationReason,
+            cancelledAtIso = dto.cancelledAt,
         )
     }
 
@@ -516,6 +551,7 @@ class FleetRepository(
         }
         _notifications.value = emptyList()
         _liveMetrics.value = null
+        _liveMetricsAt.value = 0L
     }
 
     private fun collectVehicleImageEntities(vehicles: List<VehicleDto>): List<VehicleImageEntity> {
@@ -855,6 +891,7 @@ class FleetRepository(
                     reservedVehicles = stats.reserved,
                     maintenanceVehicles = stats.maintenance
                 )
+                _liveMetricsAt.value = nowMillis()
                 Result.success(Unit)
             } else {
                 Result.failure(Exception("Erreur serveur stats: ${response.code()}"))

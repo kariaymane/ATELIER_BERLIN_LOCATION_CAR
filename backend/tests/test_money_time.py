@@ -56,3 +56,27 @@ def test_custom_bounds_swaps_reversed_range():
 def test_display_format_is_ddmmyyyy():
     assert fmt_display_date(date(2026, 9, 2)) == "02/09/2026"
     assert fmt_display_date(parse_iso_date("2026-12-31")) == "31/12/2026"
+
+
+def test_naive_datetime_policy_is_unified_across_shared_modules():
+    """v1.1.0 audit P2-4: a naive datetime must be read as business-local
+    (Africa/Casablanca) by EVERY shared engine — not UTC by some and local by
+    others. A single naive value (SQLite round-trip / legacy row) must not shift
+    revenue vs fleet-status by ~1 h."""
+    from datetime import datetime, timezone
+    from shared.money_time import to_business, BUSINESS_TZ
+    from shared.revenue_reference import _as_datetime as rev_parse
+    from shared.fleet_status_reference import _parse as fleet_parse
+
+    naive = datetime(2026, 9, 4, 10, 0, 0)  # no tzinfo
+
+    # money_time: naive -> business-local
+    mt = to_business(naive)
+    assert mt.tzinfo is not None
+    assert mt.utcoffset() == datetime(2026, 9, 4, tzinfo=BUSINESS_TZ).utcoffset()
+
+    # revenue engine agrees (compare the absolute instant)
+    assert rev_parse(naive).astimezone(timezone.utc) == mt.astimezone(timezone.utc)
+
+    # fleet-status engine agrees
+    assert fleet_parse(naive) == mt.astimezone(timezone.utc)

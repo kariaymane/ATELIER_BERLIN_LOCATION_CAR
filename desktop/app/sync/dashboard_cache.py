@@ -54,17 +54,42 @@ def _realised_days(start_dt: datetime, num_days: int, now: datetime) -> int:
     return max(0, min(num_days, n))
 
 
+def _is_revenue_eligible(status: str, reason: str) -> bool:
+    """Mirror of shared.revenue_reference.is_revenue_eligible: CANCELLED never
+    contributes EXCEPT a rental interrupted after it started (maintenance) —
+    then the days realised before the interruption are preserved."""
+    status = (status or "").strip().upper()
+    if not status:
+        return False
+    if status == "CANCELLED":
+        return (reason or "").strip().upper() == "MAINTENANCE"
+    return True
+
+
+def _realised_for_row(r_get, start_dt: datetime, num_days: int, now: datetime) -> int:
+    """Realised day count for a row, honouring COMPLETED (full) and
+    maintenance-interrupted (capped at `cancelled_at`) — mirror of the spec."""
+    status = str(r_get("status") or "").strip().upper()
+    reason = str(r_get("cancellation_reason") or "").strip().upper()
+    if status == "CANCELLED" and reason == "MAINTENANCE":
+        cap_src = r_get("cancelled_at") or r_get("end_datetime")
+        cap = _parse_dt(cap_src) if cap_src else None
+        effective_now = min(now, _to_biz(cap)) if cap is not None else now
+        return _realised_days(start_dt, num_days, effective_now)
+    if status == "COMPLETED":
+        return num_days
+    return _realised_days(start_dt, num_days, now)
+
+
 def _reservation_revenue(r_get, start_dt, from_d: date, to_d: date, now: datetime) -> Decimal:
     """Pro-rata Decimal contribution of ONE reservation to [from_d, to_d)."""
     num_days = int(r_get("num_days") or 0)
     if num_days <= 0 or start_dt is None:
         return Decimal("0")
+    if not _is_revenue_eligible(r_get("status"), r_get("cancellation_reason")):
+        return Decimal("0")
     start_dt = _to_biz(start_dt)
-    status = str(r_get("status") or "").strip().upper()
-    if status == "COMPLETED":
-        realised = num_days
-    else:
-        realised = _realised_days(start_dt, num_days, now)
+    realised = _realised_for_row(r_get, start_dt, num_days, now)
     if realised <= 0:
         return Decimal("0")
     total_price = r_get("total_price")
@@ -126,20 +151,16 @@ def revenue_between_rows(reservation_rows, from_d: date, to_d: date, now=None):
     acc = Decimal("0")
     days_total = 0
     for r in (reservation_rows or []):
-        if (_get(r, "status") or "").upper() == "CANCELLED":
+        g = lambda k, _r=r: _get(_r, k)
+        if not _is_revenue_eligible(g("status"), g("cancellation_reason")):
             continue
         start_dt = _parse_dt(_get(r, "start_datetime"))
-        g = lambda k, _r=r: _get(_r, k)
         contrib = _reservation_revenue(g, start_dt, from_d, to_d, now)
         acc += contrib
         if start_dt is not None:
             sd = _to_biz(start_dt).date()
             nd = int(_get(r, "num_days") or 0)
-            status = (_get(r, "status") or "").strip().upper()
-            if status == "COMPLETED":
-                realised = nd
-            else:
-                realised = _realised_days(_to_biz(start_dt), nd, now) if nd else 0
+            realised = _realised_for_row(g, _to_biz(start_dt), nd, now) if nd else 0
             lo = max(sd, from_d)
             hi = min(sd + timedelta(days=realised), to_d)
             days_total += max(0, (hi - lo).days)
@@ -150,7 +171,9 @@ def _rentals_started(reservation_rows, from_d: date, to_d: date):
     from app.utils.fleet_status import _get
     n = 0
     for r in (reservation_rows or []):
-        if (_get(r, "status") or "").upper() == "CANCELLED":
+        # Mirror shared.revenue_reference.rentals_started_between: a
+        # maintenance-interrupted rental still "started" and still counts.
+        if not _is_revenue_eligible(_get(r, "status"), _get(r, "cancellation_reason")):
             continue
         sdt = _parse_dt(_get(r, "start_datetime"))
         if sdt is not None and from_d <= _to_biz(sdt).date() < to_d:

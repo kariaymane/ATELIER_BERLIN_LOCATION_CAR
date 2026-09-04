@@ -27,7 +27,9 @@ class Reservation(Base, TimestampMixin, VersionMixin):
     )
     customer_id = Column(
         UUID(as_uuid=True),
-        ForeignKey("clients.id", ondelete="SET NULL"),
+        # Name pinned to match migration i4d5e6f7g8h9 so autogenerate does not
+        # see drift (audit P2-G).
+        ForeignKey("clients.id", ondelete="SET NULL", name="fk_reservations_customer_id_clients"),
         nullable=True,
         index=True,
     )
@@ -49,6 +51,11 @@ class Reservation(Base, TimestampMixin, VersionMixin):
     # overlapped this reservation). NULL for manual/other cancellations.
     # The human-facing translation lives in the UI i18n layer, never here.
     cancellation_reason = Column(String(50), nullable=True)
+    # Instant the reservation was moved to CANCELLED. Used by the canonical
+    # revenue rule to cap realised days for a rental interrupted after it
+    # started (e.g. maintenance). NULL for rentals never cancelled, and for
+    # legacy cancellations pre-dating this column.
+    cancelled_at = Column(TIMESTAMP(timezone=True), nullable=True)
     notes = Column(Text, nullable=True)
     created_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
 

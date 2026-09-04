@@ -1,6 +1,17 @@
 import os
 import gc
+import sys
+import pathlib
 import pytest
+
+# Repo root on sys.path so ``from shared.X import ...`` (used by
+# app.sync.dashboard_cache) resolves regardless of which test modules are
+# collected. Previously this only worked as a side effect of
+# ``test_e2e_sync_hover.py`` running early — a load-order landmine that made a
+# partial test selection fail with ModuleNotFoundError: No module named 'shared'.
+_REPO_ROOT = str(pathlib.Path(__file__).resolve().parents[2])
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
 
 
 @pytest.fixture(autouse=True)

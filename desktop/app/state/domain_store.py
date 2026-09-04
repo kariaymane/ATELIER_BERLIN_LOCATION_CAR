@@ -350,6 +350,7 @@ class DomainStore:
                 "total_price": r.total_price, "deposit": r.deposit,
                 "payment_status": r.payment_status, "status": r.status,
                 "cancellation_reason": getattr(r, "cancellation_reason", None),
+                "cancelled_at": getattr(r, "cancelled_at", None),
                 "notes": r.notes, "created_at": r.created_at, "updated_at": r.updated_at,
                 "version": r.version,
             }
@@ -466,16 +467,25 @@ class DomainStore:
 
         if self._server_overview is not None:
             # Time has advanced across a boundary while holding server metrics.
-            # Evolve the authoritative fleet counts to match current wall-clock reality,
-            # ensuring Dashboard and Vehicles pages are strictly coherent.
+            # Evolve the authoritative fleet counts to match current wall-clock
+            # reality, so the Dashboard and Vehicles pages stay strictly coherent.
             for k in self._FLEET_KEYS:
                 if k in new_counts:
                     self._server_overview[k] = new_counts[k]
-            # If midnight rolled over, evolve period revenue counters
-            if base.generated_at and now.date() != base.generated_at.date():
-                for k in ("today_revenue", "today_rentals", "today_returns"):
-                    if k in new_overview:
-                        self._server_overview[k] = new_overview[k]
+            # A calendar-date change can roll ANY period boundary (day / week /
+            # month / year). The server's figure for a rolled period is now
+            # stale, so adopt the local time-derived recompute for every period
+            # card until the next server fetch. Same pro-rata engine as the
+            # backend, so this is the canonical number, not a guess.
+            prev_d = base.generated_at.date() if base.generated_at else None
+            if prev_d is not None and now.date() != prev_d:
+                for _p in ("today", "week", "month", "year"):
+                    for _suffix in ("_revenue", "_rentals"):
+                        _k = _p + _suffix
+                        if _k in new_overview:
+                            self._server_overview[_k] = new_overview[_k]
+                if "today_returns" in new_overview:
+                    self._server_overview["today_returns"] = new_overview["today_returns"]
             effective_overview = dict(self._server_overview)
         else:
             effective_overview = new_overview

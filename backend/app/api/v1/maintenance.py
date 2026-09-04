@@ -549,6 +549,8 @@ async def update_maintenance(
     m, v = row
 
     update_data = body.dict(exclude_unset=True)
+    # Control flag, not a column — consume it before the generic setattr loop.
+    update_data.pop("confirm_interruption", None)
     if "parts" in update_data:
         # For simplicity, if parts are provided, replace them entirely
         parts_data = update_data.pop("parts")
@@ -586,7 +588,23 @@ async def update_maintenance(
     if prev_status in ("CANCELLED", "COMPLETED", "SCHEDULED") and new_status not in ("CANCELLED", "COMPLETED"):
         from app.repositories.rental_repository import RentalRepository
         maint_end = m.expected_end_datetime or m.actual_end_datetime  # None => open-ended (helper applies FAR_FUTURE)
-        cancelled = await RentalRepository(db).cancel_overlapping_reservations(
+        _rental_repo = RentalRepository(db)
+
+        # Policy B guard — identical to POST /maintenance: a PATCH that activates
+        # a ticket over a car that is physically out on rent right now needs the
+        # operator's explicit confirmation. Without this, PATCH was a silent
+        # bypass of the create-path guard.
+        _overlapping_active = await _rental_repo.get_overlapping_active_rentals(
+            m.vehicle_id, m.start_datetime, maint_end
+        )
+        if _overlapping_active and not getattr(body, "confirm_interruption", False):
+            _names = ", ".join(f"#{r.id} ({r.customer_name})" for r in _overlapping_active)
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Vehicle currently has active in-progress rental(s): {_names}. Confirmation required to interrupt active rental for maintenance (confirm_interruption=true).",
+            )
+
+        cancelled = await _rental_repo.cancel_overlapping_reservations(
             m.vehicle_id, m.start_datetime, maint_end
         )
         if cancelled:

@@ -122,8 +122,9 @@ def test_parse_datetime_utc_all_forms():
     base = datetime(2026, 8, 24, 22, 12, tzinfo=timezone.utc)
     assert parse_datetime_utc("2026-08-24T22:12:00Z") == base
     assert parse_datetime_utc("2026-08-24T22:12:00+00:00") == base
-    assert parse_datetime_utc("2026-08-24T22:12:00") == base          # naive legacy
-    assert parse_datetime_utc("2026-08-24 22:12:00") == base          # SQLite format
+    # Under the unified naive policy (P2-4), naive values represent Casablanca wall time (UTC+1 in August):
+    assert parse_datetime_utc("2026-08-24T23:12:00") == base          # naive legacy (23:12 local == 22:12 UTC)
+    assert parse_datetime_utc("2026-08-24 23:12:00") == base          # SQLite format (23:12 local == 22:12 UTC)
     assert parse_datetime_utc(base) == base
     assert parse_datetime_utc("2026-08-24T23:12:00+01:00") == base    # offset equiv
     assert parse_datetime_utc("garbage") is None

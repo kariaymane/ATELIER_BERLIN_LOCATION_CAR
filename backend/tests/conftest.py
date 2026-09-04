@@ -4,6 +4,7 @@ Uses a test PostgreSQL database for integration tests.
 """
 import os
 import asyncio
+import pathlib
 from typing import AsyncGenerator
 from uuid import uuid4
 
@@ -60,14 +61,33 @@ async def test_engine():
     pool_cls = StaticPool if "sqlite" in url else NullPool
     engine = create_async_engine(url, echo=False, poolclass=pool_cls)
 
+    # On PostgreSQL (CI "truth" job) build the schema from the ALEMBIC MIGRATION
+    # CHAIN, not Base.metadata.create_all — so a migration/model drift, a missing
+    # migration, or a broken DDL fails the build instead of only surfacing in
+    # production. SQLite (fast local path) keeps create_all. Override with
+    # SCHEMA_FROM=create_all to force the old behaviour.
+    _schema_from = os.environ.get("SCHEMA_FROM", "").strip().lower()
+    _use_migrations = "postgresql" in url and _schema_from != "create_all"
+
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
         if "postgresql" in url:
-            await conn.execute(
-                __import__("sqlalchemy").text("CREATE EXTENSION IF NOT EXISTS btree_gist")
-            )
-        await conn.run_sync(Base.metadata.create_all)
-        
+            from sqlalchemy import text as _text
+            await conn.execute(_text("DROP TABLE IF EXISTS alembic_version"))
+            await conn.execute(_text("CREATE EXTENSION IF NOT EXISTS btree_gist"))
+
+    if _use_migrations:
+        from alembic import command as _alembic_command
+        from alembic.config import Config as _AlembicConfig
+        _cfg = _AlembicConfig(str(pathlib.Path(__file__).resolve().parents[1] / "alembic.ini"))
+        _cfg.set_main_option("script_location", str(pathlib.Path(__file__).resolve().parents[1] / "migrations"))
+        _cfg.set_main_option("sqlalchemy.url", os.environ["DATABASE_URL_SYNC"])
+        await asyncio.to_thread(_alembic_command.upgrade, _cfg, "head")
+
+    async with engine.begin() as conn:
+        if not _use_migrations:
+            await conn.run_sync(Base.metadata.create_all)
+
         # Emulate PostgreSQL exclusion constraint for double booking in SQLite tests
         if "sqlite" in url:
             from sqlalchemy import text

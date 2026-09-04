@@ -34,7 +34,10 @@ def test_desktop_revenue_matches_reference(case):
     rows = [
         {
             "status": r["status"],
+            "cancellation_reason": r.get("cancellation_reason"),
+            "cancelled_at": r.get("cancelled_at"),
             "start_datetime": r["start_datetime"],
+            "end_datetime": r.get("end_datetime"),
             "num_days": r["num_days"],
             "daily_price": r["daily_price"],
             "total_price": r["total_price"],

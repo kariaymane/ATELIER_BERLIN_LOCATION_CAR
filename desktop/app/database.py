@@ -95,6 +95,8 @@ def init_local_db():
                 conn.execute(text("ALTER TABLE reservations ADD COLUMN driving_license_image TEXT"))
             if "cancellation_reason" not in col_names:
                 conn.execute(text("ALTER TABLE reservations ADD COLUMN cancellation_reason VARCHAR(50)"))
+            if "cancelled_at" not in col_names:
+                conn.execute(text("ALTER TABLE reservations ADD COLUMN cancelled_at VARCHAR(50)"))
             conn.commit()
         except Exception as e:
             logger.warning("Auto-migration check notice (reservations): %s", e)

@@ -355,6 +355,12 @@ class SyncService:
             if "status" in payload: res.status = payload["status"]
             if "cancellation_reason" in payload:
                 res.cancellation_reason = payload["cancellation_reason"]
+            if payload.get("cancelled_at"):
+                from datetime import datetime as _dt
+                try:
+                    res.cancelled_at = _dt.fromisoformat(str(payload["cancelled_at"]).replace("Z", "+00:00"))
+                except Exception:
+                    pass
             res.version += 1
             await self._session.flush()
             return {"status": "ok", "server_version": res.version}
@@ -689,6 +695,7 @@ class SyncService:
                         "num_days": r.num_days, "total_price": float(r.total_price), "deposit": float(r.deposit),
                         "payment_status": r.payment_status, "status": r.status,
                         "cancellation_reason": r.cancellation_reason,
+                        "cancelled_at": r.cancelled_at.isoformat() if r.cancelled_at else None,
                         "created_at": r.created_at.isoformat() if r.created_at else None,
                     },
                     "version": r.version, "updated_at": r.updated_at.isoformat()
@@ -839,6 +846,7 @@ class SyncService:
                 payment_status=r.payment_status,
                 status=r.status,
                 cancellation_reason=r.cancellation_reason,
+                cancelled_at=r.cancelled_at,
                 notes=r.notes,
                 created_at=r.created_at,
                 updated_at=r.updated_at,

@@ -47,6 +47,7 @@ async def test_backend_revenue_matches_reference(case, db_session):
     for r in case["reservations"]:
         start = datetime.fromisoformat(r["start_datetime"])
         veh = await _vehicle(db_session)
+        _cancelled_at = r.get("cancelled_at")
         db_session.add(Reservation(
             vehicle_id=veh.id,
             customer_name="X",
@@ -57,6 +58,8 @@ async def test_backend_revenue_matches_reference(case, db_session):
             total_price=r["total_price"],
             deposit=0,
             status=r["status"],
+            cancellation_reason=r.get("cancellation_reason"),
+            cancelled_at=datetime.fromisoformat(_cancelled_at) if _cancelled_at else None,
             payment_status="PAID",
         ))
     await db_session.commit()

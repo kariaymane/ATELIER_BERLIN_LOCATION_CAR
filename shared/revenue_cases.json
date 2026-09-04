@@ -1089,6 +1089,152 @@
           "expected_days": 119
         }
       ]
+    },
+    {
+      "name": "maintenance_interrupted_rental_realises_only_elapsed_days",
+      "now": "2026-09-15T12:00:00+01:00",
+      "reservations": [
+        {
+          "id": "RM1",
+          "status": "CANCELLED",
+          "cancellation_reason": "MAINTENANCE",
+          "start_datetime": "2026-08-03T09:00:00+01:00",
+          "end_datetime": "2026-08-13T09:00:00+01:00",
+          "cancelled_at": "2026-08-06T10:00:00+01:00",
+          "num_days": 10,
+          "daily_price": "300.00",
+          "total_price": "3000.00"
+        }
+      ],
+      "queries": [
+        {
+          "from": "2026-08-01",
+          "to": "2026-09-01",
+          "expected_revenue": 1200.0,
+          "expected_days": 4
+        },
+        {
+          "from": "2026-08-03",
+          "to": "2026-08-04",
+          "expected_revenue": 300.0,
+          "expected_days": 1
+        },
+        {
+          "from": "2026-08-06",
+          "to": "2026-08-07",
+          "expected_revenue": 300.0,
+          "expected_days": 1
+        },
+        {
+          "from": "2026-08-07",
+          "to": "2026-08-08",
+          "expected_revenue": 0.0,
+          "expected_days": 0
+        },
+        {
+          "from": "2026-01-01",
+          "to": "2027-01-01",
+          "expected_revenue": 1200.0,
+          "expected_days": 4
+        }
+      ]
+    },
+    {
+      "name": "maintenance_interrupted_rental_revenue_is_stable_over_time",
+      "now": "2027-06-01T12:00:00+01:00",
+      "reservations": [
+        {
+          "id": "RM1",
+          "status": "CANCELLED",
+          "cancellation_reason": "MAINTENANCE",
+          "start_datetime": "2026-08-03T09:00:00+01:00",
+          "end_datetime": "2026-08-13T09:00:00+01:00",
+          "cancelled_at": "2026-08-06T10:00:00+01:00",
+          "num_days": 10,
+          "daily_price": "300.00",
+          "total_price": "3000.00"
+        }
+      ],
+      "queries": [
+        {
+          "from": "2026-08-01",
+          "to": "2026-09-01",
+          "expected_revenue": 1200.0,
+          "expected_days": 4
+        },
+        {
+          "from": "2026-01-01",
+          "to": "2027-01-01",
+          "expected_revenue": 1200.0,
+          "expected_days": 4
+        }
+      ]
+    },
+    {
+      "name": "maintenance_interrupted_rental_split_across_month_boundary",
+      "now": "2026-09-20T12:00:00+01:00",
+      "reservations": [
+        {
+          "id": "RM2",
+          "status": "CANCELLED",
+          "cancellation_reason": "MAINTENANCE",
+          "start_datetime": "2026-08-30T12:00:00+01:00",
+          "end_datetime": "2026-09-09T12:00:00+01:00",
+          "cancelled_at": "2026-09-02T12:00:00+01:00",
+          "num_days": 10,
+          "daily_price": "100.00",
+          "total_price": "1000.00"
+        }
+      ],
+      "queries": [
+        {
+          "from": "2026-08-01",
+          "to": "2026-09-01",
+          "expected_revenue": 200.0,
+          "expected_days": 2
+        },
+        {
+          "from": "2026-09-01",
+          "to": "2026-10-01",
+          "expected_revenue": 200.0,
+          "expected_days": 2
+        },
+        {
+          "from": "2026-01-01",
+          "to": "2027-01-01",
+          "expected_revenue": 400.0,
+          "expected_days": 4
+        }
+      ]
+    },
+    {
+      "name": "manual_cancellation_without_maintenance_reason_contributes_zero",
+      "now": "2026-09-15T12:00:00+01:00",
+      "reservations": [
+        {
+          "id": "RM3",
+          "status": "CANCELLED",
+          "start_datetime": "2026-08-03T09:00:00+01:00",
+          "end_datetime": "2026-08-08T09:00:00+01:00",
+          "num_days": 5,
+          "daily_price": "200.00",
+          "total_price": "1000.00"
+        }
+      ],
+      "queries": [
+        {
+          "from": "2026-08-01",
+          "to": "2026-09-01",
+          "expected_revenue": 0.0,
+          "expected_days": 0
+        },
+        {
+          "from": "2026-01-01",
+          "to": "2027-01-01",
+          "expected_revenue": 0.0,
+          "expected_days": 0
+        }
+      ]
     }
   ],
   "period_bounds_cases": [
