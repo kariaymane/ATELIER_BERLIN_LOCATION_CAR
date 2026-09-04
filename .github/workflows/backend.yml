@@ -66,6 +66,7 @@ jobs:
           JWT_REFRESH_SECRET: testrefreshsecret
           TEST_DATABASE_URL: postgresql+asyncpg://rental_ci:rental_ci@localhost:5432/car_rental_ci
           TEST_DATABASE_URL_SYNC: postgresql+psycopg2://rental_ci:rental_ci@localhost:5432/car_rental_ci
+          DATABASE_URL_SYNC: postgresql+psycopg2://rental_ci:rental_ci@localhost:5432/car_rental_ci
         run: |
           cd backend
           alembic upgrade head
