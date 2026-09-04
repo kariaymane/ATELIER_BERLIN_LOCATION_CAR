@@ -67,7 +67,7 @@ class MobileSparseCacheForensicTest {
     fun tearDown() = db.close()
 
     private fun iso(ms: Long): String =
-        SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.US).apply {
+        SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssXXX", Locale.US).apply {
             timeZone = TimeZone.getTimeZone("UTC")
         }.format(Date(ms))
 

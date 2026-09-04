@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.vehicle import Vehicle
 from app.models.maintenance import Maintenance
 from app.services.fleet_status import compute_effective_statuses
+from shared.money_time import BUSINESS_TZ
 
 
 async def _mk_vehicle(db, status="AVAILABLE"):
@@ -96,8 +97,20 @@ async def test_active_maintenance_marks_vehicle_maintenance(client, db_session, 
 # ── Test D — half-open [start, end): exactly at end -> not MAINTENANCE ────────
 @pytest.mark.asyncio
 async def test_maintenance_end_frees_vehicle_half_open(db_session: AsyncSession):
+    """The stored window is written in BUSINESS-LOCAL wall time on purpose.
+
+    SQLite has no zone type: SQLAlchemy writes the wall-clock digits and drops
+    the offset, so a value written as UTC comes back as naive UTC digits while
+    PostgreSQL (TIMESTAMPTZ) returns it aware. Writing the window as aware
+    Africa/Casablanca makes the flattened digits business-local, which is
+    exactly what the ONE naive policy (`shared.money_time.to_utc`) reads them
+    back as — so this test now denotes the SAME instants under SQLite and under
+    the CI's PostgreSQL run. It previously passed only because the derivation
+    also guessed `naive == UTC`, matching SQLite's flattening by luck.
+    """
+    end = datetime(2026, 8, 30, 13, 0, tzinfo=BUSINESS_TZ)   # == 12:00Z
+    end_instant = end.astimezone(timezone.utc)
     v_id = await _mk_vehicle(db_session)
-    end = datetime(2026, 8, 30, 12, 0, tzinfo=timezone.utc)
     db_session.add(Maintenance(
         id=uuid4(), vehicle_id=v_id, status="ACTIVE", type="Entretien",
         start_datetime=end - timedelta(hours=4),
@@ -105,11 +118,11 @@ async def test_maintenance_end_frees_vehicle_half_open(db_session: AsyncSession)
     ))
     await db_session.commit()
 
-    at_end = await compute_effective_statuses(db_session, [v_id], now=end)
+    at_end = await compute_effective_statuses(db_session, [v_id], now=end_instant)
     assert at_end[str(v_id)] != "MAINTENANCE"
 
     just_before = await compute_effective_statuses(
-        db_session, [v_id], now=end - timedelta(minutes=1))
+        db_session, [v_id], now=end_instant - timedelta(minutes=1))
     assert just_before[str(v_id)] == "MAINTENANCE"
 
 

@@ -21,7 +21,7 @@ Rules
 """
 from __future__ import annotations
 
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 BUSINESS_TIMEZONE_NAME = "Africa/Casablanca"
@@ -55,6 +55,27 @@ def to_business(dt: datetime) -> datetime:
     if dt.tzinfo is None:
         return dt.replace(tzinfo=BUSINESS_TZ)
     return dt.astimezone(BUSINESS_TZ)
+
+
+def to_utc(dt: datetime | None) -> datetime | None:
+    """Coerce any datetime to aware UTC under THE naive policy.
+
+    A naive datetime is business-local wall time (exactly as `to_business`),
+    so `to_utc` and `to_business` can never disagree about which instant a
+    stored value denotes — they only differ in the zone they present it in.
+
+    This is the ONE helper every runtime-side normalisation must call. It
+    exists because the same three-line coercion had been re-typed in six
+    places and two of them chose `naive == UTC`, which silently shifted every
+    offset-less row by the Casablanca offset and could put Backend, Desktop
+    and Mobile in different fleet buckets for the SAME row at the SAME
+    instant.
+    """
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=BUSINESS_TZ)
+    return dt.astimezone(timezone.utc)
 
 
 def business_date(dt: datetime) -> date:

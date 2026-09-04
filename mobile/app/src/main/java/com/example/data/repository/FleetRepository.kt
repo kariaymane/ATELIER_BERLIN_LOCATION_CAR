@@ -184,24 +184,57 @@ class FleetRepository(
             RevenueEngine.namedPeriodBounds(name, now).first
     }
 
-    // Authoritative Live Server Data Authority WITH time-liveness (P1-1 / P2-A/B/C):
-    //  * Fleet counts come from the local time-derived derivation (the canonical
-    //    FleetStatus port, boundary-live) so the Dashboard never contradicts the
-    //    Vehicles list — but only when the vehicle pool agrees, to avoid a torn
-    //    mid-sync state.
-    //  * Each period's revenue / bookings come from the server UNLESS the local
-    //    clock has crossed that period's boundary since the server response, in
-    //    which case the local recompute wins for that period only. No fragile
-    //    "local says 0" guessing.
+    /**
+     * EXPLICIT AUTHORITY MATRIX — decided statically per metric, never per response.
+     *
+     * FLEET COUNTS (ready / rented / reserved / maintenance)
+     *   Authority: ALWAYS the local time-derived derivation (`FleetStatus`, the
+     *   canonical port), online and offline alike, for as long as a local vehicle
+     *   pool exists. This is the SAME derivation `deriveEffectiveVehicles` feeds
+     *   to `VehiclesScreen`, so the two screens are consistent BY CONSTRUCTION
+     *   rather than by coincidence, and it stays boundary-live via `boundaryTicks`.
+     *   It mirrors the desktop, where `DomainStore` unconditionally reconciles the
+     *   server overview's fleet keys onto the local canonical counts.
+     *
+     *   This used to be conditional: `fleetFromLocal = totalLocal == totalApi`,
+     *   i.e. on any disagreement between the Room pool and the API pool the
+     *   Dashboard SILENTLY switched to server counts while `VehiclesScreen` kept
+     *   deriving locally — the same metric published from two authorities at once,
+     *   with no diagnostic. A pool disagreement is a SYNC problem to surface, not
+     *   a metric to swap; it is logged below and left to `refreshAll()`, which
+     *   forces a full bootstrap when the cache is not provably complete.
+     *
+     * REVENUE / BOOKINGS (today / week / month / year)
+     *   Authority: the SERVER, which owns historical rows this device may never
+     *   have cached — EXCEPT when the local clock has crossed that period's
+     *   boundary since the server computed its answer, in which case the server's
+     *   figure is stale for that period and the local recompute (same pro-rata
+     *   engine) wins for that period only.
+     *
+     * PRE-BOOTSTRAP (`local == null`, i.e. Room holds no vehicles yet)
+     *   There is no local truth to be authoritative. The server object is passed
+     *   through whole; `VehiclesScreen` is in its own empty/loading state, so no
+     *   two populated screens can disagree.
+     */
     val performanceMetricsFlow: Flow<PerformanceMetrics?> =
         combine(localMetricsFlow, _liveMetrics, _liveMetricsAt) { local, api, apiAt ->
             if (api == null) return@combine local
             if (local == null) return@combine api
             val now = nowMillis()
 
-            val totalLocal = local.readyVehicles + local.rentedVehicles + local.reservedVehicles + local.maintenanceVehicles
-            val totalApi = api.readyVehicles + api.rentedVehicles + api.reservedVehicles + api.maintenanceVehicles
-            val fleetFromLocal = totalLocal == totalApi && totalLocal > 0
+            val totalLocal = local.readyVehicles + local.rentedVehicles +
+                local.reservedVehicles + local.maintenanceVehicles
+            val totalApi = api.readyVehicles + api.rentedVehicles +
+                api.reservedVehicles + api.maintenanceVehicles
+            if (totalLocal != totalApi) {
+                // Surfaced, not silently normalised: the fleet figure below stays
+                // local-authoritative either way.
+                Log.w(
+                    "FleetRepository",
+                    "Fleet pool disagreement: local=$totalLocal api=$totalApi — " +
+                        "publishing LOCAL canonical counts; cache resync required",
+                )
+            }
 
             fun pick(name: String, apiVal: Double, localVal: Double) =
                 if (boundaryCrossed(name, apiAt, now)) localVal else apiVal
@@ -209,10 +242,10 @@ class FleetRepository(
                 if (boundaryCrossed(name, apiAt, now)) localVal else apiVal
 
             api.copy(
-                readyVehicles = if (fleetFromLocal) local.readyVehicles else api.readyVehicles,
-                rentedVehicles = if (fleetFromLocal) local.rentedVehicles else api.rentedVehicles,
-                reservedVehicles = if (fleetFromLocal) local.reservedVehicles else api.reservedVehicles,
-                maintenanceVehicles = if (fleetFromLocal) local.maintenanceVehicles else api.maintenanceVehicles,
+                readyVehicles = local.readyVehicles,
+                rentedVehicles = local.rentedVehicles,
+                reservedVehicles = local.reservedVehicles,
+                maintenanceVehicles = local.maintenanceVehicles,
                 todayRevenue = pick("today", api.todayRevenue, local.todayRevenue),
                 weekRevenue = pick("week", api.weekRevenue, local.weekRevenue),
                 monthRevenue = pick("month", api.monthRevenue, local.monthRevenue),
@@ -300,16 +333,23 @@ class FleetRepository(
         )
     }
 
+    /**
+     * Display a stored instant as business-local wall time.
+     *
+     * Uses the ONE canonical parser (`FleetStatus.parseUtcMillis`, business-local
+     * naive policy) and renders in `Africa/Casablanca` — the same pair the desktop
+     * uses in `datetime_utils.format_datetime_business`. It previously ran its own
+     * parser that read naive values as UTC and rendered in the *device* timezone,
+     * so the same reservation could read an hour off from Desktop, or shift when
+     * the phone travelled.
+     */
     private fun formatIsoDate(isoString: String?): String {
         if (isoString.isNullOrBlank()) return ""
+        val millis = FleetStatus.parseUtcMillis(isoString) ?: return isoString.take(10)
         return try {
-            val parser = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", java.util.Locale.getDefault())
-            parser.timeZone = java.util.TimeZone.getTimeZone("UTC")
             val formatter = java.text.SimpleDateFormat("dd MMM yyyy, HH:mm", java.util.Locale.getDefault())
-            formatter.timeZone = java.util.TimeZone.getDefault()
-            val cleanIso = isoString.substringBefore(".").replace("Z", "")
-            val date = parser.parse(cleanIso)
-            date?.let { formatter.format(it) } ?: isoString.take(10)
+            formatter.timeZone = FleetStatus.CASABLANCA
+            formatter.format(java.util.Date(millis))
         } catch (e: Exception) {
             isoString.take(10)
         }
