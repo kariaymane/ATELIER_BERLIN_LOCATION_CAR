@@ -21,10 +21,10 @@ from app.models import User, Vehicle, Reservation, AuditLog, RefreshToken, Idemp
 config = context.config
 
 # Override sqlalchemy.url from environment
-database_url = os.environ.get("DATABASE_URL_SYNC", "")
+database_url = os.environ.get("DATABASE_URL_SYNC") or os.environ.get("TEST_DATABASE_URL_SYNC") or ""
 if not database_url:
     # Fallback: convert async URL to sync
-    async_url = os.environ.get("DATABASE_URL", "")
+    async_url = os.environ.get("DATABASE_URL") or os.environ.get("TEST_DATABASE_URL") or ""
     database_url = async_url.replace("postgresql+asyncpg://", "postgresql://")
     if database_url.startswith("postgres://"):
         database_url = database_url.replace("postgres://", "postgresql://", 1)
