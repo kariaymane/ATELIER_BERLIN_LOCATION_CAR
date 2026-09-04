@@ -81,13 +81,14 @@ class OperationalStatCard(QFrame):
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setMinimumHeight(105)
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(20, 16, 20, 16)
+        layout.setContentsMargins(16, 14, 16, 14)
         layout.setSpacing(8)
 
         # Title
         self._title_lbl = QLabel(title)
-        self._title_lbl.setFont(QFont("Hanken Grotesk", 11, QFont.Weight.Medium))
+        self._title_lbl.setFont(QFont("Hanken Grotesk", 10, QFont.Weight.Medium))
         self._title_lbl.setStyleSheet("color: #637060;")
+        self._title_lbl.setWordWrap(True)
         layout.addWidget(self._title_lbl)
 
         # Big number
@@ -122,13 +123,14 @@ class ExecutiveFleetCard(QFrame):
         self.setMinimumHeight(95)
         self._has_progress = has_progress
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(18, 14, 18, 14)
+        layout.setContentsMargins(14, 12, 14, 12)
         layout.setSpacing(6)
 
         # Title
         self._title_lbl = QLabel(title)
-        self._title_lbl.setFont(QFont("Hanken Grotesk", 11, QFont.Weight.Medium))
+        self._title_lbl.setFont(QFont("Hanken Grotesk", 10, QFont.Weight.Medium))
         self._title_lbl.setStyleSheet("color: #637060;")
+        self._title_lbl.setWordWrap(True)
         layout.addWidget(self._title_lbl)
 
         # Big number row
@@ -224,8 +226,9 @@ class DashboardWidget(QWidget):
         self._last_refresh_lbl.setFont(QFont("Hanken Grotesk", 10))
         self._last_refresh_lbl.setStyleSheet("color: #6B7264;")
         self._last_refresh_lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        self._last_refresh_lbl.setSizePolicy(QSizePolicy.Policy.MinimumExpanding, QSizePolicy.Policy.Preferred)
-        header_layout.addWidget(self._last_refresh_lbl, alignment=Qt.AlignmentFlag.AlignVCenter)
+        self._last_refresh_lbl.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self._last_refresh_lbl.setMinimumWidth(320)
+        header_layout.addWidget(self._last_refresh_lbl)
         layout.addLayout(header_layout)
 
         # ─────────────────────────────────────────────────────────────
@@ -535,6 +538,7 @@ class DashboardWidget(QWidget):
         else:
             self._last_refresh_lbl.setText(f"{base_text} (Hors ligne / Cache)")
             self._last_refresh_lbl.setStyleSheet("color: #909C8E;")
+        self._last_refresh_lbl.updateGeometry()
         self._last_refresh_lbl.adjustSize()
 
         maint = self._overview_data.get(

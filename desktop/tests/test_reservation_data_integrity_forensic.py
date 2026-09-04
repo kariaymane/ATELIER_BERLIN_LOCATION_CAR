@@ -160,9 +160,15 @@ def test_action_buttons_and_details_dialog():
     now = datetime.now(timezone.utc)
     r_res = LocalReservation(
         id="r-reserved", vehicle_id="v-btn", customer_name="Client Res",
-        start_datetime=(now + timedelta(days=1)).isoformat(),
-        end_datetime=(now + timedelta(days=3)).isoformat(),
+        start_datetime=(now + timedelta(days=5)).isoformat(),
+        end_datetime=(now + timedelta(days=7)).isoformat(),
         status="RESERVED", total_price=300.0, num_days=2, daily_price=150.0
+    )
+    r_active = LocalReservation(
+        id="r-active", vehicle_id="v-btn", customer_name="Client Active",
+        start_datetime=(now - timedelta(days=1)).isoformat(),
+        end_datetime=(now + timedelta(days=2)).isoformat(),
+        status="ACTIVE", total_price=450.0, num_days=3, daily_price=150.0
     )
     r_comp = LocalReservation(
         id="r-comp", vehicle_id="v-btn", customer_name="Client Comp",
@@ -170,21 +176,25 @@ def test_action_buttons_and_details_dialog():
         end_datetime=(now - timedelta(days=2)).isoformat(),
         status="COMPLETED", total_price=300.0, num_days=2, daily_price=150.0
     )
-    session.add_all([r_res, r_comp])
+    session.add_all([r_res, r_active, r_comp])
     session.commit()
     session.close()
 
     widget = ReservationWidget("dev-1", "user-1", user_role="ADMIN")
     widget.refresh_data()
 
-    # In Current table, action widget should have buttons: Activer, Terminer, Annuler
-    curr_act_widget = widget._table.cellWidget(0, 5)
-    assert curr_act_widget is not None
-    curr_buttons = curr_act_widget.findChildren(QPushButton)
-    btn_texts = [b.text() for b in curr_buttons]
-    assert any("Activer" in t or "تفعيل" in t for t in btn_texts)
-    assert any("Terminer" in t or "إتمام" in t for t in btn_texts)
-    assert any("Annuler" in t or "إلغاء" in t for t in btn_texts)
+    # In Current table:
+    # Row for RESERVED has Activer and Annuler (cannot Terminer before start)
+    res_buttons = [b.text() for b in widget._table.cellWidget(0, 5).findChildren(QPushButton)]
+    assert any("Activer" in t or "تفعيل" in t for t in res_buttons)
+    assert any("Annuler" in t or "إلغاء" in t for t in res_buttons)
+    assert not any("Terminer" in t or "إتمام" in t for t in res_buttons)
+
+    # Row for ACTIVE has Terminer and Annuler
+    act_buttons = [b.text() for b in widget._table.cellWidget(1, 5).findChildren(QPushButton)]
+    assert any("Terminer" in t or "إتمام" in t for t in act_buttons)
+    assert any("Annuler" in t or "إلغاء" in t for t in act_buttons)
+    assert not any("Activer" in t or "تفعيل" in t for t in act_buttons)
 
     # In History table, action widget should have Détails
     hist_act_widget = widget._history_table.cellWidget(0, 5)

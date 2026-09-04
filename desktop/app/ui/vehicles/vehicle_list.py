@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QScrollArea, QFrame,
-    QPushButton, QLineEdit, QComboBox, QLabel, QDialog,
+    QPushButton, QLineEdit, QComboBox, QLabel, QDialog, QSizePolicy,
 )
 from PySide6.QtCore import Qt, Signal, QSize, QTimer, QEvent, QPoint
 from PySide6.QtGui import QFont, QColor, QPixmap, QPainter, QPainterPath, QCursor
@@ -848,6 +848,7 @@ class VehicleListWidget(QWidget):
         if self._user_role in ("ADMIN", "MANAGER"):
             self._add_btn = QPushButton(f"+ {t('vehicles.add')}")
             self._add_btn.setFont(QFont("Hanken Grotesk", 11, QFont.Weight.Bold))
+            self._add_btn.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
             self._add_btn.setMinimumWidth(240)
             self._add_btn.adjustSize()
             self._add_btn.clicked.connect(self.add_requested.emit)
@@ -977,6 +978,8 @@ class VehicleListWidget(QWidget):
         self._title_lbl.setText(t("vehicles.title"))
         if self._add_btn:
             self._add_btn.setText(f"+ {t('vehicles.add')}")
+            self._add_btn.setMinimumWidth(240)
+            self._add_btn.updateGeometry()
             self._add_btn.adjustSize()
         self._search.setPlaceholderText(t("vehicles.search"))
 
