@@ -1,12 +1,13 @@
-# RELEASE MANIFEST — v1.1.1
+# RELEASE MANIFEST — v1.1.2
 
 | Field | Value |
 |---|---|
-| Release Tag | `v1.1.1` |
+| Release Tag | `v1.1.2` |
 | Git Branch | `main` |
-| Git Commit SHA | `13db86bde72a2ace7b24f6e7d87000be400c4843` |
-| Build Date (UTC) | 2026-09-04 03:05:00 |
-| Tree State | Clean |
+| Git Commit SHA | `14acb89b05fb12e301d3e8a2c748ab7cd196d259` |
+| Build Timestamp (UTC) | 2026-09-04 16:32:47 UTC |
+| Build Timestamp (Local) | 2026-09-04 17:32:47 +01:00 |
+| Tree State | Clean (Built directly from HEAD 14acb89) |
 
 ---
 
@@ -14,14 +15,14 @@
 
 | Field | Value |
 |---|---|
-| File | `ATELIER_BERLIN_LOCATION_CAR_v1.1.1.apk` |
+| File | `ATELIER_BERLIN_LOCATION_CAR_v1.1.2.apk` |
 | Type | Standalone Android APK |
-| Size | 23,567,287 bytes |
-| SHA256 | `09fc5ac15f47e943cf536fc4c1e2a1cc1f6baff0216b8e42d25cf6122448bc9b` |
+| Size | 23,375,146 bytes |
+| SHA256 | `9b90c078be2e7ed21eec88fa076468b01555ff855254439290a4b6ef71c8700c` |
 | Signing Status | Signed with Android Debug Keystore (Scheme v2: Verified) |
 | Package Name | `com.example` |
 | Launchable Activity | `com.example.MainActivity` |
-| Features | Server data authority, dynamic time-liveness fleet updates, midnight rollover support, maintenance-over-active-rental protection, 33-vector revenue parity, offline Room sync |
+| Features | Server data authority, dynamic time-liveness fleet updates, midnight rollover support, maintenance-over-active-rental protection, 33-vector revenue parity, offline Room sync, strict reservation lifecycle separation |
 
 ---
 
@@ -29,26 +30,22 @@
 
 | Field | Value |
 |---|---|
-| ZIP Archive | `ATELIER_BERLIN_LOCATION_CAR_WINDOWS_v1.1.1.zip` |
-| ZIP Size | 61,975,775 bytes |
-| ZIP SHA256 | `312c84a83235e5d69059f8776c3bc62bac6b8b62c9fb5c6da0588f3d9b2cdb87` |
+| ZIP Archive | `ATELIER_BERLIN_LOCATION_CAR_WINDOWS_v1.1.2.zip` |
+| ZIP Size | 61,982,146 bytes |
+| ZIP SHA256 | `0bd6a09cea83d1c9f9de2592d137758726dcdf7adf3ca8ad3027e74137aca137` |
 | Executable | `ATELIER_BERLIN_LOCATION_CAR/ATELIER_BERLIN_LOCATION_CAR.exe` |
-| EXE Size | 9,163,280 bytes |
-| EXE SHA256 | `dd531e37138b0d13972eec0926dbc60d545bf4bc68d350df7109c02aac84cd38` |
+| EXE Size | 9,169,244 bytes |
+| EXE SHA256 | `84f9b477465858e429523f3fd044f825e0dbab82dee8f4e6c6daae6a2eef6515` |
 | Signing Status | Unsigned (Developer / Ad-hoc Windows distribution) |
-| Features | Full multi-domain SQLite bootstrap reconciliation, 15s cursor rewind safety margin, Africa/Casablanca timezone conversion, temporal boundary clock evolution, anti-downgrade revenue guards |
+| Features | Full multi-domain SQLite bootstrap reconciliation, dual subtab reservations (`En cours & À venir` vs `Historique`), 300px action column (no clipping), canonical `Africa/Casablanca` date formatting, 100% dashboard KPI parity with fleet status, production DB deletion safety guard |
 
 ---
 
 ## 🏛️ Verification Gates Passed
 
-- [x] Full Desktop Test Suite: 309 passed, 0 failed, exit code 0
-- [x] Full Backend SQLite Suite: 229 passed, 0 failed, exit code 0
-- [x] Full Backend PostgreSQL 16 Suite (`alembic upgrade head`): 229 passed, 0 failed, exit code 0
-- [x] Full Mobile Test Suite (`./gradlew testDebugUnitTest --rerun-tasks`): 33/33 passed, exit code 0
-- [x] Dedicated Regressions: 109/109 passed (sync cursor, maintenance active rental, revenue preservation, etc.)
-- [x] GitHub Actions CI: 100% Green on release commit `13db86b` (Backend CI, Android Release, Windows Desktop Release)
-- [x] Live Production Contract Tests: 100% Green on deployed PostgreSQL 16 backend container
-
-
+- [x] Full Desktop Test Suite: 315 passed, 0 failed, exit code 0 (14m 34s)
+- [x] Full Backend Test Suite: 229 passed, 0 failed, exit code 0 (11.89s)
+- [x] Full Mobile Test Suite (`./gradlew testDebugUnitTest --rerun-tasks`): 33/33 passed, exit code 0 (1m 49s)
+- [x] 3-Tier Data Reconciliation Tool (`scripts/reconcile_data.py`): 100% agreement across PostgreSQL, FastAPI, and Desktop SQLite (0 discrepancies)
+- [x] Clean Build Verification: Android APK and Windows EXE built from HEAD `14acb89` with fresh timestamps
 
