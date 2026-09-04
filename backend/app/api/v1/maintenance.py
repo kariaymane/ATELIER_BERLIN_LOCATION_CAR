@@ -18,14 +18,10 @@ from app.services.event_broadcaster import broadcaster
 router = APIRouter(prefix="/maintenance", tags=["Maintenance"])
 
 
-def _as_utc(dt: datetime | None) -> datetime | None:
-    """Coerce a (possibly naive) datetime to timezone-aware UTC. Naive values
-    are interpreted as UTC — the same policy the fleet-status derivation uses."""
-    if dt is None:
-        return None
-    if dt.tzinfo is None:
-        return dt.replace(tzinfo=timezone.utc)
-    return dt.astimezone(timezone.utc)
+# THE naive policy: an offset-less datetime is business-local wall time, which
+# IS what the fleet-status derivation uses. The local copy this replaced claimed
+# that in its docstring while implementing `naive == UTC`, i.e. the opposite.
+from shared.money_time import to_utc as _as_utc
 
 
 def _extract_user_id(user) -> UUID | None:
@@ -226,7 +222,9 @@ async def create_maintenance(
     # effective-status observer automatically; nothing needs the raw flag.
     _now = datetime.now(timezone.utc)
     _m_start = _as_utc(new_maint.start_datetime)
-    _m_end = _as_utc(new_maint.expected_end_datetime or new_maint.actual_end_datetime)
+    # COALESCE(actual_end, expected_end) — actual_end wins (canonical order:
+    # shared/fleet_status_reference._maintenance_end).
+    _m_end = _as_utc(new_maint.actual_end_datetime or new_maint.expected_end_datetime)
     _active_now = (
         (new_maint.status or "").upper() not in ("CANCELLED", "COMPLETED")
         and _m_start is not None and _m_start <= _now
@@ -612,7 +610,7 @@ async def update_maintenance(
             veh = v_row.scalar_one_or_none()
             # Raw MAINTENANCE hold only when the window is open right now; a
             # future ticket relies on the canonical interval derivation.
-            _mend = _as_utc(m.expected_end_datetime or m.actual_end_datetime)
+            _mend = _as_utc(m.actual_end_datetime or m.expected_end_datetime)
             _mstart = _as_utc(m.start_datetime)
             _active = (_mstart is not None and _mstart <= datetime.now(timezone.utc)
                        and (_mend is None or _mend > datetime.now(timezone.utc)))

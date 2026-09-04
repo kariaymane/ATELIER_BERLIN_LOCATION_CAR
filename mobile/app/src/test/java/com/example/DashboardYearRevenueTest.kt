@@ -24,7 +24,7 @@ class DashboardYearRevenueTest {
     private val CASA = TimeZone.getTimeZone("Africa/Casablanca")
 
     private fun iso(ms: Long): String =
-        SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.US)
+        SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssXXX", Locale.US)
             .apply { timeZone = TimeZone.getTimeZone("UTC") }
             .format(java.util.Date(ms))
 

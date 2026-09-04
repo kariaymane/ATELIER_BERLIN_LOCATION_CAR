@@ -33,13 +33,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-def _as_utc(dt):
-    """Coerce a (possibly naive) datetime to aware UTC. Naive == UTC."""
-    if dt is None:
-        return None
-    if dt.tzinfo is None:
-        return dt.replace(tzinfo=timezone.utc)
-    return dt.astimezone(timezone.utc)
+from shared.money_time import to_utc as _as_utc  # THE naive policy: naive == business-local
 
 
 def _maintenance_active_now(m) -> bool:
@@ -52,8 +46,13 @@ def _maintenance_active_now(m) -> bool:
     start = _as_utc(getattr(m, "start_datetime", None))
     if start is None:
         return False
-    end = _as_utc(getattr(m, "expected_end_datetime", None)
-                  or getattr(m, "actual_end_datetime", None))
+    # COALESCE(actual_end, expected_end) — actual_end WINS. A ticket closed
+    # early must free its vehicle immediately even if expected_end is still in
+    # the future; the operands were previously the other way round here, which
+    # held a closed ticket's vehicle in MAINTENANCE until its original estimate.
+    # Canonical order: shared/fleet_status_reference._maintenance_end.
+    end = _as_utc(getattr(m, "actual_end_datetime", None)
+                  or getattr(m, "expected_end_datetime", None))
     now = datetime.now(timezone.utc)
     return start <= now and (end is None or end > now)
 

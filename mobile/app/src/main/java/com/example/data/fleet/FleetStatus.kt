@@ -28,8 +28,17 @@ import java.util.TimeZone
  *
  * All time is epoch-milliseconds UTC (the codebase's existing convention —
  * `System.currentTimeMillis()` / `SimpleDateFormat` with an explicit TZ — so
- * no `java.time` / desugaring dependency is added). Naive ISO strings are
- * interpreted as UTC, matching `parse_datetime_utc`.
+ * no `java.time` / desugaring dependency is added).
+ *
+ * NAIVE-DATETIME POLICY (the ONE policy, product-wide): an ISO string carrying
+ * no offset is BUSINESS-LOCAL wall time (Africa/Casablanca), never UTC. This is
+ * the contract written in `shared/money_time.to_business` and mirrored by
+ * `shared/fleet_status_reference._parse`, `shared/revenue_reference`,
+ * `desktop/app/utils/datetime_utils.parse_datetime_utc` and
+ * `backend/app/services/fleet_status`. Reading a naive value as UTC shifted
+ * every such row by the Casablanca offset and could put Mobile in a different
+ * bucket than Desktop/Backend for the SAME row at the SAME instant; the
+ * `naive_*` vectors in `shared/fleet_status_cases.json` pin this down.
  */
 object FleetStatus {
 
@@ -66,12 +75,15 @@ object FleetStatus {
     )
 
     // ── canonical parser (mirror of parse_datetime_utc) ────────────────────
+    // A format WITHOUT "XXX" has no offset in the text, so the parser's own
+    // timeZone decides the instant: that is the naive case, and it resolves to
+    // BUSINESS_TZ (see the class docstring), not UTC.
     private val ISO_FORMATS = listOf(
-        "yyyy-MM-dd'T'HH:mm:ssXXX",   // explicit offset
-        "yyyy-MM-dd'T'HH:mm:ss",      // naive -> UTC
-        "yyyy-MM-dd HH:mm:ss",        // SQLite
-        "yyyy-MM-dd'T'HH:mm",
-        "yyyy-MM-dd",
+        "yyyy-MM-dd'T'HH:mm:ssXXX",   // explicit offset -> as written
+        "yyyy-MM-dd'T'HH:mm:ss",      // naive -> business-local
+        "yyyy-MM-dd HH:mm:ss",        // SQLite round-trip -> business-local
+        "yyyy-MM-dd'T'HH:mm",         // naive -> business-local
+        "yyyy-MM-dd",                 // naive date -> business-local midnight
     )
 
     fun parseUtcMillis(value: String?): Long? {
@@ -90,7 +102,8 @@ object FleetStatus {
             try {
                 val sdf = SimpleDateFormat(fmt, Locale.US)
                 sdf.isLenient = false
-                if (!fmt.contains("XXX")) sdf.timeZone = TimeZone.getTimeZone("UTC")
+                // No offset in the pattern => naive => business-local wall time.
+                if (!fmt.contains("XXX")) sdf.timeZone = CASABLANCA
                 return sdf.parse(s)?.time
             } catch (_: Exception) {
             }

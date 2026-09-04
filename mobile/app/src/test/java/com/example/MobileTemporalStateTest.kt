@@ -168,7 +168,7 @@ class MobileTemporalStateTest {
             return c.timeInMillis
         }
         fun iso(ms: Long): String {
-            val sdf = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", java.util.Locale.US)
+            val sdf = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssXXX", java.util.Locale.US)
             sdf.timeZone = java.util.TimeZone.getTimeZone("UTC"); return sdf.format(java.util.Date(ms))
         }
         // Wed 26 Aug -> Thu 27 Aug: only the day rolls (same week, same month).
@@ -206,7 +206,7 @@ class MobileTemporalStateTest {
         val now = { base + sched.currentTime }
 
         fun iso(ms: Long): String {
-            val sdf = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", java.util.Locale.US)
+            val sdf = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssXXX", java.util.Locale.US)
             sdf.timeZone = java.util.TimeZone.getTimeZone("UTC"); return sdf.format(java.util.Date(ms))
         }
         val resStart = base - 12L * 3600_000L
@@ -242,12 +242,12 @@ class MobileTemporalStateTest {
         val start = System.currentTimeMillis()
         val endMs = start + 2_000
         val endIso = FleetStatus.let {
-            val sdf = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", java.util.Locale.US)
+            val sdf = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssXXX", java.util.Locale.US)
             sdf.timeZone = java.util.TimeZone.getTimeZone("UTC")
             sdf.format(java.util.Date(endMs))
         }
         val startIso = run {
-            val sdf = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", java.util.Locale.US)
+            val sdf = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssXXX", java.util.Locale.US)
             sdf.timeZone = java.util.TimeZone.getTimeZone("UTC")
             sdf.format(java.util.Date(start - 3_600_000))
         }

@@ -54,12 +54,23 @@ class MobileLiveAuthorityTest {
     }
 
     private fun iso(ms: Long): String =
-        SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.US).apply {
+        SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssXXX", Locale.US).apply {
             timeZone = TimeZone.getTimeZone("UTC")
         }.format(Date(ms))
 
+    /**
+     * AUTHORITY CONTRACT (R4). Revenue and booking counts are SERVER-authoritative
+     * and must survive a later Room write. Fleet counts are LOCAL-authoritative,
+     * unconditionally — they must equal what `VehiclesScreen` derives from the very
+     * same rows, even when the server reports a completely different fleet size.
+     *
+     * This test previously asserted the opposite for the fleet half (server 88/12
+     * winning over a 1-vehicle Room pool), which was defect W3: on any pool
+     * disagreement the Dashboard silently switched publisher while the Vehicles
+     * list kept deriving locally, so one device showed two answers for one metric.
+     */
     @Test
-    fun `performanceMetricsFlow prioritizes live server API over local Room cache and resists Room overwrite`() = runBlocking {
+    fun `revenue stays server-authoritative while fleet counts stay local-authoritative`() = runBlocking {
         val now = System.currentTimeMillis()
 
         // 1. Seed Room with initial snapshot (1 vehicle)
@@ -112,13 +123,14 @@ class MobileLiveAuthorityTest {
         val refreshRes = repo.refreshDashboard()
         assertTrue(refreshRes.isSuccess)
 
-        // 4. Assert performanceMetricsFlow now reflects authoritative live server data
+        // 4. Revenue/bookings come from the server; fleet counts stay LOCAL even
+        //    though the server claims a 106-vehicle fleet and Room holds 1.
         val liveMetrics = repo.performanceMetricsFlow.first()
         assertNotNull(liveMetrics)
         assertEquals(42, liveMetrics!!.todayBookings)
         assertEquals(9999.0, liveMetrics.todayRevenue, 0.001)
-        assertEquals(88, liveMetrics.readyVehicles)
-        assertEquals(12, liveMetrics.rentedVehicles)
+        assertEquals("fleet must stay local-authoritative", 1, liveMetrics.readyVehicles)
+        assertEquals(0, liveMetrics.rentedVehicles)
 
         // 5. Simulate subsequent Room emission (e.g. background sync writes another row to Room)
         val secondSnapshot = SyncBootstrapResponseDto(
@@ -135,12 +147,14 @@ class MobileLiveAuthorityTest {
         )
         repo.applyAuthoritativeSnapshot(secondSnapshot)
 
-        // 6. Assert live server data is STILL authoritative and NOT overwritten by Room!
+        // 6. Server revenue/bookings survive the Room write (that is the server's
+        //    domain); the fleet count TRACKS Room, because that is what the
+        //    Vehicles screen now shows — 2 vehicles, both idle.
         val metricsAfterRoomCommit = repo.performanceMetricsFlow.first()
         assertNotNull(metricsAfterRoomCommit)
         assertEquals(42, metricsAfterRoomCommit!!.todayBookings)
         assertEquals(9999.0, metricsAfterRoomCommit.todayRevenue, 0.001)
-        assertEquals(88, metricsAfterRoomCommit.readyVehicles)
-        assertEquals(12, metricsAfterRoomCommit.rentedVehicles)
+        assertEquals("fleet follows the local pool", 2, metricsAfterRoomCommit.readyVehicles)
+        assertEquals(0, metricsAfterRoomCommit.rentedVehicles)
     }
 }
