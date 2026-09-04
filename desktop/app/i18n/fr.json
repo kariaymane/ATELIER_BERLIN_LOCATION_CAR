@@ -149,8 +149,8 @@
   "reservations": {
     "title": "Liste des réservations",
     "add": "+ Nouvelle réservation",
-    "tab_list": "Réservations en cours & Historique",
-    "tab_current": "En cours & À venir",
+    "tab_list": "Réservations en cours et historique",
+    "tab_current": "En cours et à venir",
     "tab_history": "Historique",
     "tab_new": "Choisir un véhicule disponible",
     "col_client": "Client",

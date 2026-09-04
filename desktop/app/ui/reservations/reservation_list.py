@@ -465,8 +465,8 @@ class ReservationWidget(QWidget):
         self._tabs.setTabText(0, t("reservations.tab_list").replace("&", "&&"))
         self._tabs.setTabText(1, t("reservations.tab_new"))
         if hasattr(self, '_list_subtabs'):
-            self._list_subtabs.setTabText(0, t("reservations.tab_current"))
-            self._list_subtabs.setTabText(1, t("reservations.tab_history"))
+            self._list_subtabs.setTabText(0, t("reservations.tab_current").replace("&", "&&"))
+            self._list_subtabs.setTabText(1, t("reservations.tab_history").replace("&", "&&"))
         self._empty_res_lbl.setText(t("reservations.no_current_data"))
         if hasattr(self, '_empty_history_lbl'):
             self._empty_history_lbl.setText(t("reservations.no_history_data"))
@@ -568,8 +568,8 @@ class ReservationWidget(QWidget):
         self._empty_history_lbl.hide()
         hist_layout.addWidget(self._empty_history_lbl)
 
-        self._list_subtabs.addTab(self._current_tab_widget, t("reservations.tab_current"))
-        self._list_subtabs.addTab(self._history_tab_widget, t("reservations.tab_history"))
+        self._list_subtabs.addTab(self._current_tab_widget, t("reservations.tab_current").replace("&", "&&"))
+        self._list_subtabs.addTab(self._history_tab_widget, t("reservations.tab_history").replace("&", "&&"))
         layout.addWidget(self._list_subtabs)
 
     def _setup_res_table(self, table: QTableWidget, is_current: bool = True):
@@ -584,20 +584,24 @@ class ReservationWidget(QWidget):
         ])
 
         header = table.horizontalHeader()
-        header.setMinimumSectionSize(120)
+        header.setMinimumSectionSize(80)
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
-        header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)
+        table.setColumnWidth(2, 190)
+        header.setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)
+        table.setColumnWidth(3, 95)
         header.setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)
-        table.setColumnWidth(4, 140)
+        table.setColumnWidth(4, 115)
         header.setSectionResizeMode(5, QHeaderView.ResizeMode.Fixed)
-        table.setColumnWidth(5, 300 if is_current else 120)
+        table.setColumnWidth(5, 170 if is_current else 100)
+        header.setStretchLastSection(False)
         table.verticalHeader().setDefaultSectionSize(48)
 
         table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         table.setAlternatingRowColors(True)
+        table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
 
     def set_filter(self, text: str):
         text = text.lower()
@@ -821,18 +825,17 @@ class ReservationWidget(QWidget):
                     activate_btn.setStyleSheet("background-color: #E7F0FE; color: #1D4ED8; border: 1px solid #BFDBFE; border-radius: 4px; padding: 4px 8px;")
                     activate_btn.clicked.connect(lambda _, res_id=r.get("id"): self._activate_reservation(res_id))
                     act_layout.addWidget(activate_btn)
-
-                complete_btn = QPushButton(t("reservations.action_complete"))
-                complete_btn.setFont(QFont("Hanken Grotesk", 9, QFont.Weight.Bold))
-                complete_btn.setStyleSheet("background-color: #E8F3E6; color: #235821; border: 1px solid #C4DFC0; border-radius: 4px; padding: 4px 8px;")
-                complete_btn.clicked.connect(lambda _, res_id=r.get("id"): self._complete_reservation(res_id))
+                elif status == "ACTIVE":
+                    complete_btn = QPushButton(t("reservations.action_complete"))
+                    complete_btn.setFont(QFont("Hanken Grotesk", 9, QFont.Weight.Bold))
+                    complete_btn.setStyleSheet("background-color: #E8F3E6; color: #235821; border: 1px solid #C4DFC0; border-radius: 4px; padding: 4px 8px;")
+                    complete_btn.clicked.connect(lambda _, res_id=r.get("id"): self._complete_reservation(res_id))
+                    act_layout.addWidget(complete_btn)
 
                 cancel_btn = QPushButton(t("reservations.action_cancel"))
                 cancel_btn.setFont(QFont("Hanken Grotesk", 9, QFont.Weight.Bold))
                 cancel_btn.setStyleSheet("background-color: #FEE2E2; color: #991B1B; border: 1px solid #FCA5A5; border-radius: 4px; padding: 4px 8px;")
                 cancel_btn.clicked.connect(lambda _, res_id=r.get("id"): self._cancel_reservation(res_id))
-
-                act_layout.addWidget(complete_btn)
                 act_layout.addWidget(cancel_btn)
             else:
                 details_btn = QPushButton(t("reservations.action_details"))
@@ -842,6 +845,8 @@ class ReservationWidget(QWidget):
                 act_layout.addWidget(details_btn)
 
             table.setCellWidget(i, 5, act_widget)
+
+        table.horizontalScrollBar().setValue(0)
 
     def _show_reservation_details(self, r: dict, v: Optional[dict]):
         """Display clean details popup for a reservation."""
