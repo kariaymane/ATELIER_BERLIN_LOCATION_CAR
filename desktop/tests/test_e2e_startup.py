@@ -12,11 +12,15 @@ from pathlib import Path
 import pytest
 
 
-def test_startup_login_mainwindow_visible():
+def test_startup_login_mainwindow_visible(tmp_path):
     project_root = Path(__file__).resolve().parent.parent
+    test_data = tmp_path / "data"
+    test_data.mkdir(parents=True, exist_ok=True)
     env = dict(os.environ)
     env["PYTHONPATH"] = str(project_root)
     env["CAR_RENTAL_DB_RESET"] = "1"
+    env["CAR_RENTAL_DATA_DIR"] = str(test_data)
+    env["CAR_RENTAL_SQLITE_URL"] = f"sqlite:///{test_data / 'car_rental_local.db'}"
     env.setdefault("QT_QPA_PLATFORM", "offscreen")
     result = subprocess.run(
         [sys.executable, str(project_root / "tests" / "e2e_startup_check.py")],

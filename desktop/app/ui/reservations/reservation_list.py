@@ -4,6 +4,7 @@ Fully localized for French and Arabic with RTL layout support.
 """
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
+from typing import Optional
 import logging
 import uuid
 import json
@@ -392,7 +393,12 @@ class ReservationFormDialog(QDialog):
 
 
 # Canonical datetime/overlap helpers (single source of truth).
-from app.utils.datetime_utils import parse_datetime_utc, reservations_overlap, BLOCKING_RESERVATION_STATUSES
+from app.utils.datetime_utils import (
+    parse_datetime_utc,
+    format_datetime_range,
+    reservations_overlap,
+    BLOCKING_RESERVATION_STATUSES,
+)
 from app.models.maintenance import LocalMaintenance
 from app.state.domain_store import get_domain_store
 
@@ -458,16 +464,24 @@ class ReservationWidget(QWidget):
         self._add_res_btn.setText(t("reservations.add"))
         self._tabs.setTabText(0, t("reservations.tab_list").replace("&", "&&"))
         self._tabs.setTabText(1, t("reservations.tab_new"))
-        self._empty_res_lbl.setText(t("reservations.no_data"))
+        if hasattr(self, '_list_subtabs'):
+            self._list_subtabs.setTabText(0, t("reservations.tab_current"))
+            self._list_subtabs.setTabText(1, t("reservations.tab_history"))
+        self._empty_res_lbl.setText(t("reservations.no_current_data"))
+        if hasattr(self, '_empty_history_lbl'):
+            self._empty_history_lbl.setText(t("reservations.no_history_data"))
 
-        self._table.setHorizontalHeaderLabels([
+        headers = [
             t("reservations.col_client"),
             t("reservations.col_vehicle"),
             t("reservations.col_dates"),
             t("reservations.col_total"),
             t("reservations.col_status"),
             t("reservations.col_actions")
-        ])
+        ]
+        self._table.setHorizontalHeaderLabels(headers)
+        if hasattr(self, '_history_table'):
+            self._history_table.setHorizontalHeaderLabels(headers)
         self.refresh_data()
 
     def _toggle_new_res_view(self):
@@ -519,12 +533,48 @@ class ReservationWidget(QWidget):
 
     def _setup_list_tab(self):
         layout = QVBoxLayout(self._list_tab)
-        layout.setContentsMargins(12, 12, 12, 12)
-        layout.setSpacing(12)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+
+        self._list_subtabs = QTabWidget()
+
+        # 1. Current reservations (Active & Upcoming Reserved)
+        self._current_tab_widget = QWidget()
+        curr_layout = QVBoxLayout(self._current_tab_widget)
+        curr_layout.setContentsMargins(12, 12, 12, 12)
+        curr_layout.setSpacing(12)
 
         self._table = QTableWidget()
-        self._table.setColumnCount(6)
-        self._table.setHorizontalHeaderLabels([
+        self._setup_res_table(self._table, is_current=True)
+        curr_layout.addWidget(self._table)
+
+        self._empty_res_lbl = QLabel(t("reservations.no_current_data"))
+        self._empty_res_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._empty_res_lbl.hide()
+        curr_layout.addWidget(self._empty_res_lbl)
+
+        # 2. Historical reservations (Completed, Cancelled, Past)
+        self._history_tab_widget = QWidget()
+        hist_layout = QVBoxLayout(self._history_tab_widget)
+        hist_layout.setContentsMargins(12, 12, 12, 12)
+        hist_layout.setSpacing(12)
+
+        self._history_table = QTableWidget()
+        self._setup_res_table(self._history_table, is_current=False)
+        hist_layout.addWidget(self._history_table)
+
+        self._empty_history_lbl = QLabel(t("reservations.no_history_data"))
+        self._empty_history_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._empty_history_lbl.hide()
+        hist_layout.addWidget(self._empty_history_lbl)
+
+        self._list_subtabs.addTab(self._current_tab_widget, t("reservations.tab_current"))
+        self._list_subtabs.addTab(self._history_tab_widget, t("reservations.tab_history"))
+        layout.addWidget(self._list_subtabs)
+
+    def _setup_res_table(self, table: QTableWidget, is_current: bool = True):
+        table.setColumnCount(6)
+        table.setHorizontalHeaderLabels([
             t("reservations.col_client"),
             t("reservations.col_vehicle"),
             t("reservations.col_dates"),
@@ -533,38 +583,35 @@ class ReservationWidget(QWidget):
             t("reservations.col_actions")
         ])
 
-        header = self._table.horizontalHeader()
+        header = table.horizontalHeader()
         header.setMinimumSectionSize(120)
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)
-        self._table.setColumnWidth(4, 130)
+        table.setColumnWidth(4, 140)
         header.setSectionResizeMode(5, QHeaderView.ResizeMode.Fixed)
-        self._table.setColumnWidth(5, 290)
-        self._table.verticalHeader().setDefaultSectionSize(48)
+        table.setColumnWidth(5, 300 if is_current else 120)
+        table.verticalHeader().setDefaultSectionSize(48)
 
-        self._table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self._table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self._table.setAlternatingRowColors(True)
-
-        layout.addWidget(self._table)
-
-        self._empty_res_lbl = QLabel(t("reservations.no_data"))
-        self._empty_res_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._empty_res_lbl.hide()
-        layout.addWidget(self._empty_res_lbl)
+        table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        table.setAlternatingRowColors(True)
 
     def set_filter(self, text: str):
         text = text.lower()
-        for row in range(self._table.rowCount()):
-            match = False
-            for col in range(self._table.columnCount()):
-                item = self._table.item(row, col)
-                if item and text in item.text().lower():
-                    match = True
-            self._table.setRowHidden(row, not match)
+        tables = [self._table]
+        if hasattr(self, '_history_table'):
+            tables.append(self._history_table)
+        for tbl in tables:
+            for row in range(tbl.rowCount()):
+                match = False
+                for col in range(tbl.columnCount()):
+                    item = tbl.item(row, col)
+                    if item and text in item.text().lower():
+                        match = True
+                tbl.setRowHidden(row, not match)
     def _refresh_available_vehicles(self, snap=None):
         """Re-project the "available vehicles for the selected dates" grid.
 
@@ -670,16 +717,42 @@ class ReservationWidget(QWidget):
         self._refresh_available_vehicles(snap)
 
         vehicles_by_id = {str(v.get("id")): v for v in snap.vehicles}
-        reservations = sorted(
-            snap.reservations, key=lambda r: r.get("created_at") or "", reverse=True)
 
-        self._table.setRowCount(len(reservations))
-        if len(reservations) == 0:
+        # Canonical operational separation:
+        # 1. Current reservations (ACTIVE and upcoming RESERVED)
+        current_res = list(snap.current_reservations)
+        current_res.sort(
+            key=lambda r: (r.get("start_datetime") or "", r.get("created_at") or "", str(r.get("id"))),
+            reverse=True,
+        )
+
+        # 2. Historical reservations (COMPLETED, CANCELLED, and past ended)
+        history_res = list(snap.historical_reservations)
+        history_res.sort(
+            key=lambda r: (r.get("start_datetime") or "", r.get("created_at") or "", str(r.get("id"))),
+            reverse=True,
+        )
+
+        self._populate_table(self._table, current_res, vehicles_by_id, is_current=True)
+        if len(current_res) == 0:
             self._empty_res_lbl.show()
             self._table.hide()
         else:
             self._empty_res_lbl.hide()
             self._table.show()
+
+        if hasattr(self, "_history_table"):
+            self._populate_table(self._history_table, history_res, vehicles_by_id, is_current=False)
+            if len(history_res) == 0:
+                self._empty_history_lbl.show()
+                self._history_table.hide()
+            else:
+                self._empty_history_lbl.hide()
+                self._history_table.show()
+
+    def _populate_table(self, table: QTableWidget, reservations: list, vehicles_by_id: dict, is_current: bool):
+        table.setRowCount(len(reservations))
+        curr = "DH" if not is_rtl() else "د.م"
 
         for i, r in enumerate(reservations):
             v = vehicles_by_id.get(str(r.get("vehicle_id")))
@@ -691,24 +764,21 @@ class ReservationWidget(QWidget):
             client_text = f"{c_name}{c_phone}"
             client_item = QTableWidgetItem(client_text)
             client_item.setToolTip(client_text)
-            self._table.setItem(i, 0, client_item)
+            table.setItem(i, 0, client_item)
 
             # 1. Véhicule
             vehicle_item = QTableWidgetItem(v_name)
             vehicle_item.setToolTip(v_name)
-            self._table.setItem(i, 1, vehicle_item)
+            table.setItem(i, 1, vehicle_item)
 
-            # 2. Dates
-            start_dt_obj = self._parse_dt(r.get("start_datetime"))
-            end_dt_obj = self._parse_dt(r.get("end_datetime"))
-            start_local = start_dt_obj.astimezone().strftime("%Y-%m-%d") if start_dt_obj else ""
-            end_local = end_dt_obj.astimezone().strftime("%Y-%m-%d") if end_dt_obj else ""
-            dates_str = f"{start_local} - {end_local}" if (start_local or end_local) else "-"
-            self._table.setItem(i, 2, QTableWidgetItem(dates_str))
+            # 2. Dates (canonical DD/MM/YYYY → DD/MM/YYYY)
+            dates_str = format_datetime_range(r.get("start_datetime"), r.get("end_datetime"))
+            dates_item = QTableWidgetItem(dates_str)
+            dates_item.setToolTip(dates_str)
+            table.setItem(i, 2, dates_item)
 
             # 3. Prix Total
-            curr = "DH" if not is_rtl() else "د.م"
-            self._table.setItem(i, 3, QTableWidgetItem(f"{r.get('total_price') or 0:,.0f} {curr}"))
+            table.setItem(i, 3, QTableWidgetItem(f"{r.get('total_price') or 0:,.0f} {curr}"))
 
             # 4. Statut Badge
             status = r.get("status")
@@ -736,21 +806,15 @@ class ReservationWidget(QWidget):
                 badge_lbl.setProperty("class", "badge_info")
 
             bw_layout.addWidget(badge_lbl)
-            self._table.setCellWidget(i, 4, badge_widget)
+            table.setCellWidget(i, 4, badge_widget)
 
             # 5. Action buttons
-            if status in ("ACTIVE", "RESERVED") and self._user_role in ("ADMIN", "MANAGER"):
-                act_widget = QWidget()
-                act_layout = QHBoxLayout(act_widget)
-                act_layout.setContentsMargins(4, 4, 4, 4)
-                act_layout.setSpacing(6)
+            act_widget = QWidget()
+            act_layout = QHBoxLayout(act_widget)
+            act_layout.setContentsMargins(4, 4, 4, 4)
+            act_layout.setSpacing(6)
 
-                # "Activer" is an explicit RESERVED -> ACTIVE operational-status
-                # transition (e.g. staff confirming vehicle pickup at the
-                # counter). It does NOT gate the "en location" / revenue KPIs —
-                # those are time-derived (start <= now < end) and already count
-                # a RESERVED reservation covering now. Activer is bookkeeping,
-                # not a precondition for being "currently rented".
+            if is_current and status in ("ACTIVE", "RESERVED") and self._user_role in ("ADMIN", "MANAGER"):
                 if status == "RESERVED":
                     activate_btn = QPushButton(t("reservations.action_activate"))
                     activate_btn.setFont(QFont("Hanken Grotesk", 9, QFont.Weight.Bold))
@@ -770,9 +834,41 @@ class ReservationWidget(QWidget):
 
                 act_layout.addWidget(complete_btn)
                 act_layout.addWidget(cancel_btn)
-                self._table.setCellWidget(i, 5, act_widget)
             else:
-                self._table.setCellWidget(i, 5, QWidget())
+                details_btn = QPushButton(t("reservations.action_details"))
+                details_btn.setFont(QFont("Hanken Grotesk", 9, QFont.Weight.Bold))
+                details_btn.setStyleSheet("background-color: #F3F4F6; color: #374151; border: 1px solid #D1D5DB; border-radius: 4px; padding: 4px 8px;")
+                details_btn.clicked.connect(lambda _, res_row=r, v_row=v: self._show_reservation_details(res_row, v_row))
+                act_layout.addWidget(details_btn)
+
+            table.setCellWidget(i, 5, act_widget)
+
+    def _show_reservation_details(self, r: dict, v: Optional[dict]):
+        """Display clean details popup for a reservation."""
+        curr = "DH" if not is_rtl() else "د.م"
+        v_name = f"{v.get('brand', '')} {v.get('model', '')} ({v.get('registration', '')})".strip() if v else (r.get("vehicle_id") or "—")
+        dates_str = format_datetime_range(r.get("start_datetime"), r.get("end_datetime"), include_time=True)
+        c_name = r.get("customer_name") or "—"
+        c_phone = r.get("customer_phone") or "—"
+        total = f"{r.get('total_price') or 0:,.2f} {curr}"
+        status = t(f"status.{r.get('status')}")
+        reason = r.get("cancellation_reason") or ""
+        extra = f"<br><b>{t('reservations.cancelled_due_to_maintenance')}:</b> {reason}" if reason else ""
+
+        msg = (
+            f"<b>{t('reservations.col_client')}:</b> {c_name} ({c_phone})<br>"
+            f"<b>{t('reservations.col_vehicle')}:</b> {v_name}<br>"
+            f"<b>{t('reservations.col_dates')}:</b> {dates_str}<br>"
+            f"<b>{t('reservations.col_total')}:</b> {total}<br>"
+            f"<b>{t('reservations.col_status')}:</b> {status}{extra}<br>"
+            f"<b>ID:</b> <code>{r.get('id')}</code>"
+        )
+        dlg = QMessageBox(self)
+        dlg.setWindowTitle(t("reservations.action_details"))
+        dlg.setTextFormat(Qt.TextFormat.RichText)
+        dlg.setText(msg)
+        dlg.setIcon(QMessageBox.Icon.Information)
+        dlg.exec()
 
     def _create_available_card(self, vehicle: dict) -> QFrame:
         """``vehicle`` is a DomainStore snapshot row (dict), not an ORM object."""

@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from uuid import UUID
 from datetime import datetime, timezone
+from typing import Optional
 
 from app.database import get_db
 from app.dependencies import get_current_user, require_perm, get_language
@@ -124,16 +125,27 @@ async def list_rentals(
     page: int = Query(1, ge=1),
     page_size: int = Query(25, ge=1, le=100),
     status_filter: str = Query(None, alias="status"),
+    scope: Optional[str] = Query(None, description="Scope filter: 'current' or 'history'"),
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(require_perm(Permission.RESERVATIONS_READ)),
 ):
-    """List rentals with pagination and optional status filter."""
+    """List rentals with pagination, deterministic ordering, and optional status/scope filters."""
     service = RentalService(db)
     result = await service.list_rentals(
-        page=page, page_size=page_size, status=status_filter,
+        page=page, page_size=page_size, status=status_filter, scope=scope,
+    )
+    rentals = [_rental_response(r) for r in result["rentals"]]
+    logger.info(
+        "list_rentals: count=%d total=%d page=%d scope=%s status=%s records=%s",
+        len(rentals),
+        result["total"],
+        result["page"],
+        scope,
+        status_filter,
+        [(r.id, r.vehicle_id, r.status, str(r.start_datetime)) for r in rentals],
     )
     return RentalListResponse(
-        rentals=[_rental_response(r) for r in result["rentals"]],
+        rentals=rentals,
         total=result["total"],
         page=result["page"],
         page_size=result["page_size"],

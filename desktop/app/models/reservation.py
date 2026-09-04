@@ -1,6 +1,7 @@
 """
 SQLite local model for Reservation.
 """
+from datetime import datetime, timezone
 from sqlalchemy import Column, String, Integer, Float, Text
 from app.database import LocalBase
 
@@ -32,6 +33,7 @@ class LocalReservation(LocalBase):
     cancelled_at = Column(String(50), nullable=True)
     notes = Column(Text, nullable=True)
 
-    created_at = Column(String(30), nullable=False)
-    updated_at = Column(String(30), nullable=False)
+    created_at = Column(String(30), nullable=False, default=lambda: datetime.now(timezone.utc).isoformat())
+    updated_at = Column(String(30), nullable=False, default=lambda: datetime.now(timezone.utc).isoformat(), onupdate=lambda: datetime.now(timezone.utc).isoformat())
     version = Column(Integer, nullable=False, default=1)
+

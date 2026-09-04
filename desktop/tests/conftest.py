@@ -92,15 +92,58 @@ def _qt_thread_teardown():
 
 
 @pytest.fixture(autouse=True)
-def set_test_db_reset(monkeypatch):
-    """Ensure tests run in reset mode.
-    The environment variable ``CAR_RENTAL_DB_RESET`` is set to ``1`` for the duration
-    of each test, guaranteeing a clean SQLite database. After the test it is
-    restored to its previous value (or removed if it was not set)."""
-    original = os.getenv("CAR_RENTAL_DB_RESET", None)
+def set_test_db_reset(tmp_path, monkeypatch):
+    """Ensure tests run in isolated reset mode against a temporary SQLite database.
+    Production database is NEVER touched or reset by tests."""
+    test_data = tmp_path / "data"
+    test_data.mkdir(parents=True, exist_ok=True)
+    test_db = test_data / "car_rental_local.db"
+    test_url = f"sqlite:///{test_db}"
+
+    original_reset = os.getenv("CAR_RENTAL_DB_RESET", None)
+    original_dir = os.getenv("CAR_RENTAL_DATA_DIR", None)
+    original_url = os.getenv("CAR_RENTAL_SQLITE_URL", None)
+
     monkeypatch.setenv("CAR_RENTAL_DB_RESET", "1")
+    monkeypatch.setenv("CAR_RENTAL_DATA_DIR", str(test_data))
+    monkeypatch.setenv("CAR_RENTAL_SQLITE_URL", test_url)
+
+    import app.config
+    monkeypatch.setattr(app.config, "DATA_DIR", test_data)
+    monkeypatch.setattr(app.config, "DB_PATH", test_db)
+    monkeypatch.setattr(app.config, "SQLITE_URL", test_url)
+
+    # Force reset database engine to bind to the test url
+    import app.database
+    if app.database._engine is not None:
+        try:
+            app.database._engine.dispose()
+        except Exception:
+            pass
+    app.database._engine = None
+    app.database._session_factory = None
+
     yield
-    if original is None:
+
+    if app.database._engine is not None:
+        try:
+            app.database._engine.dispose()
+        except Exception:
+            pass
+    app.database._engine = None
+    app.database._session_factory = None
+
+    if original_reset is None:
         monkeypatch.delenv("CAR_RENTAL_DB_RESET", raising=False)
     else:
-        monkeypatch.setenv("CAR_RENTAL_DB_RESET", original)
+        monkeypatch.setenv("CAR_RENTAL_DB_RESET", original_reset)
+
+    if original_dir is None:
+        monkeypatch.delenv("CAR_RENTAL_DATA_DIR", raising=False)
+    else:
+        monkeypatch.setenv("CAR_RENTAL_DATA_DIR", original_dir)
+
+    if original_url is None:
+        monkeypatch.delenv("CAR_RENTAL_SQLITE_URL", raising=False)
+    else:
+        monkeypatch.setenv("CAR_RENTAL_SQLITE_URL", original_url)

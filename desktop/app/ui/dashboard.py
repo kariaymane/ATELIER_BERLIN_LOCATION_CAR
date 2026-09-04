@@ -6,7 +6,7 @@ from datetime import date, datetime, timedelta
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
     QLabel, QFrame, QGroupBox, QPushButton, QProgressBar, QComboBox,
-    QScrollArea, QDateEdit
+    QScrollArea, QDateEdit, QSizePolicy
 )
 from PySide6.QtCore import Qt, QDate, QThread, Signal
 from PySide6.QtGui import QFont
@@ -223,6 +223,8 @@ class DashboardWidget(QWidget):
         self._last_refresh_lbl = QLabel(t("dashboard.last_refresh", time=datetime.now().strftime('%H:%M')))
         self._last_refresh_lbl.setFont(QFont("Hanken Grotesk", 10))
         self._last_refresh_lbl.setStyleSheet("color: #6B7264;")
+        self._last_refresh_lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        self._last_refresh_lbl.setSizePolicy(QSizePolicy.Policy.MinimumExpanding, QSizePolicy.Policy.Preferred)
         header_layout.addWidget(self._last_refresh_lbl, alignment=Qt.AlignmentFlag.AlignVCenter)
         layout.addLayout(header_layout)
 
@@ -533,6 +535,7 @@ class DashboardWidget(QWidget):
         else:
             self._last_refresh_lbl.setText(f"{base_text} (Hors ligne / Cache)")
             self._last_refresh_lbl.setStyleSheet("color: #909C8E;")
+        self._last_refresh_lbl.adjustSize()
 
         maint = self._overview_data.get(
             "active_maintenance_tickets",

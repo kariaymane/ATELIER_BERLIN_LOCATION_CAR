@@ -268,6 +268,50 @@ class RentalRepository(BaseRepository[Reservation]):
         )
         return dict(result.all())
 
+    async def count_operational_rentals(self, now: Optional[datetime] = None) -> dict[str, int]:
+        """Canonical count of operational rentals aligned with fleet_status.py:
+        - active_rentals: physically in progress (status == 'ACTIVE' or covering `now`)
+        - reserved_rentals: genuinely upcoming bookings (status == 'RESERVED' and start_datetime > now)
+        - history_rentals: completed, cancelled, or past ended
+        """
+        from shared.money_time import now_business
+        if now is None:
+            now = now_business()
+
+        # In-progress rentals: explicitly ACTIVE or window covers `now`
+        active_query = select(func.count(Reservation.id)).where(
+            or_(
+                Reservation.status == "ACTIVE",
+                and_(
+                    Reservation.status == "RESERVED",
+                    Reservation.start_datetime <= now,
+                    Reservation.end_datetime > now,
+                )
+            )
+        )
+        # Upcoming reservations: RESERVED and start in future
+        upcoming_query = select(func.count(Reservation.id)).where(
+            Reservation.status == "RESERVED",
+            Reservation.start_datetime > now,
+        )
+        # Historical/past rentals
+        history_query = select(func.count(Reservation.id)).where(
+            or_(
+                Reservation.status.in_(["COMPLETED", "CANCELLED"]),
+                Reservation.end_datetime <= now,
+            )
+        )
+
+        active_res = await self._session.scalar(active_query) or 0
+        upcoming_res = await self._session.scalar(upcoming_query) or 0
+        history_res = await self._session.scalar(history_query) or 0
+
+        return {
+            "active_rentals": active_res,
+            "reserved_rentals": upcoming_res,
+            "history_rentals": history_res,
+        }
+
     async def get_revenue_between(
         self, start_dt: datetime, end_dt: datetime, now: Optional[datetime] = None
     ) -> float:

@@ -95,6 +95,22 @@ class DomainSnapshot:
     def effective_status(self, vehicle_id: str) -> Optional[str]:
         return self.effective.get(str(vehicle_id))
 
+    @property
+    def current_reservations(self) -> tuple:
+        """Active rentals or reserved bookings (ACTIVE, RESERVED)."""
+        return tuple(
+            r for r in self.reservations
+            if (r.get("status") or "").upper() in ("ACTIVE", "RESERVED")
+        )
+
+    @property
+    def historical_reservations(self) -> tuple:
+        """Completed or cancelled reservations (COMPLETED, CANCELLED)."""
+        return tuple(
+            r for r in self.reservations
+            if (r.get("status") or "").upper() in ("COMPLETED", "CANCELLED")
+        )
+
 
 _EMPTY = DomainSnapshot()
 
@@ -393,8 +409,19 @@ class DomainStore:
 
         fleet_counts = compute_fleet_counts(session, now=now)
 
-        res_dicts = tuple(_res_dict(r) for r in reservations)
-        maint_dicts = tuple(_maint_dict(m) for m in maintenances)
+        # Filter out any orphaned reservations or maintenances referencing non-existent vehicles
+        valid_vids = {str(v.id) for v in vehicles}
+        valid_reservations = [r for r in reservations if str(r.vehicle_id) in valid_vids]
+        valid_maintenances = [m for m in maintenances if str(m.vehicle_id) in valid_vids]
+
+        res_dicts = tuple(
+            sorted(
+                (_res_dict(r) for r in valid_reservations),
+                key=lambda x: (x.get("start_datetime") or "", x.get("created_at") or "", x.get("id") or ""),
+                reverse=True,
+            )
+        )
+        maint_dicts = tuple(_maint_dict(m) for m in valid_maintenances)
         client_dicts = tuple(_client_dict(c) for c in clients)
 
         if self._server_overview is not None:
