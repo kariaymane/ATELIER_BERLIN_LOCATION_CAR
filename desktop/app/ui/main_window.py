@@ -546,6 +546,10 @@ class MainWindow(QMainWindow):
                 else:
                     self._authoritative_server_overview = dict(snap.overview)
             overview = dict(self._authoritative_server_overview or snap.overview or {})
+            if snap.fleet_counts:
+                for k in ("total_vehicles", "available", "rented", "reserved", "maintenance"):
+                    if k in snap.fleet_counts:
+                        overview[k] = snap.fleet_counts[k]
             top = list(getattr(self, "_authoritative_server_top_vehicles", []) or snap.top_vehicles or [])
         else:
             overview = dict(snap.overview or {})
@@ -627,21 +631,22 @@ class MainWindow(QMainWindow):
             if overview.get(key) is None:
                 overview[key] = local_ov.get(key, 0)
 
-        self._authoritative_server_overview = dict(overview)
-        self._last_server_overview = dict(overview)
+        # Commit to DomainStore — reconciles fleet keys against canonical local snapshot
+        snap = self._store.update_server_dashboard(overview, top_vehicles, generation=generation)
+
+        canonical_overview = dict(snap.overview or self._store.snapshot.overview or overview)
+        self._authoritative_server_overview = dict(canonical_overview)
+        self._last_server_overview = dict(canonical_overview)
         if top_vehicles:
             self._authoritative_server_top_vehicles = list(top_vehicles)
             self._last_server_top_vehicles = list(top_vehicles)
         self._has_server_dashboard = True
 
-        # Commit to DomainStore — enforces server authority over all local snapshots
-        self._store.update_server_dashboard(overview, top_vehicles, generation=generation)
-
         top = (top_vehicles
                or getattr(self, "_authoritative_server_top_vehicles", None)
                or getattr(self, "_last_server_top_vehicles", None)
                or [dict(v) for v in self._store.snapshot.top_vehicles])
-        self._dashboard.refresh_data(overview, top, request_revenue=True, is_live=True)
+        self._dashboard.refresh_data(canonical_overview, top, request_revenue=True, is_live=True)
 
     def _run_sync(self, force_bootstrap: bool = False):
         """Execute the sync cycle in a background thread (never blocks UI)."""

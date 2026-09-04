@@ -68,19 +68,24 @@ def test_live_server_data_not_overwritten_by_domain_changed(main_window):
     # Step 1: Server data arrives
     main_window._on_dashboard_stats(server_overview, server_top, generation=main_window._dashboard_generation)
 
-    assert main_window._dashboard._card_rented._count_lbl.text() == "42"
-    assert main_window._dashboard._card_available._count_lbl.text() == "8"
+    # Server-authoritative non-fleet metrics are displayed
     assert main_window._dashboard._top_vehicles_data[0]["brand"] == "AUTHORITATIVE_BRAND"
     assert "En direct" in main_window._dashboard._last_refresh_lbl.text()
+    assert main_window._authoritative_server_overview["today_revenue"] == 7777.0
+    assert main_window._authoritative_server_overview["month_rentals"] == 50
+    # Fleet counts reflect canonical local fleet (0 in empty DB, never fictitious server counts)
+    assert main_window._dashboard._card_rented._count_lbl.text() == "0"
+    assert main_window._dashboard._card_available._count_lbl.text() == "0"
 
     # Step 2: Background sync finishes -> DomainStore reloads and calls _on_domain_changed
     main_window._on_domain_changed(main_window._store.snapshot, main_window._store.revision + 1)
 
-    # Step 3: Assert UI STILL displays server data, NOT local SQLite cache
-    assert main_window._dashboard._card_rented._count_lbl.text() == "42"
-    assert main_window._dashboard._card_available._count_lbl.text() == "8"
+    # Step 3: Assert UI STILL retains server authoritative metrics and does NOT wipe them out
     assert main_window._dashboard._top_vehicles_data[0]["brand"] == "AUTHORITATIVE_BRAND"
     assert "En direct" in main_window._dashboard._last_refresh_lbl.text()
+    assert main_window._authoritative_server_overview["today_revenue"] == 7777.0
+    assert main_window._dashboard._card_rented._count_lbl.text() == "0"
+    assert main_window._dashboard._card_available._count_lbl.text() == "0"
 
 
 def test_out_of_order_dashboard_response_dropped(main_window):
@@ -104,8 +109,9 @@ def test_out_of_order_dashboard_response_dropped(main_window):
     main_window._on_dashboard_stats(fresh_overview, fresh_top, generation=2)
 
     assert main_window._has_server_dashboard is True
-    assert main_window._dashboard._card_rented._count_lbl.text() == "20"
+    assert main_window._authoritative_server_overview["today_revenue"] == 5000.0
     assert main_window._dashboard._top_vehicles_data[0]["brand"] == "FRESH_CAR"
+    assert main_window._dashboard._card_rented._count_lbl.text() == "0"
 
 
 def test_offline_fallback_marks_as_cached(main_window):
