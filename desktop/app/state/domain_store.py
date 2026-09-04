@@ -116,6 +116,8 @@ _EMPTY = DomainSnapshot()
 
 
 class DomainStore:
+    _FLEET_KEYS = ("total_vehicles", "available", "rented", "reserved", "maintenance")
+
     def __init__(self, now_fn: Optional[Callable[[], datetime]] = None) -> None:
         self._snapshot: DomainSnapshot = _EMPTY
         self._revision: int = 0
@@ -141,16 +143,32 @@ class DomainStore:
     def update_server_dashboard(self, overview: dict, top_vehicles: Optional[list] = None, generation: int = 0) -> DomainSnapshot:
         """Apply authoritative live server dashboard data to the DomainStore.
 
-        Strict server authority invariant: Once authoritative server data is
-        received, it takes permanent precedence over local SQLite projections.
-        Subsequent SQLite reloads will preserve this server state unless offline.
+        Server overview may provide server metrics that are not locally derivable (e.g. revenue).
+        BUT fleet state metrics MUST be derived from the canonical fleet-state computation
+        using the current synchronized vehicle/reservation/maintenance snapshot.
+        Reconcile fleet keys immediately against canonical local state after fetch.
         """
         if self._server_generation > 0 and generation < self._server_generation:
             logger.info("DomainStore: Dropping stale server dashboard update gen %s (current %s)",
                         generation, self._server_generation)
             return self._snapshot
 
-        self._server_overview = dict(overview)
+        if self._snapshot is _EMPTY:
+            from app.database import get_local_session
+            sess = get_local_session()
+            try:
+                self._snapshot = self._build_snapshot(sess, self._revision, self.now())
+            finally:
+                sess.close()
+
+        ov = dict(overview)
+        # Immediately reconcile fleet keys against canonical local fleet counts
+        if self._snapshot is not _EMPTY and self._snapshot.fleet_counts:
+            for k in self._FLEET_KEYS:
+                if k in self._snapshot.fleet_counts:
+                    ov[k] = self._snapshot.fleet_counts[k]
+
+        self._server_overview = ov
         if top_vehicles is not None:
             self._server_top_vehicles = list(top_vehicles)
         self._server_generation = max(self._server_generation, generation)
@@ -303,17 +321,37 @@ class DomainStore:
         from app.models.reservation import LocalReservation
         from app.models.maintenance import LocalMaintenance
         from app.models.client import LocalClient
-        from app.utils.fleet_status import (
-            compute_fleet_sets, effective_status as _eff, compute_fleet_counts,
-        )
-
         now = now or datetime.now(timezone.utc)
         vehicles = session.query(LocalVehicle).all()
         reservations = session.query(LocalReservation).all()
         maintenances = session.query(LocalMaintenance).all()
         clients = session.query(LocalClient).order_by(LocalClient.last_name).all()
 
-        rented_vids, reserved_vids, maint_vids, _total = compute_fleet_sets(session, now=now)
+        # 1. Establish the real vehicle ID set first
+        valid_vids_raw = {v.id for v in vehicles if v.id is not None}
+        valid_vids_str = {str(v.id) for v in vehicles if v.id is not None}
+
+        # 2. Filter reservations and maintenances against real vehicle IDs
+        valid_reservations = [
+            r for r in reservations
+            if r.vehicle_id in valid_vids_raw or str(r.vehicle_id) in valid_vids_str
+        ]
+        valid_maintenances = [
+            m for m in maintenances
+            if m.vehicle_id in valid_vids_raw or str(m.vehicle_id) in valid_vids_str
+        ]
+
+        # 3. Fleet count and effective status calculation MUST use the filtered reservation/maintenance data
+        from app.utils.fleet_status import (
+            compute_fleet_sets_rows, effective_status as _eff, compute_fleet_counts_rows,
+        )
+
+        rented_vids, reserved_vids, maint_vids, _total = compute_fleet_sets_rows(
+            vehicles, valid_reservations, valid_maintenances, now=now
+        )
+        fleet_counts = compute_fleet_counts_rows(
+            vehicles, valid_reservations, valid_maintenances, now=now
+        )
 
         vehicle_dicts: list[dict] = []
         effective: dict[str, str] = {}
@@ -407,13 +445,6 @@ class DomainStore:
                 "updated_at": getattr(c, "updated_at", None),
             }
 
-        fleet_counts = compute_fleet_counts(session, now=now)
-
-        # Filter out any orphaned reservations or maintenances referencing non-existent vehicles
-        valid_vids = {str(v.id) for v in vehicles}
-        valid_reservations = [r for r in reservations if str(r.vehicle_id) in valid_vids]
-        valid_maintenances = [m for m in maintenances if str(m.vehicle_id) in valid_vids]
-
         res_dicts = tuple(
             sorted(
                 (_res_dict(r) for r in valid_reservations),
@@ -425,6 +456,11 @@ class DomainStore:
         client_dicts = tuple(_client_dict(c) for c in clients)
 
         if self._server_overview is not None:
+            # Server overview provides server-authoritative metrics (e.g. revenue),
+            # but fleet state metrics MUST reflect canonical local fleet counts.
+            for k in self._FLEET_KEYS:
+                if k in fleet_counts:
+                    self._server_overview[k] = fleet_counts[k]
             overview = dict(self._server_overview)
             top_vehicles = tuple(self._server_top_vehicles or ())
             is_live = True

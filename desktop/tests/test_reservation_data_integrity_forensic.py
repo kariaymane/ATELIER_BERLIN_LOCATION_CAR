@@ -25,6 +25,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 from app.database import init_local_db, get_local_session
 from app.models.vehicle import LocalVehicle
 from app.models.reservation import LocalReservation
+from app.models.maintenance import LocalMaintenance
 from app.models.client import LocalClient
 from app.state.domain_store import get_domain_store
 from app.ui.reservations.reservation_list import ReservationWidget
@@ -79,6 +80,22 @@ def _make_vehicle(vid: str, reg: str, brand: str = "Dacia", model: str = "Logan"
         transmission="Manual",
         daily_rental_price=150.0,
         status=status,
+        created_at=now_iso,
+        updated_at=now_iso,
+    )
+
+
+def _make_maintenance(mid: str, vid: str, title: str = "Repair", status: str = "IN_PROGRESS",
+                      start_datetime: str = None, expected_end_datetime: str = None) -> LocalMaintenance:
+    now_iso = datetime.now(timezone.utc).isoformat()
+    return LocalMaintenance(
+        id=mid,
+        vehicle_id=vid,
+        type="PREVENTIVE",
+        title=title,
+        status=status,
+        start_datetime=start_datetime or now_iso,
+        expected_end_datetime=expected_end_datetime,
         created_at=now_iso,
         updated_at=now_iso,
     )
@@ -301,3 +318,436 @@ def test_table_filter_filters_both_tables():
     widget.set_filter("")
     assert not widget._table.isRowHidden(0)
     assert not widget._history_table.isRowHidden(0)
+
+
+def test_regression_test_1_orphan_active_reservation():
+    """TEST 1: 1 real AVAILABLE vehicle + 0 valid reservations + 1 orphan ACTIVE reservation covering now.
+    Expected: total=1, available=1, rented=0, reserved=0, maintenance=0.
+    len(snapshot.reservations) == 0, current == 0, history == 0.
+    """
+    session = get_local_session()
+    v1 = _make_vehicle("v-real-1", "REAL-1", "Dacia", "Logan", status="AVAILABLE")
+    session.add(v1)
+
+    now = datetime.now(timezone.utc)
+    r_orphan = LocalReservation(
+        id="r-orphan-active",
+        vehicle_id="ghost-vehicle-does-not-exist",
+        customer_name="Ghost Client",
+        start_datetime=(now - timedelta(days=1)).isoformat(),
+        end_datetime=(now + timedelta(days=2)).isoformat(),
+        status="ACTIVE",
+        total_price=500.0,
+        num_days=3,
+        daily_price=150.0,
+    )
+    session.add(r_orphan)
+    session.commit()
+    session.close()
+
+    store = get_domain_store()
+    store.reload()
+    snap = store.snapshot
+
+    assert snap.fleet_counts["total_vehicles"] == 1
+    assert snap.fleet_counts["available"] == 1
+    assert snap.fleet_counts["rented"] == 0
+    assert snap.fleet_counts["reserved"] == 0
+    assert snap.fleet_counts["maintenance"] == 0
+
+    assert snap.overview["available"] == 1
+    assert snap.overview["rented"] == 0
+    assert snap.overview["reserved"] == 0
+    assert snap.overview["maintenance"] == 0
+
+    assert len(snap.reservations) == 0
+    assert len(snap.current_reservations) == 0
+    assert len(snap.historical_reservations) == 0
+
+
+def test_regression_test_2_orphan_reserved_reservation():
+    """TEST 2: 1 real AVAILABLE vehicle + 1 orphan RESERVED reservation covering now.
+    Expected: available=1, rented=0, reserved=0.
+    """
+    session = get_local_session()
+    v1 = _make_vehicle("v-real-2", "REAL-2", "Renault", "Clio", status="AVAILABLE")
+    session.add(v1)
+
+    now = datetime.now(timezone.utc)
+    r_orphan_res = LocalReservation(
+        id="r-orphan-reserved",
+        vehicle_id="ghost-vehicle-2",
+        customer_name="Ghost Res",
+        start_datetime=(now - timedelta(hours=2)).isoformat(),
+        end_datetime=(now + timedelta(days=2)).isoformat(),
+        status="RESERVED",
+        total_price=400.0,
+        num_days=2,
+        daily_price=200.0,
+    )
+    session.add(r_orphan_res)
+    session.commit()
+    session.close()
+
+    store = get_domain_store()
+    store.reload()
+    snap = store.snapshot
+
+    assert snap.fleet_counts["available"] == 1
+    assert snap.fleet_counts["rented"] == 0
+    assert snap.fleet_counts["reserved"] == 0
+    assert snap.fleet_counts["total_vehicles"] == 1
+
+
+def test_regression_test_3_orphan_maintenance():
+    """TEST 3: 1 real AVAILABLE vehicle + 1 orphan maintenance ticket covering now.
+    Expected: available=1, maintenance=0.
+    """
+    session = get_local_session()
+    v1 = _make_vehicle("v-real-3", "REAL-3", "Peugeot", "208", status="AVAILABLE")
+    session.add(v1)
+
+    now = datetime.now(timezone.utc)
+    m_orphan = _make_maintenance(
+        "m-orphan-1",
+        "ghost-vehicle-3",
+        title="Ghost repair",
+        status="IN_PROGRESS",
+        start_datetime=(now - timedelta(days=1)).isoformat(),
+        expected_end_datetime=(now + timedelta(days=2)).isoformat(),
+    )
+    session.add(m_orphan)
+    session.commit()
+    session.close()
+
+    store = get_domain_store()
+    store.reload()
+    snap = store.snapshot
+
+    assert snap.fleet_counts["available"] == 1
+    assert snap.fleet_counts["maintenance"] == 0
+    assert snap.fleet_counts["total_vehicles"] == 1
+    assert len(snap.maintenances) == 0
+
+
+def test_regression_test_4_valid_control_active():
+    """TEST 4: Valid control case: 1 real vehicle + 1 valid ACTIVE reservation covering now.
+    Expected: total=1, rented=1, available=0.
+    Proves the fix does NOT simply ignore all reservations.
+    """
+    session = get_local_session()
+    v1 = _make_vehicle("v-real-4", "REAL-4", "Dacia", "Duster", status="AVAILABLE")
+    session.add(v1)
+
+    now = datetime.now(timezone.utc)
+    r_valid = LocalReservation(
+        id="r-valid-active",
+        vehicle_id="v-real-4",
+        customer_name="Real Client",
+        start_datetime=(now - timedelta(days=1)).isoformat(),
+        end_datetime=(now + timedelta(days=2)).isoformat(),
+        status="ACTIVE",
+        total_price=600.0,
+        num_days=3,
+        daily_price=200.0,
+    )
+    session.add(r_valid)
+    session.commit()
+    session.close()
+
+    store = get_domain_store()
+    store.reload()
+    snap = store.snapshot
+
+    assert snap.fleet_counts["total_vehicles"] == 1
+    assert snap.fleet_counts["rented"] == 1
+    assert snap.fleet_counts["available"] == 0
+    assert snap.fleet_counts["reserved"] == 0
+    assert len(snap.reservations) == 1
+
+
+def test_regression_test_5_valid_reserved_upcoming():
+    """TEST 5: Valid RESERVED reservation (upcoming booking).
+    Expected: reserved=1, available=0, rented=0.
+    """
+    session = get_local_session()
+    v1 = _make_vehicle("v-real-5", "REAL-5", "Hyundai", "Accent", status="AVAILABLE")
+    session.add(v1)
+
+    now = datetime.now(timezone.utc)
+    r_valid_res = LocalReservation(
+        id="r-valid-res-upcoming",
+        vehicle_id="v-real-5",
+        customer_name="Future Client",
+        start_datetime=(now + timedelta(days=2)).isoformat(),
+        end_datetime=(now + timedelta(days=5)).isoformat(),
+        status="RESERVED",
+        total_price=600.0,
+        num_days=3,
+        daily_price=200.0,
+    )
+    session.add(r_valid_res)
+    session.commit()
+    session.close()
+
+    store = get_domain_store()
+    store.reload()
+    snap = store.snapshot
+
+    assert snap.fleet_counts["total_vehicles"] == 1
+    assert snap.fleet_counts["reserved"] == 1
+    assert snap.fleet_counts["available"] == 0
+    assert snap.fleet_counts["rented"] == 0
+    assert len(snap.reservations) == 1
+
+
+def test_regression_test_6_mix_real_and_orphan():
+    """TEST 6: Mix:
+    3 real vehicles
+    1 valid ACTIVE
+    1 valid RESERVED
+    1 orphan ACTIVE
+    1 orphan RESERVED
+    Expected fleet: total=3, rented=1, reserved=1, available=1, maintenance=0.
+    """
+    session = get_local_session()
+    v1 = _make_vehicle("v-mix-1", "MIX-1", "Dacia", "Logan")
+    v2 = _make_vehicle("v-mix-2", "MIX-2", "Renault", "Clio")
+    v3 = _make_vehicle("v-mix-3", "MIX-3", "Fiat", "Punto")
+    session.add_all([v1, v2, v3])
+
+    now = datetime.now(timezone.utc)
+    # 1. Valid ACTIVE on v1
+    r1 = LocalReservation(
+        id="r-mix-valid-act", vehicle_id="v-mix-1", customer_name="Client 1",
+        start_datetime=(now - timedelta(days=1)).isoformat(),
+        end_datetime=(now + timedelta(days=2)).isoformat(),
+        status="ACTIVE", total_price=300.0, num_days=3, daily_price=100.0,
+    )
+    # 2. Valid RESERVED on v2 (upcoming)
+    r2 = LocalReservation(
+        id="r-mix-valid-res", vehicle_id="v-mix-2", customer_name="Client 2",
+        start_datetime=(now + timedelta(days=1)).isoformat(),
+        end_datetime=(now + timedelta(days=4)).isoformat(),
+        status="RESERVED", total_price=300.0, num_days=3, daily_price=100.0,
+    )
+    # 3. Orphan ACTIVE on non-existent vehicle
+    r3_orphan = LocalReservation(
+        id="r-mix-orphan-act", vehicle_id="ghost-mix-veh-1", customer_name="Ghost Client 1",
+        start_datetime=(now - timedelta(days=1)).isoformat(),
+        end_datetime=(now + timedelta(days=2)).isoformat(),
+        status="ACTIVE", total_price=500.0, num_days=3, daily_price=150.0,
+    )
+    # 4. Orphan RESERVED on non-existent vehicle
+    r4_orphan = LocalReservation(
+        id="r-mix-orphan-res", vehicle_id="ghost-mix-veh-2", customer_name="Ghost Client 2",
+        start_datetime=(now + timedelta(days=2)).isoformat(),
+        end_datetime=(now + timedelta(days=5)).isoformat(),
+        status="RESERVED", total_price=500.0, num_days=3, daily_price=150.0,
+    )
+    session.add_all([r1, r2, r3_orphan, r4_orphan])
+    session.commit()
+    session.close()
+
+    store = get_domain_store()
+    store.reload()
+    snap = store.snapshot
+
+    assert snap.fleet_counts["total_vehicles"] == 3
+    assert snap.fleet_counts["rented"] == 1
+    assert snap.fleet_counts["reserved"] == 1
+    assert snap.fleet_counts["available"] == 1
+    assert snap.fleet_counts["maintenance"] == 0
+    assert len(snap.reservations) == 2
+
+
+def test_p0_fleet_count_invariants():
+    """P0 — INVARIANT TEST:
+    Assert rented + reserved + maintenance + available == total_vehicles
+    (for non-structural operational fleet) and <= total_registered_vehicles.
+    """
+    session = get_local_session()
+    v1 = _make_vehicle("v-inv-1", "INV-1", "Dacia", "Logan", status="AVAILABLE")
+    v2 = _make_vehicle("v-inv-2", "INV-2", "Renault", "Clio", status="AVAILABLE")
+    v3 = _make_vehicle("v-inv-3", "INV-3", "Peugeot", "208", status="AVAILABLE")
+    v4 = _make_vehicle("v-inv-4", "INV-4", "Mercedes", "C220", status="SOLD")
+    v5 = _make_vehicle("v-inv-5", "INV-5", "BMW", "Serie 3", status="INACTIVE")
+    session.add_all([v1, v2, v3, v4, v5])
+
+    now = datetime.now(timezone.utc)
+    # 1 active rental on v1
+    r1 = LocalReservation(
+        id="r-inv-1", vehicle_id="v-inv-1", customer_name="Client Inv",
+        start_datetime=(now - timedelta(days=1)).isoformat(),
+        end_datetime=(now + timedelta(days=2)).isoformat(),
+        status="ACTIVE", total_price=300.0, num_days=3, daily_price=100.0,
+    )
+    # 1 active maintenance on v2
+    m1 = _make_maintenance(
+        "m-inv-1", "v-inv-2", title="Vidange",
+        status="IN_PROGRESS",
+        start_datetime=(now - timedelta(days=1)).isoformat(),
+        expected_end_datetime=(now + timedelta(days=1)).isoformat(),
+    )
+    # 2 orphan reservations
+    r_orphan1 = LocalReservation(
+        id="r-inv-orphan-1", vehicle_id="ghost-1", customer_name="Ghost",
+        start_datetime=(now - timedelta(days=1)).isoformat(),
+        end_datetime=(now + timedelta(days=2)).isoformat(),
+        status="ACTIVE", total_price=300.0, num_days=3, daily_price=100.0,
+    )
+    r_orphan2 = LocalReservation(
+        id="r-inv-orphan-2", vehicle_id="ghost-2", customer_name="Ghost 2",
+        start_datetime=(now + timedelta(days=1)).isoformat(),
+        end_datetime=(now + timedelta(days=3)).isoformat(),
+        status="RESERVED", total_price=300.0, num_days=3, daily_price=100.0,
+    )
+    session.add_all([r1, m1, r_orphan1, r_orphan2])
+    session.commit()
+    session.close()
+
+    store = get_domain_store()
+    store.reload()
+    snap = store.snapshot
+
+    fc = snap.fleet_counts
+    total = fc["total_vehicles"]
+    rented = fc["rented"]
+    reserved = fc["reserved"]
+    maint = fc["maintenance"]
+    avail = fc["available"]
+
+    # Operational fleet invariant: exactly matches non-structural vehicles (3)
+    assert total == 3
+    assert rented == 1
+    assert maint == 1
+    assert reserved == 0
+    assert avail == 1
+    assert rented + reserved + maint + avail == total
+    assert rented + reserved + maint + avail <= 5
+
+
+def test_dashboard_source_of_truth_no_flicker():
+    """P0 — MANDATORY DASHBOARD VALIDATION:
+    Initial local dashboard = rented 1
+    Server overview arrives with rented 3
+    Canonical local fleet still = rented 1
+    Expected final displayed fleet value: rented = 1
+    No intermediate state where UI exposes server=3.
+    Across server fetch, navigation, reload, reconnect, and boundary tick.
+    """
+    session = get_local_session()
+    v1 = _make_vehicle("v-sot-1", "SOT-1", "Dacia", "Logan", status="AVAILABLE")
+    session.add(v1)
+
+    now = datetime.now(timezone.utc)
+    r1 = LocalReservation(
+        id="r-sot-1", vehicle_id="v-sot-1", customer_name="Client SOT",
+        start_datetime=(now - timedelta(hours=2)).isoformat(),
+        end_datetime=(now + timedelta(days=2)).isoformat(),
+        status="ACTIVE", total_price=300.0, num_days=2, daily_price=150.0,
+    )
+    session.add(r1)
+    session.commit()
+    session.close()
+
+    store = get_domain_store()
+    store.reload()
+    snap = store.snapshot
+
+    # Step 1: Initial local snapshot is rented=1
+    assert snap.fleet_counts["rented"] == 1
+    assert snap.fleet_counts["available"] == 0
+    assert snap.fleet_counts["total_vehicles"] == 1
+    assert snap.overview["rented"] == 1
+
+    # Step 2: Server overview arrives claiming rented=3, available=0, total_vehicles=3
+    server_overview = {
+        "total_vehicles": 3,
+        "available": 0,
+        "rented": 3,
+        "reserved": 0,
+        "maintenance": 0,
+        "today_revenue": 1500.0,
+        "month_revenue": 15000.0,
+    }
+    snap_after_server = store.update_server_dashboard(server_overview, generation=1)
+
+    # Canonical local fleet must remain rented=1 in both fleet_counts and overview
+    assert snap_after_server.fleet_counts["rented"] == 1
+    assert snap_after_server.overview["rented"] == 1
+    assert snap_after_server.overview["total_vehicles"] == 1
+    assert snap_after_server.overview["available"] == 0
+    # Server-only metrics are preserved
+    assert snap_after_server.overview["today_revenue"] == 1500.0
+    assert snap_after_server.overview["month_revenue"] == 15000.0
+
+    # Step 3: Test Navigation / UI refresh
+    from app.ui.dashboard import DashboardWidget
+    dash = DashboardWidget()
+    canonical_ov = dict(snap_after_server.overview)
+    dash.refresh_data(canonical_ov, [])
+    assert dash._card_rented._count_lbl.text() == "1"
+    assert dash._card_available._count_lbl.text() == "0"
+
+    # Step 4: Test Reload
+    snap_reload = store.reload()
+    assert snap_reload.fleet_counts["rented"] == 1
+    assert snap_reload.overview["rented"] == 1
+    assert snap_reload.overview["today_revenue"] == 1500.0
+
+    # Step 5: Test Reconnect (clear + update)
+    store.clear_server_dashboard()
+    snap_cleared = store.reload()
+    assert snap_cleared.fleet_counts["rented"] == 1
+    assert snap_cleared.overview["rented"] == 1
+
+    snap_reconnected = store.update_server_dashboard(server_overview, generation=2)
+    assert snap_reconnected.fleet_counts["rented"] == 1
+    assert snap_reconnected.overview["rented"] == 1
+
+    # Step 6: Test Boundary Tick
+    store.recompute_effective(now=now + timedelta(hours=1))
+    snap_tick = store.snapshot
+    assert snap_tick.fleet_counts["rented"] == 1
+    assert snap_tick.overview["rented"] == 1
+
+
+def test_p1_expired_reserved_state_behavior():
+    """P1 Audit: RESERVED with start < now and end < now.
+    Documents current behavior:
+    1. It does NOT inflate fleet reserved or rented (vehicle remains AVAILABLE).
+    2. It appears in snap.current_reservations because its stored status is RESERVED.
+    """
+    session = get_local_session()
+    v1 = _make_vehicle("v-exp-res", "EXP-1", "Dacia", "Sandero", status="AVAILABLE")
+    session.add(v1)
+
+    now = datetime.now(timezone.utc)
+    r_expired_reserved = LocalReservation(
+        id="r-exp-res-1",
+        vehicle_id="v-exp-res",
+        customer_name="Expired Reserved Client",
+        start_datetime=(now - timedelta(days=5)).isoformat(),
+        end_datetime=(now - timedelta(days=2)).isoformat(),
+        status="RESERVED",
+        total_price=300.0,
+        num_days=3,
+        daily_price=100.0,
+    )
+    session.add(r_expired_reserved)
+    session.commit()
+    session.close()
+
+    store = get_domain_store()
+    store.reload()
+    snap = store.snapshot
+
+    # Vehicle is AVAILABLE, not RESERVED or RENTED
+    assert snap.fleet_counts["available"] == 1
+    assert snap.fleet_counts["reserved"] == 0
+    assert snap.fleet_counts["rented"] == 0
+
+    # It resides in current_reservations by status column
+    curr_ids = [r["id"] for r in snap.current_reservations]
+    assert "r-exp-res-1" in curr_ids

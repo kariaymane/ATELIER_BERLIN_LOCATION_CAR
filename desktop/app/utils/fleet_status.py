@@ -63,10 +63,17 @@ def compute_fleet_sets_rows(vehicles, reservations, maintenances, now=None):
     """
     now = now or datetime.now(timezone.utc)
 
-    structural = {
-        _get(v, "id") for v in vehicles
-        if (_get(v, "status") or "").upper() in STRUCTURAL_STATUSES
-    }
+    # 1. Establish known vehicle IDs and structural set
+    known_vids = {}
+    structural = set()
+    for v in vehicles:
+        vid = _get(v, "id")
+        if vid is not None:
+            known_vids[vid] = vid
+            known_vids[str(vid)] = vid
+            if (_get(v, "status") or "").upper() in STRUCTURAL_STATUSES:
+                structural.add(vid)
+
     total_vehicles = sum(
         1 for v in vehicles
         if (_get(v, "status") or "").upper() not in STRUCTURAL_STATUSES
@@ -77,11 +84,15 @@ def compute_fleet_sets_rows(vehicles, reservations, maintenances, now=None):
         if (_get(m, "status") or "").upper() in TERMINAL_MAINTENANCE_STATUSES:
             continue
         vid = _get(m, "vehicle_id")
-        if vid in structural:
+        # Defense-in-depth: ignore orphan maintenance row referencing unknown vehicle
+        if vid not in known_vids:
+            continue
+        canonical_vid = known_vids[vid]
+        if canonical_vid in structural:
             continue
         m_start = parse_datetime_utc(_get(m, "start_datetime"))
         if m_start and m_start <= now < _maintenance_end(m):
-            maintenance_vids.add(vid)
+            maintenance_vids.add(canonical_vid)
 
     rented_vids = set()
     reserved_vids = set()
@@ -90,7 +101,11 @@ def compute_fleet_sets_rows(vehicles, reservations, maintenances, now=None):
         if st not in BLOCKING_RESERVATION_STATUSES:
             continue
         vid = _get(r, "vehicle_id")
-        if vid in structural or vid in maintenance_vids:
+        # Defense-in-depth: ignore orphan reservation row referencing unknown vehicle
+        if vid not in known_vids:
+            continue
+        canonical_vid = known_vids[vid]
+        if canonical_vid in structural or canonical_vid in maintenance_vids:
             continue
         r_start = parse_datetime_utc(_get(r, "start_datetime"))
         r_end = parse_datetime_utc(_get(r, "end_datetime"))
@@ -98,10 +113,10 @@ def compute_fleet_sets_rows(vehicles, reservations, maintenances, now=None):
             continue
         if r_start <= now < r_end:
             # Window contains now -> car is out (no separate pickup step).
-            rented_vids.add(vid)
+            rented_vids.add(canonical_vid)
         elif now < r_start:
             # Upcoming booking -> surfaced as RESERVED.
-            reserved_vids.add(vid)
+            reserved_vids.add(canonical_vid)
 
     reserved_vids -= rented_vids
     return rented_vids, reserved_vids, maintenance_vids, total_vehicles
@@ -182,11 +197,14 @@ def _rows_from_session(session):
     from app.models.vehicle import LocalVehicle
     from app.models.reservation import LocalReservation
     from app.models.maintenance import LocalMaintenance
-    return (
-        session.query(LocalVehicle).all(),
-        session.query(LocalReservation).all(),
-        session.query(LocalMaintenance).all(),
-    )
+    vehicles = session.query(LocalVehicle).all()
+    reservations = session.query(LocalReservation).all()
+    maintenances = session.query(LocalMaintenance).all()
+    valid_ids = {v.id for v in vehicles if v.id is not None}
+    valid_ids_str = {str(v.id) for v in vehicles if v.id is not None}
+    clean_res = [r for r in reservations if r.vehicle_id in valid_ids or str(r.vehicle_id) in valid_ids_str]
+    clean_maint = [m for m in maintenances if m.vehicle_id in valid_ids or str(m.vehicle_id) in valid_ids_str]
+    return vehicles, clean_res, clean_maint
 
 
 def compute_fleet_sets(session, now=None):
@@ -206,10 +224,10 @@ def effective_status(v_status, vehicle_id, rented_vids, reserved_vids, maintenan
     """Resolve one vehicle's effective status given the disjoint sets."""
     if (v_status or "").upper() in STRUCTURAL_STATUSES:
         return v_status
-    if vehicle_id in maintenance_vids:
+    if vehicle_id in maintenance_vids or str(vehicle_id) in maintenance_vids:
         return EFFECTIVE_MAINTENANCE
-    if vehicle_id in rented_vids:
+    if vehicle_id in rented_vids or str(vehicle_id) in rented_vids:
         return EFFECTIVE_RENTED
-    if vehicle_id in reserved_vids:
+    if vehicle_id in reserved_vids or str(vehicle_id) in reserved_vids:
         return EFFECTIVE_RESERVED
     return EFFECTIVE_AVAILABLE

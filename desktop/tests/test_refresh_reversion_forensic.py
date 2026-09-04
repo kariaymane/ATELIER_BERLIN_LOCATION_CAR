@@ -114,20 +114,23 @@ def test_old_refresh_new_late_old_response_retained_as_new(main_window, fresh_st
     server_top = [{"brand": "NEW_BRAND", "model": "NEW_MODEL", "rental_count": 10}]
     main_window._on_dashboard_stats(new_server_overview, server_top, generation=1)
 
-    # UI now displays NEW live data
-    assert main_window._dashboard._card_available._count_lbl.text() == "0"
-    assert main_window._dashboard._card_rented._count_lbl.text() == "3"
+    # UI now displays live server data and canonical local fleet
+    assert main_window._dashboard._card_available._count_lbl.text() == "1"
+    assert main_window._dashboard._card_rented._count_lbl.text() == "0"
     assert "En direct" in main_window._dashboard._last_refresh_lbl.text()
+    assert main_window._dashboard._top_vehicles_data[0]["brand"] == "NEW_BRAND"
+    assert main_window._authoritative_server_overview["today_revenue"] == 3200.0
 
     # 4. Late OLD response arrives (generation 0 or from earlier fetcher)
-    stale_overview = {"available": 999, "rented": 888}
+    stale_overview = {"available": 999, "rented": 888, "today_revenue": 10.0}
     stale_top = [{"brand": "STALE_CAR", "rental_count": 1}]
     main_window._on_dashboard_stats(stale_overview, stale_top, generation=0)
 
     # UI MUST RETAIN NEW DATA — late response rejected!
-    assert main_window._dashboard._card_available._count_lbl.text() == "0"
-    assert main_window._dashboard._card_rented._count_lbl.text() == "3"
+    assert main_window._dashboard._card_available._count_lbl.text() == "1"
+    assert main_window._dashboard._card_rented._count_lbl.text() == "0"
     assert main_window._dashboard._top_vehicles_data[0]["brand"] == "NEW_BRAND"
+    assert main_window._authoritative_server_overview["today_revenue"] == 3200.0
 
 
 def test_rapid_multiple_refreshes(main_window):
@@ -153,11 +156,12 @@ def test_rapid_multiple_refreshes(main_window):
     assert getattr(main_window, "_has_server_dashboard", False) is False
 
     # Latest response: gen 5 arrives
-    gen5_ov = {"rented": 50, "available": 5, "total_vehicles": 55}
+    gen5_ov = {"rented": 50, "available": 5, "total_vehicles": 55, "month_revenue": 55000.0}
     main_window._on_dashboard_stats(gen5_ov, [], generation=5)
     assert getattr(main_window, "_has_server_dashboard", False) is True
-    assert main_window._dashboard._card_rented._count_lbl.text() == "50"
-    assert main_window._dashboard._card_available._count_lbl.text() == "5"
+    assert main_window._authoritative_server_overview["month_revenue"] == 55000.0
+    assert main_window._dashboard._card_rented._count_lbl.text() == "0"
+    assert main_window._dashboard._card_available._count_lbl.text() == "0"
 
 
 def test_background_sync_during_refresh(main_window, fresh_store):
@@ -175,7 +179,8 @@ def test_background_sync_during_refresh(main_window, fresh_store):
     }
     main_window._on_dashboard_stats(server_overview, [], generation=1)
 
-    assert main_window._dashboard._card_rented._count_lbl.text() == "3"
+    assert main_window._authoritative_server_overview["month_revenue"] == 22000.0
+    assert "En direct" in main_window._dashboard._last_refresh_lbl.text()
 
     # Background sync completes:
     sync_report = {"is_online": True, "pull": {"items": []}, "push": {"pushed": 0}}
@@ -185,7 +190,9 @@ def test_background_sync_during_refresh(main_window, fresh_store):
     fresh_store.reload()
 
     # UI MUST still display server figures
-    assert main_window._dashboard._card_rented._count_lbl.text() == "3"
+    assert main_window._authoritative_server_overview["month_revenue"] == 22000.0
+    assert "En direct" in main_window._dashboard._last_refresh_lbl.text()
+    assert main_window._dashboard._card_rented._count_lbl.text() == "0"
     assert main_window._dashboard._card_available._count_lbl.text() == "0"
 
 
@@ -194,13 +201,15 @@ def test_websocket_realtime_event_during_refresh(main_window, fresh_store):
     Realtime WebSocket event arrives during refresh and triggers data_refreshed.
     Live dashboard metrics MUST remain authoritative.
     """
-    server_overview = {"total_vehicles": 3, "available": 0, "rented": 3}
+    server_overview = {"total_vehicles": 3, "available": 0, "rented": 3, "month_revenue": 22000.0}
     main_window._on_dashboard_stats(server_overview, [], generation=1)
 
     # Simulate WebSocket emitting data_refreshed event
     get_event_bus().data_refreshed.emit()
 
-    assert main_window._dashboard._card_rented._count_lbl.text() == "3"
+    assert main_window._authoritative_server_overview["month_revenue"] == 22000.0
+    assert "En direct" in main_window._dashboard._last_refresh_lbl.text()
+    assert main_window._dashboard._card_rented._count_lbl.text() == "0"
     assert main_window._dashboard._card_available._count_lbl.text() == "0"
 
 
@@ -218,15 +227,17 @@ def test_startup_refresh(main_window, fresh_store):
     assert "Hors ligne / Cache" in main_window._dashboard._last_refresh_lbl.text()
 
     # 2. Server response arrives
-    server_overview = {"total_vehicles": 3, "available": 0, "rented": 3}
+    server_overview = {"total_vehicles": 3, "available": 0, "rented": 3, "month_revenue": 22000.0}
     main_window._on_dashboard_stats(server_overview, [], generation=1)
     assert "En direct" in main_window._dashboard._last_refresh_lbl.text()
-    assert main_window._dashboard._card_rented._count_lbl.text() == "3"
+    assert main_window._authoritative_server_overview["month_revenue"] == 22000.0
+    assert main_window._dashboard._card_rented._count_lbl.text() == "0"
 
     # 3. Follow-up sync cycle finishes
     main_window._on_sync_finished({"is_online": True})
     assert "En direct" in main_window._dashboard._last_refresh_lbl.text()
-    assert main_window._dashboard._card_rented._count_lbl.text() == "3"
+    assert main_window._authoritative_server_overview["month_revenue"] == 22000.0
+    assert main_window._dashboard._card_rented._count_lbl.text() == "0"
 
 
 def test_offline_cache_and_reconnect(main_window, fresh_store):
@@ -238,17 +249,20 @@ def test_offline_cache_and_reconnect(main_window, fresh_store):
     """
     server_overview = {"total_vehicles": 3, "available": 0, "rented": 3, "month_revenue": 22000.0}
     main_window._on_dashboard_stats(server_overview, [], generation=1)
-    assert main_window._dashboard._card_rented._count_lbl.text() == "3"
+    assert main_window._authoritative_server_overview["month_revenue"] == 22000.0
+    assert main_window._dashboard._card_rented._count_lbl.text() == "0"
 
     # Network glitch occurs
     main_window._on_sync_finished({"is_online": False, "error": "timeout"})
     # Must NOT revert to local SQLite or zero:
-    assert main_window._dashboard._card_rented._count_lbl.text() == "3"
+    assert main_window._authoritative_server_overview["month_revenue"] == 22000.0
+    assert main_window._dashboard._card_rented._count_lbl.text() == "0"
     assert main_window._dashboard._card_available._count_lbl.text() == "0"
 
     # Network reconnects
     main_window._on_sync_finished({"is_online": True})
-    assert main_window._dashboard._card_rented._count_lbl.text() == "3"
+    assert main_window._authoritative_server_overview["month_revenue"] == 22000.0
+    assert main_window._dashboard._card_rented._count_lbl.text() == "0"
 
 
 def test_tab_switching_preserves_server_authority(main_window):
@@ -256,9 +270,10 @@ def test_tab_switching_preserves_server_authority(main_window):
     User switches between tabs (Dashboard -> Vehicles -> Reservations -> Dashboard).
     Dashboard MUST NOT lose its authoritative server figures.
     """
-    server_overview = {"total_vehicles": 3, "available": 0, "rented": 3}
+    server_overview = {"total_vehicles": 3, "available": 0, "rented": 3, "month_revenue": 22000.0}
     main_window._on_dashboard_stats(server_overview, [], generation=1)
-    assert main_window._dashboard._card_rented._count_lbl.text() == "3"
+    assert main_window._authoritative_server_overview["month_revenue"] == 22000.0
+    assert "En direct" in main_window._dashboard._last_refresh_lbl.text()
 
     # Navigate to vehicles
     main_window._switch_page("vehicles")
@@ -271,7 +286,9 @@ def test_tab_switching_preserves_server_authority(main_window):
     # Navigate back to dashboard
     main_window._switch_page("dashboard")
     assert main_window._current_page_key == "dashboard"
-    assert main_window._dashboard._card_rented._count_lbl.text() == "3"
+    assert main_window._authoritative_server_overview["month_revenue"] == 22000.0
+    assert "En direct" in main_window._dashboard._last_refresh_lbl.text()
+    assert main_window._dashboard._card_rented._count_lbl.text() == "0"
     assert main_window._dashboard._card_available._count_lbl.text() == "0"
 
 
