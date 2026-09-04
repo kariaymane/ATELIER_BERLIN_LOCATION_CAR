@@ -8,14 +8,20 @@ ONE parser for the entire codebase:
 Policy (deterministic):
 - Accepts ISO-8601 strings ("Z", explicit offsets, naive legacy values),
   datetime objects, and SQLite "YYYY-MM-DD HH:MM:SS" timestamps.
-- Naive values are interpreted as UTC (server serializes UTC; legacy local
-  rows were written with UTC wall time).
+- Naive values are interpreted as BUSINESS-LOCAL wall time (Africa/Casablanca),
+  exactly as shared.money_time.to_business — ONE naive-datetime policy across
+  backend, shared and desktop (v1.1.0 audit P2-4 unification). The server
+  serializes tz-aware ISO off TIMESTAMPTZ, so a naive value here only ever comes
+  from a legacy row / SQLite round-trip, which is business-local wall time.
 - Output is ALWAYS timezone-aware UTC.
 - Invalid input -> None (never raises).
 
 Business rule: datetime comparisons must NEVER be performed on strings.
 """
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
+
+_BUSINESS_TZ = ZoneInfo("Africa/Casablanca")
 
 import logging
 
@@ -31,13 +37,13 @@ def parse_datetime_utc(value):
         return None
     if isinstance(value, datetime):
         if value.tzinfo is None:
-            return value.replace(tzinfo=timezone.utc)
+            return value.replace(tzinfo=_BUSINESS_TZ).astimezone(timezone.utc)
         return value.astimezone(timezone.utc)
     try:
         s = str(value).strip().replace("Z", "+00:00").replace("z", "+00:00")
         dt = datetime.fromisoformat(s)
         if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
+            dt = dt.replace(tzinfo=_BUSINESS_TZ)   # unified: naive == business-local
         return dt.astimezone(timezone.utc)
     except Exception as e:
         logger.warning("parse_datetime_utc invalid format %r: %s", value, e)

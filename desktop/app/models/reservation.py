@@ -27,6 +27,9 @@ class LocalReservation(LocalBase):
     # Machine-readable cause when status == 'CANCELLED' (e.g. 'MAINTENANCE').
     # The human translation lives in the i18n layer, never here.
     cancellation_reason = Column(String(50), nullable=True)
+    # ISO instant the rental was cancelled — caps realised revenue for a
+    # rental interrupted after it started (mirrors backend reservations.cancelled_at).
+    cancelled_at = Column(String(50), nullable=True)
     notes = Column(Text, nullable=True)
 
     created_at = Column(String(30), nullable=False)

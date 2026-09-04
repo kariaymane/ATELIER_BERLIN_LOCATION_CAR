@@ -109,6 +109,7 @@ data class RentalDto(
     @Json(name = "payment_status") val paymentStatus: String = "PENDING",
     @Json(name = "status") val status: String = "RESERVED",
     @Json(name = "cancellation_reason") val cancellationReason: String? = null,
+    @Json(name = "cancelled_at") val cancelledAt: String? = null,
     @Json(name = "notes") val notes: String? = null,
     @Json(name = "vehicle_registration") val vehicleRegistration: String? = null,
     @Json(name = "vehicle_brand") val vehicleBrand: String? = null,

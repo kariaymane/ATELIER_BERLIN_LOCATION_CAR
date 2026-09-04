@@ -60,10 +60,12 @@ data class ReservationEntity(
     // BoundaryTicker / local effective-status derivation. `startDate`/`endDate`
     // above remain the localized display strings the screens render.
     val startDatetimeIso: String = "",
-    val endDatetimeIso: String = ""
+    val endDatetimeIso: String = "",
+    val cancellationReason: String? = null,
+    val cancelledAtIso: String? = null,
 ) {
-    fun toDomain() = Reservation(id, clientName, clientPhone, clientEmail, identityCardImage, drivingLicenseImage, vehicleId, vehicleName, vehiclePlate, vehicleImageUrl, startDate, endDate, ReservationStatus.fromApi(status), totalAmount, dailyPrice, numDays, deposit, paymentStatus, lastUpdated, pickupLocation, returnLocation, notes, startDatetimeIso, endDatetimeIso)
-    companion object { fun fromDomain(r: Reservation) = ReservationEntity(r.id, r.clientName, r.clientPhone, r.clientEmail, r.identityCardImage, r.drivingLicenseImage, r.vehicleId, r.vehicleName, r.vehiclePlate, r.vehicleImageUrl, r.startDate, r.endDate, r.status.apiValue, r.totalAmount, r.dailyPrice, r.numDays, r.deposit, r.paymentStatus, r.lastUpdated, r.pickupLocation, r.returnLocation, r.notes, r.startIso, r.endIso) }
+    fun toDomain() = Reservation(id, clientName, clientPhone, clientEmail, identityCardImage, drivingLicenseImage, vehicleId, vehicleName, vehiclePlate, vehicleImageUrl, startDate, endDate, ReservationStatus.fromApi(status), totalAmount, dailyPrice, numDays, deposit, paymentStatus, lastUpdated, pickupLocation, returnLocation, notes, startDatetimeIso, endDatetimeIso, cancellationReason, cancelledAtIso)
+    companion object { fun fromDomain(r: Reservation) = ReservationEntity(r.id, r.clientName, r.clientPhone, r.clientEmail, r.identityCardImage, r.drivingLicenseImage, r.vehicleId, r.vehicleName, r.vehiclePlate, r.vehicleImageUrl, r.startDate, r.endDate, r.status.apiValue, r.totalAmount, r.dailyPrice, r.numDays, r.deposit, r.paymentStatus, r.lastUpdated, r.pickupLocation, r.returnLocation, r.notes, r.startIso, r.endIso, r.cancellationReason, r.cancelledAtIso) }
 }
 
 @Entity(tableName = "maintenance")

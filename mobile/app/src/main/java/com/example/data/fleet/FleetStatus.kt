@@ -53,6 +53,8 @@ object FleetStatus {
         val endIso: String?,
         val totalAmount: Double = 0.0,
         val numDays: Int = 1,
+        val cancellationReason: String? = null,
+        val cancelledAtIso: String? = null,
     )
 
     data class MaintenanceRow(
@@ -272,7 +274,10 @@ object FleetStatus {
         // September" by when it started).
         var tB = 0; var wB = 0; var mB = 0; var yB = 0
         for (r in reservations) {
-            if (norm(r.status) == "CANCELLED") continue
+            // Mirror shared.revenue_reference.rentals_started_between: a
+            // maintenance-interrupted rental still "started" and still counts;
+            // any other CANCELLED does not.
+            if (norm(r.status) == "CANCELLED" && norm(r.cancellationReason) != "MAINTENANCE") continue
             val start = parseUtcMillis(r.startIso) ?: continue
             if (start in p.today) tB++; if (start in p.week) wB++
             if (start in p.month) mB++; if (start in p.year) yB++
@@ -281,8 +286,13 @@ object FleetStatus {
         // revenue = the ONE pro-rata engine (shared/revenue_reference.py).
         val rentals = reservations.map {
             RevenueEngine.Rental(
-                it.status, parseUtcMillis(it.startIso), it.numDays,
-                java.math.BigDecimal(it.totalAmount.toString()),
+                status = it.status,
+                startMillis = parseUtcMillis(it.startIso),
+                numDays = it.numDays,
+                totalPrice = java.math.BigDecimal(it.totalAmount.toString()),
+                cancellationReason = it.cancellationReason,
+                cancelledAtMillis = parseUtcMillis(it.cancelledAtIso),
+                endMillis = parseUtcMillis(it.endIso),
             )
         }
         fun rev(name: String): Double {

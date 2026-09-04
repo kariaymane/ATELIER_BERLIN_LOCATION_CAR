@@ -224,3 +224,158 @@ async def test_non_overlapping_maintenance_boundaries_preserve_rental(client: As
 
     await db_session.refresh(res)
     assert res.status == "RESERVED"  # untouched
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Post-release fix regression tests (v1.1.0 audit — P1-B, P1-C, P1-D)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_in_progress_RESERVED_rental_also_requires_confirmation(client: AsyncClient, admin_token, db_session):
+    """P1-C: a RESERVED reservation whose window COVERS NOW is a car physically
+    out on rent (no pickup step in this business). Maintenance over it must 409
+    without confirmation — the same as ACTIVE."""
+    now = datetime.now(TZ)
+    v = await _make_vehicle(db_session, status="RESERVED")
+    res = Reservation(
+        vehicle_id=v.id,
+        customer_name="Client RESERVED en cours",
+        start_datetime=now - timedelta(days=1),   # started yesterday
+        end_datetime=now + timedelta(days=4),     # ends in 4 days -> covers now
+        daily_price=Decimal("300.00"),
+        num_days=5,
+        total_price=Decimal("1500.00"),
+        deposit=0,
+        status="RESERVED",                        # never "Activer"-ed
+        payment_status="PAID",
+    )
+    db_session.add(res)
+    await db_session.commit()
+
+    headers = {"Authorization": f"Bearer {admin_token}"}
+    payload = {
+        "vehicle_id": str(v.id),
+        "type": "MÉCANIQUE",
+        "title": "Panne",
+        "start_datetime": now.isoformat(),
+        "expected_end_datetime": (now + timedelta(days=2)).isoformat(),
+        "confirm_interruption": False,
+    }
+    resp = await client.post("/api/v1/maintenance", json=payload, headers=headers)
+    assert resp.status_code == 409, resp.text
+    await db_session.refresh(res)
+    assert res.status == "RESERVED"  # untouched — guard blocked the cancellation
+
+
+@pytest.mark.asyncio
+async def test_interrupted_rental_revenue_is_stable_and_not_full_contract(client: AsyncClient, admin_token, db_session):
+    """P1-B: a rental cancelled for maintenance realises ONLY the days elapsed
+    before the interruption, and that number never grows afterwards (a closed
+    period's revenue is immutable)."""
+    now = datetime.now(TZ)
+    v = await _make_vehicle(db_session, status="RENTED")
+    start = now - timedelta(days=3)
+    res = Reservation(
+        vehicle_id=v.id,
+        customer_name="Client Interrompu",
+        start_datetime=start,
+        end_datetime=now + timedelta(days=7),   # 10-day rental, 3 elapsed
+        daily_price=Decimal("300.00"),
+        num_days=10,
+        total_price=Decimal("3000.00"),
+        deposit=0,
+        status="ACTIVE",
+        payment_status="PAID",
+    )
+    db_session.add(res)
+    await db_session.commit()
+
+    headers = {"Authorization": f"Bearer {admin_token}"}
+    payload = {
+        "vehicle_id": str(v.id),
+        "type": "RÉVISION",
+        "title": "Révision",
+        "start_datetime": now.isoformat(),
+        "expected_end_datetime": (now + timedelta(days=2)).isoformat(),
+        "confirm_interruption": True,
+    }
+    resp = await client.post("/api/v1/maintenance", json=payload, headers=headers)
+    assert resp.status_code in (200, 201), resp.text
+    await db_session.refresh(res)
+    assert res.status == "CANCELLED" and res.cancellation_reason == "MAINTENANCE"
+    assert res.cancelled_at is not None, "cancelled_at must be recorded"
+
+    year_start = now.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+    year_end = year_start.replace(year=year_start.year + 1)
+
+    rev_now = (await revenue_between(db_session, year_start, year_end, now=now))["revenue"]
+    # ~4 realised days (day0..day3) @ 300 = ~1200; definitely > 0 and < the full 3000
+    assert 0 < rev_now < 3000.0, f"expected partial realised revenue, got {rev_now}"
+
+    # Advance the evaluation clock far past the ORIGINAL end — revenue must NOT move.
+    future = now + timedelta(days=60)
+    rev_future = (await revenue_between(db_session, year_start, year_end, now=future))["revenue"]
+    assert rev_future == pytest.approx(rev_now), (
+        f"interrupted-rental revenue changed retroactively: {rev_now} -> {rev_future}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_patch_activating_maintenance_over_in_progress_rental_requires_confirmation(
+    client: AsyncClient, admin_token, db_session
+):
+    """P1-D: PATCH /maintenance/{id} that transitions a ticket into an active
+    state over a car currently out on rent must 409 without confirmation —
+    closing the create-path bypass (create CANCELLED, then PATCH to active)."""
+    now = datetime.now(TZ)
+    v = await _make_vehicle(db_session, status="RENTED")
+    res = Reservation(
+        vehicle_id=v.id,
+        customer_name="Client PATCH",
+        start_datetime=now - timedelta(days=1),
+        end_datetime=now + timedelta(days=4),
+        daily_price=Decimal("300.00"),
+        num_days=5,
+        total_price=Decimal("1500.00"),
+        deposit=0,
+        status="ACTIVE",
+        payment_status="PAID",
+    )
+    db_session.add(res)
+    await db_session.commit()
+
+    headers = {"Authorization": f"Bearer {admin_token}"}
+
+    # Create a CANCELLED ticket over the same window — no guard, no cancellation.
+    create = {
+        "vehicle_id": str(v.id),
+        "type": "MÉCANIQUE",
+        "title": "Ticket dormant",
+        "start_datetime": now.isoformat(),
+        "expected_end_datetime": (now + timedelta(days=2)).isoformat(),
+        "status": "CANCELLED",
+    }
+    r_create = await client.post("/api/v1/maintenance", json=create, headers=headers)
+    assert r_create.status_code in (200, 201), r_create.text
+    mid = r_create.json()["id"]
+    await db_session.refresh(res)
+    assert res.status == "ACTIVE"  # not touched by a CANCELLED ticket
+
+    # PATCH it active WITHOUT confirmation -> 409
+    r_patch = await client.patch(
+        f"/api/v1/maintenance/{mid}", json={"status": "ACTIVE"}, headers=headers
+    )
+    assert r_patch.status_code == 409, r_patch.text
+    await db_session.refresh(res)
+    assert res.status == "ACTIVE"  # still protected
+
+    # PATCH it active WITH confirmation -> succeeds, rental interrupted
+    r_patch2 = await client.patch(
+        f"/api/v1/maintenance/{mid}",
+        json={"status": "ACTIVE", "confirm_interruption": True},
+        headers=headers,
+    )
+    assert r_patch2.status_code in (200, 201), r_patch2.text
+    await db_session.refresh(res)
+    assert res.status == "CANCELLED" and res.cancellation_reason == "MAINTENANCE"

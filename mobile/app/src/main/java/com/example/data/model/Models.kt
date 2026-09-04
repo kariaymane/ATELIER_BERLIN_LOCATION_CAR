@@ -107,7 +107,12 @@ data class Reservation(
     // Raw ISO-8601 UTC interval edges (machine-parseable; `startDate`/`endDate`
     // are the localized display strings).
     val startIso: String = "",
-    val endIso: String = ""
+    val endIso: String = "",
+    // Machine cause when status == CANCELLED (e.g. "MAINTENANCE"); ISO instant
+    // of the cancellation. Used by the offline revenue engine to preserve the
+    // days realised before a maintenance interruption.
+    val cancellationReason: String? = null,
+    val cancelledAtIso: String? = null,
 )
 
 enum class MaintenanceStep(val label: String, val order: Int) {

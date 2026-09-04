@@ -6,7 +6,7 @@ Handles offline-first queuing, retries, idempotency, and connection failures gra
 import json
 import httpx
 from typing import Optional
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import logging
 
 from app.sync.queue import SyncQueue
@@ -32,6 +32,9 @@ class SyncEngine:
         self._base_url = (base_url or API_BASE_URL).rstrip("/")
         self._is_online = False
         self._last_sync: Optional[datetime] = None
+        # Highest /sync/bootstrap revision applied — guards against a truncated
+        # 200 response purging a populated cache (see bootstrap()).
+        self._bootstrap_revision: int = 0
         self._upload_processor = PendingUploadProcessor(self)
 
     def set_token(self, token: str, refresh_token: str = None):
@@ -373,6 +376,7 @@ class SyncEngine:
                         r.deposit = payload.get("deposit", getattr(r, 'deposit', 0.0))
                         r.status = payload.get("status", getattr(r, 'status', "RESERVED"))
                         r.cancellation_reason = payload.get("cancellation_reason", getattr(r, 'cancellation_reason', None))
+                        r.cancelled_at = payload.get("cancelled_at", getattr(r, 'cancelled_at', None))
                         r.payment_status = payload.get("payment_status", getattr(r, 'payment_status', "PENDING"))
                         r.version = ver
                         r.updated_at = now_iso
@@ -528,8 +532,12 @@ class SyncEngine:
     async def bootstrap(self) -> dict:
         """Atomic full synchronization from /api/v1/sync/bootstrap.
 
-        Guarantees that local SQLite cache is a 100% faithful mirror of PostgreSQL,
-        purging any local records that were deleted on the server without lingering.
+        Reconciles the local SQLite cache against the authoritative PostgreSQL
+        snapshot — upserting fresh rows and PURGING rows the server no longer
+        has. Because it deletes, a partial/degraded server response (HTTP 200
+        but truncated body) could wipe good local data — so it is guarded:
+        a snapshot whose ``revision`` did not advance and that is emptier than
+        the current cache is rejected without touching a single row.
         """
         if not self._access_token:
             return {"status": "offline", "message": "Not authenticated"}
@@ -552,6 +560,37 @@ class SyncEngine:
                 from app.models.reservation import LocalReservation
                 from app.models.maintenance import LocalMaintenance, LocalMaintenancePart
                 from app.models.client import LocalClient
+
+                server_vehicles = data.get("vehicles", []) or []
+                server_clients = data.get("clients", []) or []
+                server_rentals = data.get("rentals", []) or data.get("reservations", []) or []
+                server_maint = data.get("maintenance", []) or []
+                server_total = (len(server_vehicles) + len(server_clients)
+                                + len(server_rentals) + len(server_maint))
+                local_total = (
+                    session.query(LocalVehicle).count()
+                    + session.query(LocalClient).count()
+                    + session.query(LocalReservation).count()
+                    + session.query(LocalMaintenance).count()
+                )
+                incoming_rev = int(data.get("revision") or 0)
+                # Completeness guard: never let a 200-but-truncated snapshot purge
+                # a populated cache. Accept a smaller snapshot only when the
+                # server's monotonic revision has moved forward (real deletions).
+                if (
+                    local_total > 0
+                    and server_total == 0
+                ) or (
+                    local_total > 5
+                    and server_total * 2 < local_total
+                    and incoming_rev <= (self._bootstrap_revision or 0)
+                ):
+                    logger.warning(
+                        "bootstrap: rejecting suspect snapshot (server=%d local=%d rev=%d<=%s) — no rows touched",
+                        server_total, local_total, incoming_rev, self._bootstrap_revision,
+                    )
+                    return {"status": "rejected", "message": "suspect/partial server snapshot"}
+                self._bootstrap_revision = max(self._bootstrap_revision or 0, incoming_rev)
 
                 p_rows = session.query(SyncQueueItem.entity_id).filter(
                     SyncQueueItem.sync_status == "PENDING"
@@ -656,6 +695,7 @@ class SyncEngine:
                     r.deposit = float(r_dto.get("deposit", 0.0) or 0.0)
                     r.status = r_dto.get("status", "RESERVED")
                     r.cancellation_reason = r_dto.get("cancellation_reason")
+                    r.cancelled_at = r_dto.get("cancelled_at")
                     r.payment_status = r_dto.get("payment_status", "PENDING")
                     r.notes = r_dto.get("notes")
                     r.version = r_dto.get("version", 1)

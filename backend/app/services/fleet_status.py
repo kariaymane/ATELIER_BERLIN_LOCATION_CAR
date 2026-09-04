@@ -126,7 +126,10 @@ async def compute_effective_statuses(
     reserved_vids: set[str] = set()
     for vid, r_start in (await session.execute(r_query)).all():
         if r_start is not None and r_start.tzinfo is None:
-            r_start = r_start.replace(tzinfo=timezone.utc)
+            # Unified naive-datetime policy: business-local wall time, as
+            # shared.money_time / shared.fleet_status_reference (audit P2-4).
+            from shared.money_time import BUSINESS_TZ
+            r_start = r_start.replace(tzinfo=BUSINESS_TZ)
         if r_start is not None and r_start <= now:
             rented_vids.add(str(vid))
         else:

@@ -36,9 +36,34 @@ def _dt(v):
     return None if v is None else datetime.fromisoformat(str(v).replace("Z", "+00:00"))
 
 
+async def _seed_without_triggers(db_session: AsyncSession):
+    """Suppress the reservation<->maintenance overlap trigger while seeding.
+
+    These vectors exercise the effective-status DERIVATION over arbitrary
+    coexisting rows (e.g. an ACTIVE reservation AND an ACTIVE maintenance on the
+    same vehicle — the "maintenance wins" precedence case). PostgreSQL's
+    `check_reservation_maintenance_overlap` trigger legitimately blocks BOOKING
+    over maintenance in production, but here we need the raw state to test the
+    derivation, so bypass it for the fixture only (no-op on SQLite)."""
+    from sqlalchemy import text
+    try:
+        await db_session.execute(text("SET session_replication_role = replica"))
+    except Exception:
+        pass
+
+
+async def _restore_triggers(db_session: AsyncSession):
+    from sqlalchemy import text
+    try:
+        await db_session.execute(text("SET session_replication_role = origin"))
+    except Exception:
+        pass
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("case", _CASES["cases"], ids=lambda c: c["name"])
 async def test_backend_matches_reference(case, db_session: AsyncSession):
+    await _seed_without_triggers(db_session)
     idmap: dict[str, object] = {}
     for v in case["vehicles"]:
         vid = uuid4()
@@ -66,6 +91,7 @@ async def test_backend_matches_reference(case, db_session: AsyncSession):
             actual_end_datetime=_dt(m.get("actual_end")),
         ))
     await db_session.commit()
+    await _restore_triggers(db_session)
 
     want_eff = ref_effective(case["vehicles"], case["reservations"],
                              case["maintenances"], _NOW)

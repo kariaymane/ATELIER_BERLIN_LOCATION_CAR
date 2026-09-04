@@ -52,6 +52,7 @@ def _rental_response(r, vehicle=None) -> RentalResponse:
         payment_status=r.payment_status,
         status=r.status,
         cancellation_reason=getattr(r, "cancellation_reason", None),
+        cancelled_at=getattr(r, "cancelled_at", None),
         notes=r.notes,
         created_at=r.created_at,
         updated_at=r.updated_at,

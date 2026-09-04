@@ -137,11 +137,19 @@ class RentalRepository(BaseRepository[Reservation]):
         if dialect_name == "postgresql":
             query = query.with_for_update()
 
+        from shared.money_time import now_business, to_business
+        cancelled_instant = now_business()
+
         result = await self._session.execute(query)
         affected = list(result.scalars().all())
         for res in affected:
             res.status = "CANCELLED"
             res.cancellation_reason = reason
+            # Cap realised revenue at the interruption instant, but never later
+            # than the rental's own end (an interruption after the scheduled
+            # return realises the whole rental, not more).
+            _end = to_business(res.end_datetime) if res.end_datetime else None
+            res.cancelled_at = min(cancelled_instant, _end) if _end else cancelled_instant
             res.version += 1
         if affected:
             await self._session.flush()
@@ -152,9 +160,24 @@ class RentalRepository(BaseRepository[Reservation]):
         vehicle_id: UUID,
         maint_start: datetime,
         maint_end: Optional[datetime],
+        now: Optional[datetime] = None,
     ) -> list[Reservation]:
-        """Query currently active in-progress reservations overlapping the maintenance window."""
-        from app.services.fleet_status import FAR_FUTURE
+        """Reservations that are physically IN PROGRESS right now and overlap the
+        maintenance window — i.e. cars actually out on rent that maintenance
+        would interrupt.
+
+        CANONICAL: a blocking reservation (status RESERVED **or** ACTIVE) whose
+        window covers ``now`` (``start <= now < end``) means the car is out —
+        this business has no separate pickup step, so ``ACTIVE`` is an optional
+        refinement, never the precondition (see shared/fleet_status_reference).
+        Filtering on ``status == 'ACTIVE'`` alone missed the majority of real
+        in-progress rentals, which stay ``RESERVED``.
+        """
+        from app.services.fleet_status import FAR_FUTURE, BLOCKING_RESERVATION_STATUSES
+        from shared.money_time import now_business
+
+        if now is None:
+            now = now_business()
         if maint_end is None:
             maint_end = FAR_FUTURE
         if maint_end <= maint_start:
@@ -163,9 +186,13 @@ class RentalRepository(BaseRepository[Reservation]):
             select(Reservation)
             .where(
                 Reservation.vehicle_id == vehicle_id,
-                Reservation.status == "ACTIVE",
+                Reservation.status.in_(BLOCKING_RESERVATION_STATUSES),
+                # overlaps the maintenance window …
                 Reservation.start_datetime < maint_end,
                 Reservation.end_datetime > maint_start,
+                # … AND is in progress right now (car physically out)
+                Reservation.start_datetime <= now,
+                Reservation.end_datetime > now,
             )
         )
         result = await self._session.execute(query)

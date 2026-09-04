@@ -13,6 +13,17 @@ async def test_process_pull_includes_created_at(db_session, admin_user):
     service = SyncService(db_session)
     now = datetime.now(timezone.utc)
 
+    # This test seeds a vehicle that has BOTH an active reservation and an
+    # active maintenance (to prove all four entity payloads carry created_at).
+    # PostgreSQL's reservation<->maintenance overlap trigger blocks that raw
+    # combination (it is a booking guard, not a derivation rule), so suppress
+    # it for the fixture only — no-op on SQLite.
+    from sqlalchemy import text
+    try:
+        await db_session.execute(text("SET session_replication_role = replica"))
+    except Exception:
+        pass
+
     # 1. Create entities with explicit created_at
     vid = uuid4()
     v = Vehicle(

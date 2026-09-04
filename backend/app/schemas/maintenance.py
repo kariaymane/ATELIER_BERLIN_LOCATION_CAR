@@ -96,6 +96,9 @@ class MaintenanceUpdate(BaseModel):
     status: Optional[str] = Field(None, max_length=20)
     notes: Optional[str] = None
     parts: Optional[List[MaintenancePartCreate]] = None
+    # Explicit operator confirmation to interrupt a car that is out on rent
+    # right now when this PATCH activates the ticket (Policy B guard).
+    confirm_interruption: bool = False
 
 class MaintenanceResponse(MaintenanceBase):
     id: UUID

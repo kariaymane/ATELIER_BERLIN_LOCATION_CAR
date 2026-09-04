@@ -65,6 +65,9 @@ class RevenueEngineParityTest {
                         startMillis = millis(r.getString("start_datetime")),
                         numDays = r.getInt("num_days"),
                         totalPrice = BigDecimal(r.getString("total_price")),
+                        cancellationReason = r.optString("cancellation_reason", null),
+                        cancelledAtMillis = r.optString("cancelled_at", null)?.let { s -> millis(s) },
+                        endMillis = r.optString("end_datetime", null)?.let { s -> millis(s) },
                     )
                 }
             }

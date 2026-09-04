@@ -32,7 +32,23 @@ object RevenueEngine {
         val numDays: Int,
         val totalPrice: BigDecimal?,
         val dailyPrice: BigDecimal? = null,
+        /** Machine cause when status == CANCELLED (e.g. "MAINTENANCE"). */
+        val cancellationReason: String? = null,
+        /** Instant the rental was cancelled — caps realised days for a rental
+         *  interrupted after it started. Falls back to endMillis for legacy rows. */
+        val cancelledAtMillis: Long? = null,
+        val endMillis: Long? = null,
     )
+
+    /** Mirror of shared.revenue_reference.is_revenue_eligible. */
+    private fun isRevenueEligible(r: Rental): Boolean {
+        val s = (r.status ?: "").trim().uppercase(Locale.US)
+        if (s.isEmpty()) return false
+        if (s == "CANCELLED") {
+            return (r.cancellationReason ?: "").trim().uppercase(Locale.US) == "MAINTENANCE"
+        }
+        return true
+    }
 
     /** Epoch-day (days since 1970-01-01) of the business-local calendar date a
      *  moment falls on. Uses the "UTC midnight of that Y/M/D" trick so the
@@ -103,9 +119,17 @@ object RevenueEngine {
         r: Rental, fromEpochDay: Long, toEpochDay: Long, nowMillis: Long, zone: TimeZone,
     ): Int {
         val status = (r.status ?: "").trim().uppercase(Locale.US)
-        if (status == "CANCELLED") return 0
+        if (!isRevenueEligible(r)) return 0
         if (r.numDays <= 0 || r.startMillis == null) return 0
-        val realised = if (status == "COMPLETED") {
+        val reason = (r.cancellationReason ?: "").trim().uppercase(Locale.US)
+        val realised = if (status == "CANCELLED" && reason == "MAINTENANCE") {
+            // Interrupted rental: only days realised BEFORE the interruption,
+            // and that number never grows afterwards. Cap the clock at
+            // cancelledAt (fall back to endMillis for legacy rows).
+            val cap = r.cancelledAtMillis ?: r.endMillis
+            val effectiveNow = if (cap != null) minOf(nowMillis, cap) else nowMillis
+            realisedDays(r.startMillis, r.numDays, effectiveNow)
+        } else if (status == "COMPLETED") {
             r.numDays
         } else {
             realisedDays(r.startMillis, r.numDays, nowMillis)

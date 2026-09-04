@@ -54,6 +54,7 @@ async def _load_candidate_reservations(
             {
                 "status": r.status,
                 "cancellation_reason": r.cancellation_reason,
+                "cancelled_at": to_business(r.cancelled_at) if getattr(r, "cancelled_at", None) else None,
                 "start_datetime": to_business(r.start_datetime),
                 "end_datetime": to_business(r.end_datetime) if r.end_datetime else None,
                 "num_days": int(r.num_days or 0),

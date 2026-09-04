@@ -121,9 +121,14 @@ def _realised_day_dates(res: dict, now: datetime):
     reason = str(res.get("cancellation_reason") or "").strip().upper()
 
     if status == CANCELLED and (reason == "MAINTENANCE" or res.get("realised_revenue_preserved")):
-        # Interrupted rental: only days elapsed prior to the interruption are realised.
-        end_cap = _as_datetime(res.get("cancelled_at") or res.get("end_datetime")) if (res.get("cancelled_at") or res.get("end_datetime")) else None
-        effective_now = min(now, end_cap) if end_cap else now
+        # Interrupted rental: only the days realised BEFORE the interruption
+        # count, and that number must never grow afterwards (a closed period's
+        # revenue is immutable). Cap the clock at the cancellation instant;
+        # fall back to the rental's own end for legacy rows with no
+        # ``cancelled_at`` (matches the migration back-fill).
+        _cap_src = res.get("cancelled_at") or res.get("end_datetime") or res.get("end_date")
+        cap = _as_datetime(_cap_src) if _cap_src else None
+        effective_now = min(now, cap) if cap is not None else now
         realised = _realised_days(start_dt, num_days, effective_now)
     elif status == "COMPLETED":
         realised = num_days
