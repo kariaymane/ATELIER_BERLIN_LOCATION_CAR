@@ -50,7 +50,9 @@ class DashboardService:
             "MAINTENANCE": maintenance,
         }
 
-        rental_counts = await self._rental_repo.count_by_status()
+        operational_rentals = await self._rental_repo.count_operational_rentals(now=now)
+        active_rentals = operational_rentals["active_rentals"]
+        reserved_rentals = operational_rentals["reserved_rentals"]
 
         # Open maintenance tickets in total (excluding completed and cancelled)
         from app.models.maintenance import Maintenance
@@ -96,8 +98,8 @@ class DashboardService:
             "reserved": vehicle_counts.get("RESERVED", 0),
             "rented": vehicle_counts.get("RENTED", 0),
             "maintenance": vehicle_counts.get("MAINTENANCE", 0),
-            "active_rentals": rental_counts.get("ACTIVE", 0),
-            "reserved_rentals": rental_counts.get("RESERVED", 0),
+            "active_rentals": active_rentals,
+            "reserved_rentals": reserved_rentals,
             "active_maintenance_tickets": active_maintenance_tickets,
             "today_rentals": today_rentals,
             "today_returns": today_returns,

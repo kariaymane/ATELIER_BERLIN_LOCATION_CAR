@@ -15,6 +15,12 @@ except ImportError:
 
 def get_data_dir() -> Path:
     """Get writable application data directory, prioritizing OS standards."""
+    custom = os.environ.get("CAR_RENTAL_DATA_DIR")
+    if custom:
+        custom_dir = Path(custom).expanduser()
+        custom_dir.mkdir(parents=True, exist_ok=True)
+        return custom_dir
+
     app_name = "CarRentalSystem"
     if sys.platform == "win32":
         base = Path(os.environ.get("APPDATA", "~")).expanduser()
@@ -67,7 +73,7 @@ def get_data_dir() -> Path:
 APP_DIR = Path(__file__).parent
 DATA_DIR = get_data_dir()
 DB_PATH = DATA_DIR / "car_rental_local.db"
-SQLITE_URL = f"sqlite:///{DB_PATH}"
+SQLITE_URL = os.environ.get("CAR_RENTAL_SQLITE_URL", f"sqlite:///{DB_PATH}")
 
 # API
 _raw_api_url = os.environ.get("API_BASE_URL", "https://car-rental-system.fly.dev").rstrip("/")

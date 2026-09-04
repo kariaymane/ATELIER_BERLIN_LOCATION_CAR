@@ -34,8 +34,9 @@ class BaseRepository(Generic[T]):
         page: int = 1,
         page_size: int = 25,
         filters: Optional[list] = None,
+        order_by: Optional[list] = None,
     ) -> tuple[list[T], int]:
-        """Get paginated entities with optional filters."""
+        """Get paginated entities with optional filters and ordering."""
         query = select(self._model_class)
         count_query = select(func.count()).select_from(self._model_class)
 
@@ -44,9 +45,12 @@ class BaseRepository(Generic[T]):
                 query = query.where(f)
                 count_query = count_query.where(f)
 
+        if order_by:
+            query = query.order_by(*order_by)
+
         # Get total count
         total_result = await self._session.execute(count_query)
-        total = total_result.scalar()
+        total = total_result.scalar() or 0
 
         # Get paginated results
         offset = (page - 1) * page_size

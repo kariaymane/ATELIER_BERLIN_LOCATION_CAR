@@ -546,7 +546,7 @@ class SyncEngine:
             headers = {"Authorization": f"Bearer {self._access_token}"}
             async with httpx.AsyncClient(timeout=30.0) as client:
                 resp = await client.get(
-                    f"{API_BASE_URL}/api/{API_VERSION}/sync/bootstrap",
+                    f"{self._base_url}/api/{API_VERSION}/sync/bootstrap",
                     headers=headers
                 )
                 if resp.status_code != 200:
@@ -573,29 +573,25 @@ class SyncEngine:
                     + session.query(LocalReservation).count()
                     + session.query(LocalMaintenance).count()
                 )
-                incoming_rev = int(data.get("revision") or 0)
-                # Completeness guard: never let a 200-but-truncated snapshot purge
-                # a populated cache. Accept a smaller snapshot only when the
-                # server's monotonic revision has moved forward (real deletions).
-                if (
-                    local_total > 0
-                    and server_total == 0
-                ) or (
-                    local_total > 5
-                    and server_total * 2 < local_total
-                    and incoming_rev <= (self._bootstrap_revision or 0)
-                ):
-                    logger.warning(
-                        "bootstrap: rejecting suspect snapshot (server=%d local=%d rev=%d<=%s) — no rows touched",
-                        server_total, local_total, incoming_rev, self._bootstrap_revision,
-                    )
-                    return {"status": "rejected", "message": "suspect/partial server snapshot"}
-                self._bootstrap_revision = max(self._bootstrap_revision or 0, incoming_rev)
-
                 p_rows = session.query(SyncQueueItem.entity_id).filter(
                     SyncQueueItem.sync_status == "PENDING"
                 ).all()
                 pending_ids = {str(r[0]) for r in p_rows if r[0]}
+                has_pending = bool(pending_ids)
+
+                incoming_rev = int(data.get("revision") or 0)
+                # Completeness guard: reject if snapshot is completely empty while local has rows,
+                # or if snapshot is suspiciously smaller while local has pending unsynced changes.
+                if (local_total > 0 and server_total == 0) or (
+                    has_pending and local_total > 5 and server_total * 2 < local_total and incoming_rev <= (self._bootstrap_revision or 0)
+                ):
+                    logger.warning(
+                        "bootstrap: rejecting suspect snapshot (server=%d local=%d rev=%d<=%s pending=%s) — no rows touched",
+                        server_total, local_total, incoming_rev, self._bootstrap_revision, has_pending,
+                    )
+                    return {"status": "rejected", "message": "suspect/partial server snapshot"}
+                self._bootstrap_revision = max(self._bootstrap_revision or 0, incoming_rev)
+
                 now_iso = datetime.now(timezone.utc).isoformat()
 
                 # 1. Reconcile VEHICLES
@@ -753,6 +749,18 @@ class SyncEngine:
                     m.updated_at = now_iso
                     if not getattr(m, "created_at", None):
                         m.created_at = m_dto.get("created_at") or now_iso
+
+                # 5. Purge any orphaned local records referencing non-existent vehicles
+                known_v_ids = {str(v.id) for v in session.query(LocalVehicle.id).all()}
+                for lr in session.query(LocalReservation).all():
+                    if str(lr.vehicle_id) not in known_v_ids and str(lr.id) not in pending_ids:
+                        logger.warning("Bootstrap: purging orphaned reservation %s with non-existent vehicle %s", lr.id, lr.vehicle_id)
+                        session.delete(lr)
+                for lm in session.query(LocalMaintenance).all():
+                    if str(lm.vehicle_id) not in known_v_ids and str(lm.id) not in pending_ids:
+                        logger.warning("Bootstrap: purging orphaned maintenance %s with non-existent vehicle %s", lm.id, lm.vehicle_id)
+                        session.query(LocalMaintenancePart).filter_by(maintenance_id=lm.id).delete()
+                        session.delete(lm)
 
                 session.commit()
                 self._is_online = True

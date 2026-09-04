@@ -153,13 +153,30 @@ class RentalService:
         page: int = 1,
         page_size: int = 25,
         status: Optional[str] = None,
+        scope: Optional[str] = None,
     ) -> dict:
-        """List rentals with pagination and optional status filter."""
+        """List rentals with pagination, deterministic ordering, and optional status/scope filters."""
+        from sqlalchemy import or_, and_
+        from shared.money_time import now_business
+
         filters = []
         if status:
             filters.append(Reservation.status == status)
+
+        if scope:
+            norm_scope = scope.strip().lower()
+            if norm_scope == "current":
+                filters.append(Reservation.status.in_(["ACTIVE", "RESERVED"]))
+            elif norm_scope == "history":
+                filters.append(Reservation.status.in_(["COMPLETED", "CANCELLED"]))
+
+        order_by = [
+            Reservation.start_datetime.desc(),
+            Reservation.created_at.desc(),
+            Reservation.id.desc(),
+        ]
         rentals, total = await self._repo.get_all(
-            page=page, page_size=page_size, filters=filters if filters else None
+            page=page, page_size=page_size, filters=filters if filters else None, order_by=order_by
         )
         return {
             "rentals": rentals,

@@ -5,6 +5,7 @@ Mirrors the PostgreSQL schema with SQLite-compatible types.
 from sqlalchemy import create_engine, Column, String, Integer, Float, Text, Boolean
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 from app.config import SQLITE_URL
+import os
 import logging
 
 logger = logging.getLogger(__name__)
@@ -24,9 +25,19 @@ def init_local_db():
     In normal production runs the database file is preserved; tables are created if they do not yet exist.
     """
     global _engine, _session_factory
-    import os
+    import app.config
     reset_mode = os.getenv("CAR_RENTAL_DB_RESET", "0") == "1"
-    db_path = SQLITE_URL.replace('sqlite:///', '')
+    sqlite_url = os.environ.get("CAR_RENTAL_SQLITE_URL") or app.config.SQLITE_URL
+    db_path = sqlite_url.replace('sqlite:///', '')
+
+    # Production safety guard: Never delete default production database under test resets
+    default_prod_dir = app.config.get_data_dir()
+    default_prod_db = str((default_prod_dir / "car_rental_local.db").resolve())
+    resolved_target = str(os.path.abspath(db_path))
+    if reset_mode and resolved_target == default_prod_db and not os.getenv("ALLOW_PRODUCTION_RESET"):
+        logger.warning("[SAFETY GUARD] Blocked attempt to delete production database %s", db_path)
+        reset_mode = False
+
     if reset_mode:
         try:
             for ext in ('', '-wal', '-shm'):
@@ -40,7 +51,7 @@ def init_local_db():
         logger.info("[PRESERVE] Existing SQLite database preserved.")
     # Create engine (will create file if missing)
     _engine = create_engine(
-        SQLITE_URL,
+        sqlite_url,
         echo=False,
         # Allow multi-threading and add timeout
         connect_args={'check_same_thread': False, 'timeout': 15}

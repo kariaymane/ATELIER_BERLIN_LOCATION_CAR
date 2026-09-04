@@ -63,3 +63,34 @@ def reservations_overlap(start_a, end_a, start_b, end_b) -> bool:
 def status_blocks_reservation(status) -> bool:
     """Normalize status: RESERVED/ACTIVE block; CANCELLED/COMPLETED do not."""
     return (status or "").upper() in BLOCKING_RESERVATION_STATUSES
+
+
+def format_datetime_range(start_val, end_val, include_time: bool = False, separator: str = " → ") -> str:
+    """Format start and end datetimes into canonical 'DD/MM/YYYY → DD/MM/YYYY'
+    (or 'DD/MM/YYYY HH:MM → DD/MM/YYYY HH:MM') in Africa/Casablanca time.
+    Returns '-' if both are None.
+    """
+    s_dt = parse_datetime_utc(start_val)
+    e_dt = parse_datetime_utc(end_val)
+
+    fmt = "%d/%m/%Y %H:%M" if include_time else "%d/%m/%Y"
+
+    s_str = s_dt.astimezone(_BUSINESS_TZ).strftime(fmt) if s_dt else ""
+    e_str = e_dt.astimezone(_BUSINESS_TZ).strftime(fmt) if e_dt else ""
+
+    if s_str and e_str:
+        return f"{s_str}{separator}{e_str}"
+    elif s_str:
+        return s_str
+    elif e_str:
+        return e_str
+    return "-"
+
+
+def format_datetime_business(val, fmt: str = "%d/%m/%Y") -> str:
+    """Format a single datetime/ISO-string in Africa/Casablanca time."""
+    dt = parse_datetime_utc(val)
+    if not dt:
+        return "-"
+    return dt.astimezone(_BUSINESS_TZ).strftime(fmt)
+

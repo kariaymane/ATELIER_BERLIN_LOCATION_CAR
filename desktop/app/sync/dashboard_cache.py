@@ -207,6 +207,25 @@ def compute_overview_rows(reservation_rows, fleet_counts, maintenances=None, now
                 if today_start <= end_biz.date() < today_end:
                     returns_today += 1
 
+    active_rentals = 0
+    reserved_rentals = 0
+    for r in rows:
+        rst = (_get(r, "status") or "").strip().upper()
+        s_dt = _parse_dt(_get(r, "start_datetime"))
+        e_dt = _parse_dt(_get(r, "end_datetime"))
+        if rst == "ACTIVE":
+            active_rentals += 1
+        elif rst == "RESERVED":
+            if s_dt and e_dt:
+                s_biz = _to_biz(s_dt)
+                e_biz = _to_biz(e_dt)
+                if s_biz <= now < e_biz:
+                    active_rentals += 1
+                elif s_biz > now:
+                    reserved_rentals += 1
+            elif s_dt and _to_biz(s_dt) > now:
+                reserved_rentals += 1
+
     out = {
         "total_vehicles": fleet_counts["total_vehicles"],
         "available": fleet_counts["available"],
@@ -215,6 +234,8 @@ def compute_overview_rows(reservation_rows, fleet_counts, maintenances=None, now
         "maintenance": fleet_counts["maintenance"],
         "active_maintenances": fleet_counts["maintenance"],
         "active_maintenance_tickets": open_tickets if maint_rows else fleet_counts["maintenance"],
+        "active_rentals": active_rentals,
+        "reserved_rentals": reserved_rentals,
         "today_returns": returns_today,
     }
     for key, name in (("today", "today"), ("week", "week"),
@@ -339,6 +360,7 @@ def compute_local_overview(session=None, now=None):
     """
     from app.database import get_local_session
     from app.models.reservation import LocalReservation
+    from app.models.maintenance import LocalMaintenance
     from app.utils.fleet_status import compute_fleet_counts
 
     own_session = session is None
@@ -346,8 +368,9 @@ def compute_local_overview(session=None, now=None):
         session = get_local_session()
     try:
         reservations = session.query(LocalReservation).all()
+        maintenances = session.query(LocalMaintenance).all()
         fleet = compute_fleet_counts(session, now=now)
-        return compute_overview_rows(reservations, fleet, now=now)
+        return compute_overview_rows(reservations, fleet, maintenances=maintenances, now=now)
     finally:
         if own_session:
             session.close()
