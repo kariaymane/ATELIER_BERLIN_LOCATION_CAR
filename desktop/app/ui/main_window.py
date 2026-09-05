@@ -7,6 +7,7 @@ import logging
 import asyncio
 from datetime import datetime, timezone, timedelta, date
 from pathlib import Path
+from typing import Optional, Dict, Any
 
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QFrame, QHBoxLayout, QVBoxLayout,
