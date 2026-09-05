@@ -665,7 +665,7 @@ class SyncEngine:
                 server_rentals = data.get("rentals", []) or data.get("reservations", [])
                 server_r_ids = {str(r.get("id")) for r in server_rentals}
                 for lr in session.query(LocalReservation).all():
-                    if str(lr.id) not in server_r_ids and str(lr.id) not in pending_ids:
+                    if (str(lr.id) not in server_r_ids or str(lr.vehicle_id) not in server_v_ids) and str(lr.id) not in pending_ids:
                         session.delete(lr)
 
                 for r_dto in server_rentals:
@@ -703,7 +703,7 @@ class SyncEngine:
                 server_maint = data.get("maintenance", [])
                 server_m_ids = {str(m.get("id")) for m in server_maint}
                 for lm in session.query(LocalMaintenance).all():
-                    if str(lm.id) not in server_m_ids and str(lm.id) not in pending_ids:
+                    if (str(lm.id) not in server_m_ids or str(lm.vehicle_id) not in server_v_ids) and str(lm.id) not in pending_ids:
                         session.query(LocalMaintenancePart).filter_by(maintenance_id=lm.id).delete()
                         session.delete(lm)
 

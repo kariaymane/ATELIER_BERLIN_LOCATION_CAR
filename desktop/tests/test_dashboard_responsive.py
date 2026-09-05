@@ -32,7 +32,10 @@ EXTREME = [(1024, 600), (900, 560)]
 
 
 def _dto():
-    from tests.test_dashboard_rebuild import make_dto
+    try:
+        from tests.test_dashboard_rebuild import make_dto
+    except ImportError:
+        from desktop.tests.test_dashboard_rebuild import make_dto
     return make_dto()
 
 

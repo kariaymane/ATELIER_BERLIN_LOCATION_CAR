@@ -481,7 +481,7 @@ class MainWindow(QMainWindow):
         # Prime the canonical snapshot, then sync. The reload publishes to every
         # subscribed view; no per-view kick-off needed.
         self._store.reload()
-        self._run_sync()
+        self._run_sync(force_bootstrap=True)
 
     def _load_vehicles_from_local(self):
         """Render the Vehicles page FROM the canonical snapshot.
@@ -603,9 +603,19 @@ class MainWindow(QMainWindow):
                     self._on_server_snapshot(dto)
                     return dto
             except ServerContractMismatchError as e:
-                # A deployed backend older than this client. Never silently
-                # degrade to a local number that would look authoritative.
-                logger.error("Dashboard contract mismatch: %s", e)
+                # A deployed backend older than this client (e.g. running v28 with /stats but without /summary).
+                # Query legacy server endpoints (/stats, /revenue) to build a server-authoritative DTO
+                # rather than falling back to local SQLite cache or failing.
+                logger.info("Dashboard contract mismatch (%s) — using legacy server endpoints", e)
+                try:
+                    legacy_dto = self._fetch_legacy_server_snapshot(
+                        period, from_date, to_date_inclusive
+                    )
+                    if legacy_dto:
+                        self._on_server_snapshot(legacy_dto)
+                        return legacy_dto
+                except Exception as el:
+                    logger.warning("Legacy server snapshot fallback failed: %s", el)
             except Exception as e:
                 logger.info("Dashboard snapshot fetch failed (offline?): %s", e)
 
@@ -631,6 +641,113 @@ class MainWindow(QMainWindow):
         except Exception as e:
             logger.error("Local dashboard snapshot failed: %s", e, exc_info=True)
             return None
+
+    def _fetch_legacy_server_snapshot(self, period: str, from_date: date,
+                                      to_date_inclusive: date) -> Optional[dict]:
+        """Synthesize a canonical dashboard DTO from legacy server endpoints
+        (/stats, /revenue, /vehicle-performance) when the deployed backend
+        predates /dashboard/summary. PostgreSQL server values are authoritative.
+        """
+        stats = self._api.get_dashboard()
+        if not stats:
+            return None
+
+        f_iso = from_date.isoformat()
+        t_iso = to_date_inclusive.isoformat()
+        rev_data = None
+        try:
+            if period == "custom":
+                rev_data = self._api.get_revenue_range(f_iso, t_iso)
+            else:
+                rev_data = self._api.get_period_revenue(period)
+        except Exception as e:
+            logger.debug("Legacy server revenue fetch note: %s", e)
+
+        rev_amount = float(rev_data.get("revenue", 0.0) or 0.0) if rev_data else 0.0
+        rev_rentals = int(rev_data.get("rentals", 0) or 0) if rev_data else 0
+        rev_days = int(rev_data.get("days_rented", 0) or 0) if rev_data else 0
+
+        top_list = []
+        try:
+            perf = self._api._request("get", "/api/v1/dashboard/vehicle-performance")
+            if perf and perf.status_code == 200:
+                raw_top = perf.json() or []
+                for item in raw_top[:5]:
+                    top_list.append({
+                        "vehicle_id": str(item.get("vehicle_id", "")),
+                        "registration": item.get("registration", ""),
+                        "brand": item.get("brand", ""),
+                        "model": item.get("model", ""),
+                        "rental_count": int(item.get("rental_count", 0) or 0),
+                        "rental_days": int(item.get("rental_days", 0) or 0),
+                        "revenue": float(item.get("total_revenue", 0.0) or 0.0),
+                        "last_rental": item.get("last_rental"),
+                    })
+        except Exception as e:
+            logger.debug("Legacy top vehicles fetch note: %s", e)
+
+        from shared.dashboard_reference import SCHEMA_VERSION, resolve_period
+        from app.ui.dashboard import _business_today
+        now_biz = _business_today()
+        period_meta = resolve_period(
+            period,
+            custom_from=from_date if period == "custom" else None,
+            custom_to_inclusive=to_date_inclusive if period == "custom" else None,
+            now=datetime.combine(now_biz, datetime.min.time()),
+        )
+
+        total_v = int(stats.get("total_vehicles", 0) or 0)
+        avail_v = int(stats.get("available", 0) or 0)
+        rented_v = int(stats.get("rented", 0) or 0)
+        reserved_v = int(stats.get("reserved", 0) or 0)
+        maint_v = int(stats.get("maintenance", 0) or 0)
+
+        # Update domain store with server stats so components reading overview stay aligned
+        self._store.update_server_dashboard(stats)
+
+        dto = {
+            "schema_version": SCHEMA_VERSION,
+            "source": "server",
+            "generated_at": datetime.now().isoformat(),
+            "period": period_meta,
+            "vehicles": {
+                "total": total_v,
+                "ready_to_rent": avail_v,
+                "active_rental": rented_v,
+                "reserved": reserved_v,
+                "maintenance": maint_v,
+                "excluded_structural": 0,
+                "fleet_size": total_v,
+            },
+            "revenue": {
+                "amount": rev_amount,
+                "rentals": rev_rentals,
+                "rental_days": rev_days,
+                "currency": "DH",
+                "standing_periods": {
+                    "today": {"revenue": float(stats.get("today_revenue", 0.0) or 0.0), "rentals": int(stats.get("today_rentals", 0) or 0), "rental_days": 0},
+                    "week": {"revenue": float(stats.get("week_revenue", 0.0) or 0.0), "rentals": int(stats.get("week_rentals", 0) or 0), "rental_days": 0},
+                    "month": {"revenue": float(stats.get("month_revenue", 0.0) or 0.0), "rentals": int(stats.get("month_rentals", 0) or 0), "rental_days": 0},
+                    "year": {"revenue": float(stats.get("year_revenue", 0.0) or 0.0), "rentals": int(stats.get("year_rentals", 0) or 0), "rental_days": 0},
+                },
+            },
+            "reservations_today": {
+                "count": int(stats.get("today_rentals", 0) or 0),
+                "starting_today": int(stats.get("today_rentals", 0) or 0),
+                "ending_today": int(stats.get("today_returns", 0) or 0),
+                "in_progress": rented_v,
+                "date": now_biz.isoformat(),
+            },
+            "maintenance": {
+                "active_tickets": int(stats.get("active_maintenance_tickets", 0) or 0),
+                "open_tickets": int(stats.get("active_maintenance_tickets", 0) or 0),
+                "vehicles_in_maintenance": maint_v,
+                "fleet_maintenance_vehicles": maint_v,
+            },
+            "top_vehicles": top_list,
+            "integrity": {"ok": True, "violations": []},
+        }
+        return dto
 
     def _on_server_snapshot(self, dto: dict):
         """Record the latest authoritative server snapshot (worker thread).
