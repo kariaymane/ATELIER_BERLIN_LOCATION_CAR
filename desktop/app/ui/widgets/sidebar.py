@@ -3,7 +3,7 @@ Sidebar navigation widget matching Stitch ATELIER BERLIN LOCATION CAR Design.
 Provides seamless LTR/RTL support and dynamic live re-translation.
 """
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QPushButton, QLabel, QFrame
+    QWidget, QVBoxLayout, QPushButton, QLabel, QFrame, QScrollArea, QSizePolicy
 )
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QFont
@@ -11,6 +11,19 @@ from app.i18n import t, is_rtl
 
 
 class Sidebar(QWidget):
+    """Navigation rail.
+
+    RESPONSIVE CONTRACT: the rail keeps a comfortable 260px on roomy windows
+    but is allowed to narrow to ``MIN_WIDTH`` so the main content is never
+    squeezed off-screen, and its contents live in a vertical QScrollArea so a
+    short window (720px tall or less, once the OS panel is subtracted) scrolls
+    the navigation instead of clipping the bottom entries. Previously
+    ``setFixedWidth(260)`` plus a tall un-scrollable column meant a small
+    screen simply lost the lower buttons.
+    """
+
+    MIN_WIDTH = 200
+    PREFERRED_WIDTH = 260
     page_changed = Signal(str)
     language_changed = Signal(str)
     theme_changed = Signal(str)
@@ -28,7 +41,9 @@ class Sidebar(QWidget):
     def __init__(self, user_role="EMPLOYEE", parent=None):
         super().__init__(parent)
         self.setObjectName("sidebar")
-        self.setFixedWidth(260)
+        self.setMinimumWidth(self.MIN_WIDTH)
+        self.setMaximumWidth(self.PREFERRED_WIDTH)
+        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
         self._user_role = user_role
         self._current_page = "dashboard"
         self._buttons = {}
@@ -37,8 +52,28 @@ class Sidebar(QWidget):
     def _setup_ui(self):
         self.setLayoutDirection(Qt.LayoutDirection.RightToLeft if is_rtl() else Qt.LayoutDirection.LeftToRight)
 
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(16, 20, 16, 20)
+        # The rail scrolls vertically so a short window never clips the lower
+        # navigation entries; horizontal scrolling stays off because every
+        # child is allowed to shrink.
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+        self._scroll = QScrollArea(self)
+        self._scroll.setWidgetResizable(True)
+        self._scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self._scroll.setStyleSheet("QScrollArea { background: transparent; border: none; }")
+        outer.addWidget(self._scroll)
+
+        inner = QWidget()
+        inner.setObjectName("sidebarInner")
+        inner.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        inner.setStyleSheet("background: transparent;")
+        self._scroll.setWidget(inner)
+
+        layout = QVBoxLayout(inner)
+        layout.setContentsMargins(14, 18, 14, 18)
         layout.setSpacing(6)
 
         # Official Transparent Logo (max 200px, KeepAspectRatio, SmoothTransformation, centered)
@@ -51,9 +86,11 @@ class Sidebar(QWidget):
         if logo_path.exists():
             pixmap = QPixmap(str(logo_path))
             if not pixmap.isNull():
+                # 150px, not 200: the rail can narrow to MIN_WIDTH and a
+                # 200px pixmap would then be wider than the content area.
                 scaled = pixmap.scaled(
-                    200,
-                    200,
+                    150,
+                    150,
                     Qt.AspectRatioMode.KeepAspectRatio,
                     Qt.TransformationMode.SmoothTransformation,
                 )

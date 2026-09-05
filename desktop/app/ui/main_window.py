@@ -11,7 +11,7 @@ from pathlib import Path
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QFrame, QHBoxLayout, QVBoxLayout,
     QStackedWidget, QLabel, QLineEdit, QPushButton,
-    QStatusBar, QMessageBox, QComboBox, QMenu, QApplication
+    QStatusBar, QMessageBox, QComboBox, QMenu, QApplication, QSizePolicy
 )
 from PySide6.QtCore import Qt, QTimer, QEvent, QThread, Signal
 from PySide6.QtGui import QFont, QAction
@@ -43,51 +43,6 @@ from app.ui.clients.client_details import ClientDetailsDialog
 from app.ui.settings.settings_widget import SettingsWidget
 
 logger = logging.getLogger(__name__)
-
-
-class DashboardFetcher(QThread):
-    """Fetches dashboard statistics from the API off the UI thread."""
-    stats_ready = Signal(dict, list)
-
-    def __init__(self, access_token: str, parent=None):
-        super().__init__(parent)
-        self._access_token = access_token
-
-    def run(self):
-        import requests
-        from app.config import API_BASE_URL, API_VERSION
-        overview = None
-        top_vehicles = []
-        try:
-            headers = {"Authorization": f"Bearer {self._access_token}"}
-            # 25s read timeout: the Fly machine can cold-start (a 5s timeout
-            # here made the dashboard show its empty 0-state after any idle
-            # period — same failure class as the old login timeout).
-            resp_stats = requests.get(
-                f"{API_BASE_URL}/api/{API_VERSION}/dashboard/stats",
-                headers=headers, timeout=(5, 25),
-            )
-            resp_perf = requests.get(
-                f"{API_BASE_URL}/api/{API_VERSION}/dashboard/vehicle-performance",
-                headers=headers, timeout=(5, 25),
-            )
-            if resp_stats.status_code == 200:
-                data = resp_stats.json()
-                # Pass the WHOLE canonical payload through (no key cherry-pick
-                # that silently drops year_* — FORENSIC_ROOT_CAUSE_ANALYSIS.md
-                # §4 C1). Add the aliases the widget also accepts.
-                overview = dict(data)
-                overview.setdefault("active_maintenances", data.get("active_maintenance_tickets", 0))
-                overview.setdefault("active_maintenance_tickets", data.get("active_maintenances", 0))
-                overview["day_locations"] = data.get("today_rentals", 0)
-                overview["week_locations"] = data.get("week_rentals", 0)
-                overview["month_locations"] = data.get("month_rentals", 0)
-                overview["year_locations"] = data.get("year_rentals", 0)
-                top_vehicles = resp_perf.json() if resp_perf.status_code == 200 else []
-        except Exception as e:
-            logger.info("Dashboard fetch failed (offline?): %s", e)
-        if overview is not None:
-            self.stats_ready.emit(overview, top_vehicles)
 
 
 class SyncThread(QThread):
@@ -156,7 +111,13 @@ class MainWindow(QMainWindow):
         set_language(current_lang)
 
         self.setWindowTitle(t("app_name"))
-        self.setMinimumSize(1200, 750)
+        # RESPONSIVE ROOT CAUSE FIX. The old floor was 1200x750: on a 1366x768
+        # or 1280x720 laptop the usable desktop area (minus title bar, panel
+        # and taskbar) is SHORTER than 750, so Qt could not honour the size and
+        # the shell was forced past the screen edge — the clipped sidebar and
+        # cut-off header in the reported screenshot. Every page now reflows and
+        # scrolls, so the window only needs to stay usable, not stay large.
+        self.setMinimumSize(900, 560)
 
         # Cache user locally for offline login
         self._cache_user_locally(user_data)
@@ -181,6 +142,11 @@ class MainWindow(QMainWindow):
         # Authoritative Live Server Dashboard State
         self._authoritative_server_overview = None
         self._authoritative_server_top_vehicles = None
+        self._authoritative_server_snapshot = None
+        # Which payload the dashboard is currently painting from:
+        # "dto" (snapshot endpoint), "overview" (legacy flat), or None (local
+        # mirror). Exactly one is ever used — they are never blended.
+        self._dashboard_source_kind = None
         self._has_server_dashboard = False
         self._dashboard_generation = 0
 
@@ -313,26 +279,38 @@ class MainWindow(QMainWindow):
         # Expanding spacer pushes all controls to the far right
         topbar_layout.addStretch(1)
 
-        # Global search bar
+        # Global search bar — shrinks with the window instead of pinning
+        # 260px and pushing the refresh/profile controls off the right edge.
         self._global_search = QLineEdit()
         self._global_search.setPlaceholderText(t("topbar.search_placeholder"))
-        self._global_search.setFixedWidth(260)
+        self._global_search.setMinimumWidth(120)
+        self._global_search.setMaximumWidth(320)
         self._global_search.setFixedHeight(36)
+        self._global_search.setSizePolicy(QSizePolicy.Policy.Expanding,
+                                          QSizePolicy.Policy.Fixed)
         self._global_search.setFont(QFont("Hanken Grotesk", 11))
         self._global_search.textChanged.connect(self._on_global_search)
-        topbar_layout.addWidget(self._global_search)
+        topbar_layout.addWidget(self._global_search, 1)
 
         # Refresh button
         self._refresh_btn = QPushButton(t("topbar.refresh"))
-        self._refresh_btn.setFixedSize(140, 36)
+        self._refresh_btn.setFixedHeight(36)
+        self._refresh_btn.setMinimumWidth(96)
+        self._refresh_btn.setMaximumWidth(160)
+        self._refresh_btn.setSizePolicy(QSizePolicy.Policy.Preferred,
+                                        QSizePolicy.Policy.Fixed)
         self._refresh_btn.setFont(QFont("Hanken Grotesk", 10, QFont.Weight.Bold))
         self._refresh_btn.clicked.connect(self._on_refresh_clicked)
         topbar_layout.addWidget(self._refresh_btn)
 
-        # User Avatar + Dropdown
+        # User Avatar + Dropdown — always visible; the name is what gives way.
         user_name = self._user_data.get('full_name', 'Profil')
         self._user_btn = QPushButton(f"👤 {user_name} ▾")
         self._user_btn.setFixedHeight(36)
+        self._user_btn.setMinimumWidth(60)
+        self._user_btn.setMaximumWidth(220)
+        self._user_btn.setSizePolicy(QSizePolicy.Policy.Preferred,
+                                     QSizePolicy.Policy.Fixed)
         self._user_btn.setFont(QFont("Hanken Grotesk", 10, QFont.Weight.Bold))
 
         self._user_menu = QMenu(self._user_btn)
@@ -349,6 +327,9 @@ class MainWindow(QMainWindow):
 
         # 1. Dashboard
         self._dashboard = DashboardWidget()
+        # ONE provider -> ONE snapshot -> every card. The revenue-only provider
+        # stays wired for the legacy flat-overview path (BoundaryClock, tests).
+        self._dashboard.set_snapshot_provider(self._dashboard_snapshot_provider)
         self._dashboard.set_revenue_provider(self._revenue_provider)
         self._add_page("dashboard", self._dashboard)
 
@@ -526,85 +507,161 @@ class MainWindow(QMainWindow):
             logger.error("Failed to render vehicles from domain snapshot: %s", e, exc_info=True)
 
     def _refresh_dashboard(self, fetch_server: bool = False, request_revenue: bool = False):
-        """Render dashboard ensuring live server data is never overwritten by local cache.
+        """Render the Dashboard, and optionally go and get a fresher snapshot.
 
-        Strict Server Authority Invariant:
-        When online and authoritative server data is available, renders from the
-        server state with is_live=True.
-        Local SQLite snapshot is used ONLY when truly offline or before the first
-        server response arrives (marked is_live=False).
+        Two steps, deliberately separate:
+
+        1. RENDER NOW from the best payload already held, so a domain fan-out
+           never blanks the screen while a request is in flight.
+        2. When ``fetch_server`` is set (tab visit, manual refresh, end of a
+           sync cycle), ask for a fresh authoritative snapshot — coalesced,
+           because one sync can publish several revisions in a row.
+
+        What this method no longer does is assemble an overview by hand. The
+        previous version merged the server response with fleet keys re-derived
+        from the local SQLite mirror, which is exactly how the screen ended up
+        showing counts that contradicted both the database and each other.
         """
-        snap = self._store.snapshot
-        is_live = snap.is_live or (self._is_online and getattr(self, "_has_server_dashboard", False))
+        self._render_dashboard_from_best_known()
 
-        if is_live and getattr(self, "_has_server_dashboard", False):
-            if snap.overview:
-                if getattr(self, "_authoritative_server_overview", None):
-                    for k in ("total_vehicles", "available", "rented", "reserved", "maintenance", "today_revenue", "today_rentals", "today_returns"):
-                        if k in snap.overview:
-                            self._authoritative_server_overview[k] = snap.overview[k]
-                else:
-                    self._authoritative_server_overview = dict(snap.overview)
-            overview = dict(self._authoritative_server_overview or snap.overview or {})
-            if snap.fleet_counts:
-                for k in ("total_vehicles", "available", "rented", "reserved", "maintenance"):
-                    if k in snap.fleet_counts:
-                        overview[k] = snap.fleet_counts[k]
-            top = list(getattr(self, "_authoritative_server_top_vehicles", []) or snap.top_vehicles or [])
-        else:
-            overview = dict(snap.overview or {})
-            for key in ("today_revenue", "week_revenue", "month_revenue", "year_revenue"):
-                if overview.get(key) is None:
-                    overview[key] = 0.0
-            top = [dict(v) for v in snap.top_vehicles]
+        if fetch_server:
+            timer = getattr(self, "_dashboard_refresh_timer", None)
+            if timer is None:
+                timer = QTimer(self)
+                timer.setSingleShot(True)
+                timer.timeout.connect(self._dashboard.request_snapshot)
+                self._dashboard_refresh_timer = timer
+            timer.start(120)
 
-        self._dashboard.refresh_data(overview, top, request_revenue=request_revenue, is_live=is_live)
+    def _render_dashboard_from_best_known(self):
+        """Paint from the freshest payload in hand — no network, no merging.
 
-        # 2. Asynchronously query FastAPI ONLY when explicitly requested (Async Race Protection)
-        if fetch_server and self._is_online and self._access_token:
-            self._dashboard_generation = getattr(self, "_dashboard_generation", 0) + 1
-            current_generation = self._dashboard_generation
+        Precedence: the last authoritative server snapshot, then the legacy
+        server overview, then the local mirror (explicitly marked as cache).
+        Exactly one of them is used; they are never blended, because a blended
+        dashboard is one whose cards describe different data.
+        """
+        kind = getattr(self, "_dashboard_source_kind", None)
+        if not self._is_online:
+            # Genuinely disconnected: the operator's own offline edits are the
+            # freshest truth available, so show the mirror (labelled as cache)
+            # rather than a frozen server payload that predates them.
+            kind = None
+        try:
+            if kind == "dto" and getattr(self, "_authoritative_server_snapshot", None):
+                self._dashboard.apply_snapshot(self._authoritative_server_snapshot)
+                return
+            if kind == "overview" and getattr(self, "_authoritative_server_overview", None):
+                # Prefer the store's copy: it holds the SAME server payload
+                # (taken verbatim) but ``recompute_effective`` keeps its
+                # time-derived figures current when the clock crosses a
+                # reservation, maintenance or midnight boundary. Falling back
+                # to the frozen fetch-time copy is what used to make the
+                # Dashboard contradict the Vehicles list after a boundary.
+                snap = self._store.snapshot
+                overview = (dict(snap.overview) if (snap.is_live and snap.overview)
+                            else dict(self._authoritative_server_overview))
+                top = (list(snap.top_vehicles or [])
+                       or list(getattr(self, "_authoritative_server_top_vehicles", None) or []))
+                self._dashboard.refresh_data(overview, top,
+                                             request_revenue=False, is_live=True)
+                return
 
-            fetcher = DashboardFetcher(self._access_token, parent=self)
-            fetcher.stats_ready.connect(
-                lambda ov, tv, gen=current_generation: self._on_dashboard_stats(ov, tv, gen)
+            from app.sync.dashboard_snapshot import build_local_snapshot
+            # The store's clock, not the wall clock: tests (and the temporal
+            # recompute path) drive the store from an injected ``now_fn``, and
+            # the snapshot must describe the same instant as the rows it reads.
+            self._dashboard.apply_snapshot(
+                build_local_snapshot(self._store.snapshot,
+                                     period=self._dashboard.current_period(),
+                                     now=self._store.now())
             )
-            fetcher.finished.connect(fetcher.deleteLater)
-            self._dashboard_fetcher = fetcher  # keep reference
-            fetcher.start()
+        except Exception as e:
+            logger.error("Dashboard render failed: %s", e, exc_info=True)
 
-    def _revenue_provider(self, from_date: date, to_date_inclusive: date):
-        """(revenue, source) for the dashboard revenue panel. Canonical
-        backend endpoint first; offline -> the SAME pro-rata rule over the
-        DomainStore snapshot. Runs on a worker thread (never the UI thread)."""
+    def _dashboard_snapshot_provider(self, period: str, from_date: date,
+                                     to_date_inclusive: date):
+        """(period, from, to) -> the canonical dashboard DTO.
+
+        Runs on the Dashboard's worker thread. PostgreSQL is the source of
+        truth: the server snapshot is used verbatim, never merged key-by-key
+        with locally derived numbers. The local mirror is consulted ONLY when
+        the server cannot be reached, and the DTO it produces is stamped
+        ``source="local"`` so the UI labels it as cache rather than truth.
+        Returning None means "unknown" and the Dashboard shows "—", never 0.
+        """
         from app.services.api_client import ServerContractMismatchError
-        f_iso = from_date.isoformat()
-        t_iso = to_date_inclusive.isoformat()
+
         if self._is_online and self._access_token:
             try:
-                data = self._api.get_revenue_range(f_iso, t_iso)
+                dto = self._api.get_dashboard_summary(
+                    period,
+                    from_date.isoformat() if period == "custom" else None,
+                    to_date_inclusive.isoformat() if period == "custom" else None,
+                )
+                if dto:
+                    self._on_server_snapshot(dto)
+                    return dto
+            except ServerContractMismatchError as e:
+                # A deployed backend older than this client. Never silently
+                # degrade to a local number that would look authoritative.
+                logger.error("Dashboard contract mismatch: %s", e)
+            except Exception as e:
+                logger.info("Dashboard snapshot fetch failed (offline?): %s", e)
+
+            if self._is_online and getattr(self, "_has_server_dashboard", False):
+                # A transient failure while nominally online, with authoritative
+                # server figures already in hand. Returning a locally recomputed
+                # snapshot here would REPLACE them with the SQLite mirror — a
+                # downgrade dressed as a refresh, and the exact reversion this
+                # architecture forbids. Report "could not refresh" instead and
+                # let the Dashboard keep what it has. (Once the window knows it
+                # is truly offline, the mirror IS the best answer and the
+                # fallback below runs.)
+                return None
+
+        try:
+            from app.sync.dashboard_snapshot import build_local_snapshot
+            return build_local_snapshot(
+                self._store.snapshot,
+                period=period,
+                custom_from=from_date if period == "custom" else None,
+                custom_to_inclusive=to_date_inclusive if period == "custom" else None,
+            )
+        except Exception as e:
+            logger.error("Local dashboard snapshot failed: %s", e, exc_info=True)
+            return None
+
+    def _on_server_snapshot(self, dto: dict):
+        """Record the latest authoritative server snapshot (worker thread).
+
+        Kept as plain state for the sync/reversion regression tests; the
+        rendering itself is done by the Dashboard from the DTO it received.
+        """
+        self._authoritative_server_snapshot = dict(dto)
+        self._dashboard_source_kind = "dto"
+        self._has_server_dashboard = True
+
+    def _revenue_provider(self, from_date: date, to_date_inclusive: date):
+        """(revenue, source) — legacy revenue-only path.
+
+        Retained for callers and tests that predate the snapshot DTO. It asks
+        the SAME backend engine (``/dashboard/revenue``) and falls back to the
+        SAME shared pro-rata spec over the local mirror, so it can never
+        produce a third number.
+        """
+        from app.services.api_client import ServerContractMismatchError
+        if self._is_online and self._access_token:
+            try:
+                data = self._api.get_revenue_range(
+                    from_date.isoformat(), to_date_inclusive.isoformat()
+                )
                 if data and data.get("revenue") is not None:
-                    rev = float(data["revenue"])
-                    self._last_server_revenue = rev
-                    return rev, "server"
+                    return float(data["revenue"]), "server"
             except ServerContractMismatchError as e:
                 logger.error("Server contract mismatch on revenue range: %s", e)
             except Exception as e:
                 logger.info("revenue range fetch failed: %s", e)
-
-        # Authoritative server fallback: if we already hold live server metrics
-        # for today / week / month / year, use the server figure instead of 0.00 DH local!
-        ov = getattr(self._store, "_server_overview", None) or getattr(self, "_authoritative_server_overview", None)
-        today = date.today()
-        if ov and getattr(self, "_has_server_dashboard", False):
-            if from_date == today and to_date_inclusive == today and ov.get("today_revenue") is not None:
-                return float(ov["today_revenue"]), "server"
-            if from_date == (today - timedelta(days=today.weekday())) and ov.get("week_revenue") is not None:
-                return float(ov["week_revenue"]), "server"
-            if from_date == today.replace(day=1) and ov.get("month_revenue") is not None:
-                return float(ov["month_revenue"]), "server"
-            if hasattr(self, "_last_server_revenue") and self._last_server_revenue is not None:
-                return self._last_server_revenue, "server"
 
         try:
             from app.sync.dashboard_cache import revenue_between_rows
@@ -618,7 +675,14 @@ class MainWindow(QMainWindow):
             return None, "error"
 
     def _on_dashboard_stats(self, overview: dict, top_vehicles: list, generation: int = 0):
-        """Apply API dashboard results (delivered on the UI thread)."""
+        """Apply a legacy ``/dashboard/stats`` payload (UI thread).
+
+        PostgreSQL is authoritative: the server figures are rendered VERBATIM.
+        The previous version overwrote the server's fleet keys with counts
+        re-derived from the local SQLite mirror, so a stale or partially
+        synced cache could silently contradict the database on screen — the
+        root cause this rebuild removes.
+        """
         current_gen = getattr(self, "_dashboard_generation", 0)
         if current_gen > 0 and generation < current_gen:
             logger.info("Dropping stale dashboard stats generation %s (current: %s)",
@@ -626,17 +690,12 @@ class MainWindow(QMainWindow):
             return
 
         overview = dict(overview)
-        local_ov = self._store.snapshot.overview or {}
-        for key in ("year_revenue", "year_rentals"):
-            if overview.get(key) is None:
-                overview[key] = local_ov.get(key, 0)
+        snap = self._store.update_server_dashboard(overview, top_vehicles,
+                                                   generation=generation)
 
-        # Commit to DomainStore — reconciles fleet keys against canonical local snapshot
-        snap = self._store.update_server_dashboard(overview, top_vehicles, generation=generation)
-
-        canonical_overview = dict(snap.overview or self._store.snapshot.overview or overview)
-        self._authoritative_server_overview = dict(canonical_overview)
-        self._last_server_overview = dict(canonical_overview)
+        self._authoritative_server_overview = dict(overview)
+        self._last_server_overview = dict(overview)
+        self._dashboard_source_kind = "overview"
         if top_vehicles:
             self._authoritative_server_top_vehicles = list(top_vehicles)
             self._last_server_top_vehicles = list(top_vehicles)
@@ -646,7 +705,7 @@ class MainWindow(QMainWindow):
                or getattr(self, "_authoritative_server_top_vehicles", None)
                or getattr(self, "_last_server_top_vehicles", None)
                or [dict(v) for v in self._store.snapshot.top_vehicles])
-        self._dashboard.refresh_data(canonical_overview, top, request_revenue=True, is_live=True)
+        self._dashboard.refresh_data(overview, top, request_revenue=False, is_live=True)
 
     def _run_sync(self, force_bootstrap: bool = False):
         """Execute the sync cycle in a background thread (never blocks UI)."""

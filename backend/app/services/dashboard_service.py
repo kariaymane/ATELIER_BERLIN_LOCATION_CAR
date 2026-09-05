@@ -25,92 +25,16 @@ class DashboardService:
         self._rental_repo = RentalRepository(session)
         self._vehicle_repo = VehicleRepository(session)
     async def get_overview(self) -> dict:
-        """Main dashboard overview."""
-        from sqlalchemy import select, func, or_
-        from app.models.maintenance import Maintenance
-        from app.models.reservation import Reservation
-        from app.models.vehicle import Vehicle
-        
-        now = now_business()
+        """The legacy flat overview.
 
-        # CANONICAL fleet breakdown — one derivation, mutually exclusive,
-        # provably sums to total_vehicles and matches per-vehicle
-        # effective_status from /vehicles. See app/services/fleet_status.py.
-        from app.services.fleet_status import compute_fleet_counts
-        fleet = await compute_fleet_counts(self._session, now=now)
-        total_vehicles = fleet["total_vehicles"]
-        available = fleet["available"]
-        reserved = fleet["reserved"]
-        rented = fleet["rented"]
-        maintenance = fleet["maintenance"]
-        vehicle_counts = {
-            "AVAILABLE": available,
-            "RENTED": rented,
-            "RESERVED": reserved,
-            "MAINTENANCE": maintenance,
-        }
-
-        operational_rentals = await self._rental_repo.count_operational_rentals(now=now)
-        active_rentals = operational_rentals["active_rentals"]
-        reserved_rentals = operational_rentals["reserved_rentals"]
-
-        # Open maintenance tickets in total (excluding completed and cancelled)
-        from app.models.maintenance import Maintenance
-        open_tickets_res = await self._session.execute(
-            select(func.count(Maintenance.id)).where(
-                Maintenance.status.notin_(["COMPLETED", "CANCELLED"])
-            )
-        )
-        active_maintenance_tickets = open_tickets_res.scalar() or 0
-
-        today_start, today_end = period_bounds("today", now)
-
-        _today = await revenue_between(self._session, today_start, today_end, now=now)
-        today_rentals = _today["rentals"]
-        today_revenue = _today["revenue"]
-
-        # today_returns: active or reserved rentals ending today (COMPLETED and CANCELLED excluded)
-        tr_res = await self._session.execute(
-            select(func.count(Reservation.id)).where(
-                Reservation.status.in_(["ACTIVE", "RESERVED"]),
-                Reservation.end_datetime >= today_start,
-                Reservation.end_datetime < today_end
-            )
-        )
-        today_returns = tr_res.scalar() or 0
-
-        _week = await revenue_between(self._session, *period_bounds("week", now), now=now)
-        week_rentals = _week["rentals"]
-        week_revenue = _week["revenue"]
-
-        _month = await revenue_between(self._session, *period_bounds("month", now), now=now)
-        month_rentals = _month["rentals"]
-        month_revenue = _month["revenue"]
-
-        # Year-to-date — same pro-rata engine, wider window.
-        _year = await revenue_between(self._session, *period_bounds("year", now), now=now)
-        year_rentals = _year["rentals"]
-        year_revenue = _year["revenue"]
-
-        return {
-            "total_vehicles": total_vehicles,
-            "available": vehicle_counts.get("AVAILABLE", 0),
-            "reserved": vehicle_counts.get("RESERVED", 0),
-            "rented": vehicle_counts.get("RENTED", 0),
-            "maintenance": vehicle_counts.get("MAINTENANCE", 0),
-            "active_rentals": active_rentals,
-            "reserved_rentals": reserved_rentals,
-            "active_maintenance_tickets": active_maintenance_tickets,
-            "today_rentals": today_rentals,
-            "today_returns": today_returns,
-            "today_revenue": today_revenue,
-            "week_rentals": week_rentals,
-            "week_revenue": week_revenue,
-            "month_rentals": month_rentals,
-            "month_revenue": month_revenue,
-            "year_rentals": year_rentals,
-            "year_revenue": year_revenue,
-        }
+        Delegates to the ONE dashboard computation
+        (``shared/dashboard_reference``) via ``build_legacy_overview`` — this
+        method used to run its own queries and its own period loop, which is
+        how the legacy payload drifted away from the numbers the newer
+        endpoints returned. It is now a projection, not a second calculation.
+        """
+        from app.services.dashboard_snapshot import build_legacy_overview
+        return await build_legacy_overview(self._session)
 
     # Legacy endpoint period name -> canonical shared period name.
     _PERIOD_ALIAS = {

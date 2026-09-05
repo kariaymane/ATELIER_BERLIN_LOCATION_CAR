@@ -236,6 +236,45 @@ class ApiClient:
 
     # ── Dashboard ──
 
+    def get_dashboard_summary(
+        self,
+        period: str = "month",
+        from_iso: Optional[str] = None,
+        to_iso: Optional[str] = None,
+    ) -> Optional[dict]:
+        """THE dashboard call — one request, one coherent snapshot.
+
+        Returns the whole DTO (revenue, réservations du jour, maintenances,
+        the four fleet buckets, Top-5, integrity) computed server-side against
+        a single ``now``. ``period`` scopes the revenue window only;
+        ``from_iso``/``to_iso`` are required when ``period == "custom"`` and
+        ``to`` is INCLUSIVE (the operator's 'Au' date counts in full).
+
+        Raises ``ServerContractMismatchError`` on 404/405 so a deployed
+        backend that predates this endpoint is reported as a version mismatch
+        instead of being silently mistaken for "offline" — the failure mode
+        that previously let a stale local number pose as live truth.
+        """
+        path = f"/api/v1/dashboard/summary?period={period}"
+        if period == "custom":
+            if not from_iso or not to_iso:
+                raise ValueError("custom period requires both from_iso and to_iso")
+            path += f"&from={from_iso}&to={to_iso}"
+        r = self._request("get", path, retries=2)
+        if r is None:
+            return None
+        if r.status_code == 200:
+            return r.json()
+        if r.status_code in (404, 405):
+            raise ServerContractMismatchError(
+                f"Endpoint {path} returned {r.status_code}. Server contract version mismatch.",
+                status_code=r.status_code,
+                path=path,
+            )
+        if r.status_code >= 500:
+            raise ServerError(f"Server error {r.status_code} on {path}", status_code=r.status_code)
+        return None
+
     def get_dashboard(self) -> Optional[dict]:
         path = "/api/v1/dashboard/stats"
         r = self._request("get", path)

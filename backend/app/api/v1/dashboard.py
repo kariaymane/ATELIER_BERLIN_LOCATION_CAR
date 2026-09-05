@@ -10,6 +10,10 @@ from app.database import get_db
 from app.dependencies import get_current_user, require_perm
 from app.auth.rbac import Permission
 from app.services.dashboard_service import DashboardService
+from app.services.dashboard_snapshot import (
+    build_dashboard_snapshot,
+    build_legacy_overview,
+)
 from app.services.rental_service import RentalService
 from app.repositories.vehicle_repository import VehicleRepository
 from shared.money_time import PERIOD_NAMES
@@ -21,14 +25,50 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/dashboard", tags=["Dashboard"])
 
 
+@router.get("/summary")
+async def dashboard_summary(
+    period: str = Query(
+        "month",
+        description="Revenue window: today | yesterday | week | last_week | month | "
+                    "last_month | year | last_year | custom",
+    ),
+    from_: date | None = Query(
+        None, alias="from", description="Custom range start (ISO date, inclusive)"
+    ),
+    to: date | None = Query(
+        None, description="Custom range end (ISO date, INCLUSIVE — the operator's 'Au')"
+    ),
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(require_perm(Permission.VEHICLES_READ)),
+):
+    """THE dashboard endpoint — one coherent snapshot for every card.
+
+    Revenue, réservations du jour, maintenances en cours, the four fleet
+    buckets and the Top-5 are all computed from ONE database read set against
+    ONE ``now``, so no two cards can describe different instants. ``period``
+    scopes the REVENUE window only; the operational counters always describe
+    the current state.
+    """
+    try:
+        return await build_dashboard_snapshot(
+            db, period=period, custom_from=from_, custom_to_inclusive=to
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+
 @router.get("/stats")
 async def dashboard_stats(
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(require_perm(Permission.VEHICLES_READ)),
 ):
-    """Main dashboard overview with key metrics."""
-    service = DashboardService(db)
-    return await service.get_overview()
+    """Legacy dashboard overview.
+
+    Kept for the mobile app and older desktop builds; it is a pure projection
+    of the SAME snapshot the new ``/summary`` endpoint returns, so the two
+    shapes cannot drift apart.
+    """
+    return await build_legacy_overview(db)
 
 
 @router.get("/daily")

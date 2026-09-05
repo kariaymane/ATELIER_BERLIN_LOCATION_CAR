@@ -72,7 +72,18 @@
     "rev_range": "Du {frm} au {to}",
     "rev_updated": "Mis à jour à {time}",
     "rev_updated_local": "Hors-ligne — {time}",
-    "rev_unavailable": "Données indisponibles"
+    "rev_unavailable": "Données indisponibles",
+    "reservations_footnote": "{ending} retour(s) • {in_progress} en cours",
+    "maintenance_footnote": "{vehicles} véhicule(s) immobilisé(s)",
+    "fleet_reconciliation": "{ready} prêts + {rented} en location + {reserved} réservés + {maintenance} en maintenance = {total} véhicules actifs",
+    "banner_offline": "Hors ligne — chiffres issus du cache local. Ils seront actualisés dès le retour du serveur.",
+    "banner_unavailable": "Tableau de bord indisponible : {reason}. Aucune valeur n'est affichée — ce n'est PAS un zéro.",
+    "banner_integrity": "Incohérence détectée dans les données du tableau de bord : {detail}",
+    "state_unavailable": "Indisponible",
+    "rev_mismatch": "⚠ Serveur non synchronisé ({time})",
+    "banner_stale": "Actualisation impossible ({reason}) — les chiffres affichés datent de la dernière synchronisation réussie.",
+    "state_live": "En direct",
+    "state_cached": "Hors ligne / Cache"
   },
   "vehicles": {
     "title": "Véhicules",

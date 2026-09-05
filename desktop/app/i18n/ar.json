@@ -72,7 +72,18 @@
     "rev_range": "من {frm} إلى {to}",
     "rev_updated": "حُدّث في {time}",
     "rev_updated_local": "دون اتصال — {time}",
-    "rev_unavailable": "البيانات غير متوفرة"
+    "rev_unavailable": "البيانات غير متوفرة",
+    "reservations_footnote": "{ending} إرجاع • {in_progress} جارية",
+    "maintenance_footnote": "{vehicles} مركبة متوقفة",
+    "fleet_reconciliation": "{ready} جاهزة + {rented} مؤجرة + {reserved} محجوزة + {maintenance} في الصيانة = {total} مركبة نشطة",
+    "banner_offline": "غير متصل — الأرقام من الذاكرة المحلية. سيتم تحديثها عند عودة الخادم.",
+    "banner_unavailable": "لوحة التحكم غير متوفرة: {reason}. لا تُعرض أي قيمة — هذا ليس صفراً.",
+    "banner_integrity": "تم رصد تعارض في بيانات لوحة التحكم: {detail}",
+    "state_unavailable": "غير متوفر",
+    "rev_mismatch": "⚠ الخادم غير متزامن ({time})",
+    "banner_stale": "تعذّر التحديث ({reason}) — الأرقام المعروضة تعود لآخر مزامنة ناجحة.",
+    "state_live": "مباشر",
+    "state_cached": "غير متصل / ذاكرة مؤقتة"
   },
   "vehicles": {
     "title": "السيارات",

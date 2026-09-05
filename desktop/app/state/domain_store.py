@@ -161,13 +161,11 @@ class DomainStore:
             finally:
                 sess.close()
 
+        # Taken VERBATIM — PostgreSQL is the source of truth for dashboard
+        # business statistics. Re-deriving the fleet keys from the local
+        # mirror here is what made the Dashboard disagree with the database
+        # (and with the Vehicles list) whenever the cache was behind.
         ov = dict(overview)
-        # Immediately reconcile fleet keys against canonical local fleet counts
-        if self._snapshot is not _EMPTY and self._snapshot.fleet_counts:
-            for k in self._FLEET_KEYS:
-                if k in self._snapshot.fleet_counts:
-                    ov[k] = self._snapshot.fleet_counts[k]
-
         self._server_overview = ov
         if top_vehicles is not None:
             self._server_top_vehicles = list(top_vehicles)
@@ -456,11 +454,11 @@ class DomainStore:
         client_dicts = tuple(_client_dict(c) for c in clients)
 
         if self._server_overview is not None:
-            # Server overview provides server-authoritative metrics (e.g. revenue),
-            # but fleet state metrics MUST reflect canonical local fleet counts.
-            for k in self._FLEET_KEYS:
-                if k in fleet_counts:
-                    self._server_overview[k] = fleet_counts[k]
+            # PostgreSQL is authoritative: the server overview is taken
+            # VERBATIM. This used to overwrite the server's fleet keys with
+            # counts re-derived from this SQLite mirror, so a stale or
+            # partially synced cache could contradict the database on screen.
+            # The mirror is a cache, never a second authority.
             overview = dict(self._server_overview)
             top_vehicles = tuple(self._server_top_vehicles or ())
             is_live = True

@@ -73,9 +73,12 @@ def test_live_server_data_not_overwritten_by_domain_changed(main_window):
     assert "En direct" in main_window._dashboard._last_refresh_lbl.text()
     assert main_window._authoritative_server_overview["today_revenue"] == 7777.0
     assert main_window._authoritative_server_overview["month_rentals"] == 50
-    # Fleet counts reflect canonical local fleet (0 in empty DB, never fictitious server counts)
-    assert main_window._dashboard._card_rented._count_lbl.text() == "0"
-    assert main_window._dashboard._card_available._count_lbl.text() == "0"
+    # PostgreSQL is authoritative: the server's fleet counts are shown VERBATIM.
+    # (Before the 2026-09-05 rebuild these were overwritten with counts
+    # re-derived from the local SQLite mirror, so a stale cache silently
+    # contradicted the database on screen.)
+    assert main_window._dashboard._card_rented._count_lbl.text() == "42"
+    assert main_window._dashboard._card_available._count_lbl.text() == "8"
 
     # Step 2: Background sync finishes -> DomainStore reloads and calls _on_domain_changed
     main_window._on_domain_changed(main_window._store.snapshot, main_window._store.revision + 1)
@@ -84,8 +87,8 @@ def test_live_server_data_not_overwritten_by_domain_changed(main_window):
     assert main_window._dashboard._top_vehicles_data[0]["brand"] == "AUTHORITATIVE_BRAND"
     assert "En direct" in main_window._dashboard._last_refresh_lbl.text()
     assert main_window._authoritative_server_overview["today_revenue"] == 7777.0
-    assert main_window._dashboard._card_rented._count_lbl.text() == "0"
-    assert main_window._dashboard._card_available._count_lbl.text() == "0"
+    assert main_window._dashboard._card_rented._count_lbl.text() == "42"
+    assert main_window._dashboard._card_available._count_lbl.text() == "8"
 
 
 def test_out_of_order_dashboard_response_dropped(main_window):
@@ -111,7 +114,7 @@ def test_out_of_order_dashboard_response_dropped(main_window):
     assert main_window._has_server_dashboard is True
     assert main_window._authoritative_server_overview["today_revenue"] == 5000.0
     assert main_window._dashboard._top_vehicles_data[0]["brand"] == "FRESH_CAR"
-    assert main_window._dashboard._card_rented._count_lbl.text() == "0"
+    assert main_window._dashboard._card_rented._count_lbl.text() == "20"
 
 
 def test_offline_fallback_marks_as_cached(main_window):
