@@ -47,12 +47,35 @@ def run_psql(sql: str) -> list[str]:
         raise
 
 
+def _credentials() -> tuple[str, str]:
+    """Read operator credentials from the environment.
+
+    NEVER hardcode a credential here. This script talks to whatever
+    ``API_BASE_URL`` points at — including production — so an embedded literal
+    is a published secret the moment the repository is pushed (the repo is
+    public). Fail loudly and safely when the environment is not configured
+    rather than falling back to any default.
+
+        export RECONCILE_EMAIL='operator@example.com'
+        export RECONCILE_PASSWORD='...'      # e.g. from a password manager
+    """
+    email = os.environ.get("RECONCILE_EMAIL")
+    password = os.environ.get("RECONCILE_PASSWORD")
+    if not email or not password:
+        raise SystemExit(
+            "[ABORT] RECONCILE_EMAIL and RECONCILE_PASSWORD must be set in the "
+            "environment. This script has no built-in credentials by design."
+        )
+    return email, password
+
+
 def get_api_data() -> tuple[list[dict], list[dict]]:
     """Fetch rentals and vehicles via FastAPI with JWT auth."""
+    email, password = _credentials()
     login_url = f"{API_BASE_URL}/api/v1/auth/login"
-    login_payload = json.dumps({"email": "berlinecar@gmail.com", "password": "berlin20002000"}).encode()
+    login_payload = json.dumps({"email": email, "password": password}).encode()
     req = urllib.request.Request(login_url, data=login_payload, headers={"Content-Type": "application/json"})
-    
+
     with urllib.request.urlopen(req, timeout=10) as resp:
         login_data = json.load(resp)
         token = login_data["access_token"]

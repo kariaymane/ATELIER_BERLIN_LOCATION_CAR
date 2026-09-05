@@ -64,9 +64,9 @@ Desktop offline auth (`_authenticate_offline`) and mobile cached-session restore
 ### Live evidence
 ```
 POST https://car-rental-system.fly.dev/api/v1/auth/login
-  {"email":"berlinecar@gmail.com","password":"berlin20002000"}      → 200, tokens issued
+  {"email":"<PROD_ADMIN_EMAIL>","password":"<REDACTED>"}      → 200, tokens issued
   {"email":"BERLINECAR@GMAIL.COM", ...}  (uppercase)                → 200 (server lower-cases)
-  {"email":"berlinecar@gmail.com","password":"wrong"}               → 422 (password min_length=8), NOT 401
+  {"email":"<PROD_ADMIN_EMAIL>","password":"wrong"}               → 422 (password min_length=8), NOT 401
 ```
 Backend auth is **correct and canonical**: `AuthService.login` lower-cases + strips the email, verifies Argon2, rotates refresh tokens, locks after 5 failures, returns `{access_token, refresh_token, token_type, expires_in, user_id, role, full_name}`. Access TTL 15 min, refresh TTL 7 days.
 

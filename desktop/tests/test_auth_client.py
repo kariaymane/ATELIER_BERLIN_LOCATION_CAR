@@ -51,21 +51,24 @@ def test_success(monkeypatch):
         "access_token": "a", "refresh_token": "r", "role": "ADMIN",
         "user_id": "u1", "full_name": "Berlin",
     })])
-    res = AuthClient("https://x").login("berlinecar@gmail.com", "berlin20002000")
+    # Synthetic credentials only. The transport is mocked (`https://x` is never
+    # dialled), so these values are decorative — a real credential here would be
+    # a published secret, not a stronger test.
+    res = AuthClient("https://x").login("operator@example.test", "dummy-password")
     assert res.outcome == AuthOutcome.SUCCESS
     assert res.data["access_token"] == "a"
 
 
 def test_wrong_password_is_invalid_credentials_not_network(monkeypatch):
     _patch(monkeypatch, [_resp(401, {"detail": "Identifiants invalides"})])
-    res = AuthClient("https://x").login("berlinecar@gmail.com", "nope12345")
+    res = AuthClient("https://x").login("operator@example.test", "nope12345")
     assert res.outcome == AuthOutcome.INVALID_CREDENTIALS
     assert res.is_server_side_rejection is True
 
 
 def test_locked_account(monkeypatch):
     _patch(monkeypatch, [_resp(401, {"detail": "Compte bloqué / verrouillé"})])
-    res = AuthClient("https://x").login("berlinecar@gmail.com", "x" * 9)
+    res = AuthClient("https://x").login("operator@example.test", "x" * 9)
     assert res.outcome == AuthOutcome.ACCOUNT_LOCKED
     assert res.is_server_side_rejection is True
 
