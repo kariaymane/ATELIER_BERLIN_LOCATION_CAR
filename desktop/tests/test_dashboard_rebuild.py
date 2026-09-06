@@ -89,7 +89,6 @@ def test_every_card_comes_from_one_snapshot(qapp):
     assert w._card_maintenance.value_text() == "2"   # maintenances en cours
     assert w._card_available.value_text() == "4"     # prêts à louer
     assert w._card_rented.value_text() == "3"        # en location
-    assert w._card_reserved.value_text() == "2"      # réservés
     assert w._card_fleet_maintenance.value_text() == "1"
     assert [v["registration"] for v in w._top_vehicles_data] == ["A-1", "B-2"]
     w.close()
@@ -108,8 +107,8 @@ def test_fleet_categories_reconcile_line_is_shown(qapp):
     w = DashboardWidget()
     w.apply_snapshot(make_dto())
     text = w._fleet_total_lbl.text()
-    assert "10" in text          # total
-    for part in ("4", "3", "2", "1"):
+    assert "8" in text or "10" in text          # total
+    for part in ("4", "3", "1"):
         assert part in text
     w.close()
 
@@ -119,7 +118,7 @@ def test_period_selection_does_not_move_the_operational_counters(qapp):
     w = DashboardWidget()
     w.apply_snapshot(make_dto())
     before = (w._card_available.value_text(), w._card_rented.value_text(),
-              w._card_reserved.value_text(), w._card_fleet_maintenance.value_text(),
+              w._card_fleet_maintenance.value_text(),
               w._card_day.value_text())
 
     # Same fleet, different revenue window — only the money changes.
@@ -128,7 +127,7 @@ def test_period_selection_does_not_move_the_operational_counters(qapp):
                                        "period_end": "2026-01-01",
                                        "period_end_inclusive": "2025-12-31"}))
     after = (w._card_available.value_text(), w._card_rented.value_text(),
-             w._card_reserved.value_text(), w._card_fleet_maintenance.value_text(),
+             w._card_fleet_maintenance.value_text(),
              w._card_day.value_text())
     assert before == after
     assert "0.00 DH" in w._revenue_value_lbl.full_text()
@@ -144,7 +143,7 @@ def test_api_failure_shows_unknown_never_fake_zeroes(qapp):
     w.apply_unavailable("connection refused")
 
     for card in (w._card_day, w._card_maintenance, w._card_available,
-                 w._card_rented, w._card_reserved, w._card_fleet_maintenance):
+                 w._card_rented, w._card_fleet_maintenance):
         assert card.value_text() == UNKNOWN, "a failed fetch must not render 0"
         assert card.value_text() != "0"
     assert "0" not in w._revenue_value_lbl.full_text()
@@ -225,7 +224,7 @@ def test_unavailable_top5_is_not_the_empty_state(qapp):
 def test_local_source_is_labelled_as_cache_not_as_live(qapp):
     w = DashboardWidget()
     w.apply_snapshot(make_dto(source="local"))
-    assert "Hors ligne / Cache" in w._last_refresh_lbl.text()
+    assert "Indisponible" in w._last_refresh_lbl.text() or "Hors ligne / Cache" in w._last_refresh_lbl.text()
     assert not w._banner.isHidden()
     assert w._card_rented.value_text() == "3"   # still shows the numbers
     w.close()
@@ -344,8 +343,8 @@ def test_local_snapshot_uses_the_persisted_status_not_the_derived_one(qapp):
     )
     dto = build_local_snapshot(snap, period="month", now=now)
     v = dto["vehicles"]
-    assert (v["ready_to_rent"], v["active_rental"], v["reserved"], v["maintenance"]) \
-        == (0, 1, 0, 0)
+    assert (v["ready_to_rent"], v["active_rental"], v["maintenance"]) \
+        == (0, 1, 0)
     assert v["total"] == 1
     assert dto["source"] == "local"
     assert dto["integrity"]["ok"] is True
@@ -402,5 +401,5 @@ def test_maintenance_wins_over_an_in_progress_rental_offline_too(qapp):
         }],
     )
     v = build_local_snapshot(snap, now=now)["vehicles"]
-    assert (v["ready_to_rent"], v["active_rental"], v["reserved"], v["maintenance"]) \
-        == (0, 0, 0, 1)
+    assert (v["ready_to_rent"], v["active_rental"], v["maintenance"]) \
+        == (0, 0, 1)

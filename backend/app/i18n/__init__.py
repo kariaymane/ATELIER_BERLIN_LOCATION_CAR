@@ -12,7 +12,7 @@ FR: dict[str, str] = {
     # Auth
     "auth.invalid_credentials": "Identifiants invalides.",
     "auth.account_disabled": "Ce compte est désactivé.",
-    "auth.account_locked": "Ce compte est bloqué suite à plusieurs tentatives échouées. Réessayez dans 15 minutes.",
+    "auth.account_locked": "Ce compte est temporairement bloqué suite à plusieurs tentatives échouées.",
     "auth.token_expired": "Le jeton a expiré.",
     "auth.token_invalid": "Jeton invalide.",
     "auth.refresh_token_revoked": "Le jeton de rafraîchissement a été révoqué.",
@@ -71,7 +71,7 @@ AR: dict[str, str] = {
     # Auth
     "auth.invalid_credentials": "بيانات الاعتماد غير صالحة.",
     "auth.account_disabled": "هذا الحساب معطل.",
-    "auth.account_locked": "تم قفل هذا الحساب بسبب عدة محاولات فاشلة. يرجى المحاولة بعد 15 دقيقة.",
+    "auth.account_locked": "تم قفل هذا الحساب مؤقتًا بسبب عدة محاولات فاشلة.",
     "auth.token_expired": "انتهت صلاحية الرمز.",
     "auth.token_invalid": "رمز غير صالح.",
     "auth.refresh_token_revoked": "تم إلغاء رمز التحديث.",

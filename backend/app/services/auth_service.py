@@ -19,6 +19,38 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+# ── Account lockout policy (server-authoritative) ─────────────────────────
+# The backend is the single source of truth for lockout. Clients must never
+# implement their own lockout timer; they render what the server reports.
+MAX_FAILED_ATTEMPTS = 5
+LOCKOUT_DURATION = timedelta(minutes=15)
+
+# Machine-readable discriminators returned alongside the localized message so
+# clients can map an auth failure by code instead of sniffing message text.
+ERROR_INVALID_CREDENTIALS = "INVALID_CREDENTIALS"
+ERROR_ACCOUNT_LOCKED = "ACCOUNT_LOCKED"
+ERROR_ACCOUNT_DISABLED = "ACCOUNT_DISABLED"
+
+
+def _as_utc(value: Optional[datetime]) -> Optional[datetime]:
+    """Normalize a ``locked_until`` value to an aware UTC datetime.
+
+    ``users.locked_until`` is only ever written by this service from
+    ``datetime.now(timezone.utc)``, so it is canonically UTC. PostgreSQL
+    (``DateTime(timezone=True)``) hands it back aware; SQLite — used by the
+    test suite — hands the same instant back naive. Coercing a naive value to
+    UTC keeps the expiry comparison identical on both backends instead of
+    raising ``TypeError: can't compare offset-naive and offset-aware``.
+
+    Note this is deliberately scoped to this auth column: business datetimes
+    elsewhere follow the project's separate naive == Africa/Casablanca policy.
+    """
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
 
 class AuthService:
     def __init__(self, session: AsyncSession, jwt_handler: JWTHandler):
@@ -43,7 +75,11 @@ class AuthService:
         user = await self._user_repo.get_by_email(clean_email)
 
         now = datetime.now(timezone.utc)
-        if user and user.locked_until and user.locked_until > now:
+        locked_until = _as_utc(user.locked_until) if user else None
+
+        if user and locked_until and locked_until > now:
+            # Active lockout. Report the server's own remaining time so the
+            # client never has to guess (and never invents its own countdown).
             await self._audit_repo.create(
                 entity_type="auth",
                 action="LOGIN_FAILED_LOCKED",
@@ -52,7 +88,21 @@ class AuthService:
                 ip_address=ip_address,
                 device_id=device_id,
             )
-            return {"error": get_message("auth.account_locked", lang)}
+            return {
+                "error": get_message("auth.account_locked", lang),
+                "error_code": ERROR_ACCOUNT_LOCKED,
+                "retry_after_seconds": max(1, int((locked_until - now).total_seconds())),
+            }
+
+        if user and locked_until:
+            # The lockout has expired. Clear it AND the counter that armed it:
+            # leaving ``failed_login_attempts`` at the threshold meant the very
+            # next mistyped password re-locked the account instantly, turning a
+            # 15-minute lockout into a permanent one. Expiry restores a full
+            # attempt budget — that is what makes the lockout temporary.
+            user.failed_login_attempts = 0
+            user.locked_until = None
+            self._session.add(user)
 
         if not user or not verify_password(password, user.password_hash):
             # Log failed attempt without the password
@@ -65,22 +115,33 @@ class AuthService:
             )
             if user:
                 user.failed_login_attempts += 1
-                if user.failed_login_attempts >= 5:
-                    user.locked_until = now + timedelta(minutes=15)
+                newly_locked = user.failed_login_attempts >= MAX_FAILED_ATTEMPTS
+                if newly_locked:
+                    user.locked_until = now + LOCKOUT_DURATION
                     await self._audit_repo.create(
                         entity_type="auth",
                         action="ACCOUNT_LOCKED",
                         user_id=user.id,
-                        details="Account locked due to 5 failed login attempts",
+                        details=(
+                            f"Account locked due to {MAX_FAILED_ATTEMPTS} "
+                            "failed login attempts"
+                        ),
                         ip_address=ip_address,
                         device_id=device_id,
                     )
                 self._session.add(user)
                 await self._session.commit()
-                if user.failed_login_attempts >= 5:
-                    return {"error": get_message("auth.account_locked", lang)}
+                if newly_locked:
+                    return {
+                        "error": get_message("auth.account_locked", lang),
+                        "error_code": ERROR_ACCOUNT_LOCKED,
+                        "retry_after_seconds": int(LOCKOUT_DURATION.total_seconds()),
+                    }
 
-            return {"error": get_message("auth.invalid_credentials", lang)}
+            return {
+                "error": get_message("auth.invalid_credentials", lang),
+                "error_code": ERROR_INVALID_CREDENTIALS,
+            }
 
         if not user.is_active:
             await self._audit_repo.create(
@@ -91,7 +152,10 @@ class AuthService:
                 ip_address=ip_address,
                 device_id=device_id,
             )
-            return {"error": get_message("auth.account_disabled", lang)}
+            return {
+                "error": get_message("auth.account_disabled", lang),
+                "error_code": ERROR_ACCOUNT_DISABLED,
+            }
 
         # Reset failed attempts and locked status on successful login
         user.failed_login_attempts = 0

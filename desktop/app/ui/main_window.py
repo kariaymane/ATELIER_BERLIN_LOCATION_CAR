@@ -411,7 +411,10 @@ class MainWindow(QMainWindow):
                 break
         if row is None:
             row = {"id": client_id}
-        dialog = ClientDetailsDialog(row, api_client=self._api, parent=self)
+        dialog = ClientDetailsDialog(
+            row, api_client=self._api, parent=self,
+            device_id=self._device_id,
+            user_id=self._user_data.get("user_id", ""))
         dialog.exec()
         # After closing (possible mutations elsewhere), refresh live state.
         self._clients_page.refresh_data()
@@ -1271,7 +1274,6 @@ class MainWindow(QMainWindow):
                 other_cost=data.get("other_cost", 0.0),
                 actual_cost=data.get("actual_cost", 0.0),
                 status="ACTIVE",
-                step=data.get("step", "DIAGNOSTIC"),
                 created_at=now_iso,
                 updated_at=now_iso,
                 version=1

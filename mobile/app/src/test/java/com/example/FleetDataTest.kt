@@ -1,6 +1,5 @@
 package com.example
 
-import com.example.data.model.MaintenanceStep
 import com.example.data.model.PerformanceMetrics
 import com.example.data.model.ReservationStatus
 import com.example.data.model.Vehicle
@@ -146,11 +145,6 @@ class FleetDataTest {
     fun testStatusLabels() {
         assertEquals("Disponible", VehicleStatus.DISPONIBLE.label)
         assertEquals("En location", VehicleStatus.EN_LOCATION.label)
-        assertEquals("En attente", MaintenanceStep.EN_ATTENTE.label)
-        assertEquals("Diagnostic", MaintenanceStep.DIAGNOSTIC.label)
-        assertEquals("Réparation", MaintenanceStep.REPARATION.label)
-        assertEquals("Contrôle", MaintenanceStep.CONTROLE.label)
-        assertEquals("Terminé", MaintenanceStep.TERMINEE.label)
         assertEquals("Réservée", ReservationStatus.RESERVEE.label)
         assertEquals("En cours", ReservationStatus.EN_COURS.label)
         assertEquals("Terminée", ReservationStatus.TERMINEE.label)

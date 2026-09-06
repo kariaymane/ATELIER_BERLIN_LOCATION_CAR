@@ -109,7 +109,7 @@ class RentalService:
                 num_days=num_days,
                 total_price=total_price,
                 deposit=data.deposit or 0,
-                status="RESERVED",
+                status="ACTIVE",
                 notes=data.notes,
                 created_by=created_by,
             )
@@ -201,6 +201,8 @@ class RentalService:
 
         old_status = rental.status
         rental.status = "CANCELLED"
+        rental.cancellation_reason = "USER"
+        rental.cancelled_at = datetime.now(timezone.utc)
         rental.version += 1
 
         vehicle = await self._vehicle_repo.get_by_id(rental.vehicle_id)
@@ -216,7 +218,7 @@ class RentalService:
             entity_id=rental.id,
             user_id=cancelled_by,
             old_values={"status": old_status},
-            new_values={"status": "CANCELLED"},
+            new_values={"status": "CANCELLED", "cancellation_reason": "USER"},
         )
 
         return {"rental": rental}

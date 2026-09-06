@@ -41,7 +41,7 @@ async def _load_candidate_reservations(
             select(Reservation).where(
                 (
                     (Reservation.status != "CANCELLED")
-                    | (Reservation.cancellation_reason == "MAINTENANCE")
+                    | (Reservation.cancellation_reason.in_(["MAINTENANCE", "MAINTENANCE_URGENT"]))
                 ),
                 Reservation.start_datetime < end_dt,
             )

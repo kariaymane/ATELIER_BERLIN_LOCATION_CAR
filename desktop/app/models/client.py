@@ -12,6 +12,7 @@ class LocalClient(LocalBase):
     last_name = Column(String(100), nullable=True, default="")  # Made nullable with default for test
     email = Column(String(255), nullable=True)
     phone = Column(String(20), nullable=True)
+    address = Column(Text, nullable=True)
     cin_number = Column(String(50), nullable=True)
     # Identity documents are two-sided: the legacy columns are the RECTO
     # (front); *_back holds the VERSO (back), NULL for historical clients.
@@ -20,6 +21,8 @@ class LocalClient(LocalBase):
     license_number = Column(String(50), nullable=True)
     driving_license_image = Column(Text, nullable=True)
     driving_license_image_back = Column(Text, nullable=True)
+    # Signed rental contract scan — the fifth client document slot.
+    contract_image = Column(Text, nullable=True)
     photo_url = Column(Text, nullable=True)
     notes = Column(Text, nullable=True)
     status = Column(String(20), nullable=False, default="ACTIVE")

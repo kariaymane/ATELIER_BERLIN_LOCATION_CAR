@@ -415,15 +415,13 @@ class DashboardWidget(QWidget):
         self._kpi_grid.addWidget(self._card_maintenance)
         layout.addLayout(self._kpi_grid)
 
-        # ── 3. Fleet row — the four mutually exclusive buckets ──────────
+        # ── 3. Fleet row — the three operational buckets ────────────────
         self._fleet_grid = ResponsiveGrid(min_item_width=self.FLEET_MIN_WIDTH,
                                           h_spacing=14, v_spacing=14)
         self._card_available = StatCard(t("dashboard.available_fleet"), UNKNOWN)
         self._card_rented = StatCard(t("dashboard.rented_fleet"), UNKNOWN)
-        self._card_reserved = StatCard(t("dashboard.reserved_fleet"), UNKNOWN)
         self._card_fleet_maintenance = StatCard(t("dashboard.maintenance_fleet"), UNKNOWN)
-        for c in (self._card_available, self._card_rented,
-                  self._card_reserved, self._card_fleet_maintenance):
+        for c in (self._card_available, self._card_rented, self._card_fleet_maintenance):
             self._fleet_grid.addWidget(c)
         layout.addLayout(self._fleet_grid)
 
@@ -681,8 +679,7 @@ class DashboardWidget(QWidget):
         self._is_live_revenue = False
         self._revenue_value_lbl.setText(t("dashboard.rev_unavailable"))
         for card in (self._card_day, self._card_maintenance, self._card_available,
-                     self._card_rented, self._card_reserved,
-                     self._card_fleet_maintenance):
+                     self._card_rented, self._card_fleet_maintenance):
             card.set_value(UNKNOWN, "")
         self._fleet_total_lbl.setText("")
         self._render_top_vehicles(unavailable=True)
@@ -705,10 +702,9 @@ class DashboardWidget(QWidget):
             self._rev_updated_lbl.setText(t("dashboard.rev_updated", time=stamp))
             self._rev_updated_lbl.setStyleSheet("color: #909C8E;")
         else:
-            self._last_refresh_lbl.setText(f"{base} ({t('dashboard.state_cached')})")
-            self._last_refresh_lbl.setStyleSheet("color: #909C8E;")
-            self._rev_updated_lbl.setText(t("dashboard.rev_updated_local", time=stamp))
-            self._rev_updated_lbl.setStyleSheet("color: #909C8E;")
+            self._last_refresh_lbl.setText(f"{base} ({t('dashboard.state_unavailable')})")
+            self._last_refresh_lbl.setStyleSheet("color: #DC2626; font-weight: 600;")
+            self._rev_updated_lbl.setText("")
 
         integrity = dto.get("integrity") or {}
         if integrity and not integrity.get("ok", True):
@@ -718,7 +714,7 @@ class DashboardWidget(QWidget):
                 level="error",
             )
         elif not self._is_live_data:
-            self._show_banner(t("dashboard.banner_offline"), level="warn")
+            self._show_banner(t("dashboard.banner_unavailable", reason="Serveur indisponible"), level="error")
         else:
             self._hide_banner()
 
@@ -753,16 +749,15 @@ class DashboardWidget(QWidget):
 
         self._card_available.set_value(show("available"))
         self._card_rented.set_value(show("rented"))
-        self._card_reserved.set_value(show("reserved"))
         self._card_fleet_maintenance.set_value(show("maintenance"))
 
-        parts = [d.get(k) for k in ("available", "rented", "reserved", "maintenance")]
+        parts = [d.get(k) for k in ("available", "rented", "maintenance")]
         total = d.get("total_vehicles")
         if total is not None and all(p is not None for p in parts):
             self._fleet_total_lbl.setText(
                 t("dashboard.fleet_reconciliation",
-                  ready=parts[0], rented=parts[1], reserved=parts[2],
-                  maintenance=parts[3], total=total)
+                  ready=parts[0], rented=parts[1],
+                  maintenance=parts[2], total=total)
             )
         else:
             self._fleet_total_lbl.setText("")
@@ -898,8 +893,8 @@ class DashboardWidget(QWidget):
             "total_vehicles": v.get("total"),
             "available": v.get("ready_to_rent"),
             "rented": v.get("active_rental"),
-            "reserved": v.get("reserved"),
             "maintenance": v.get("maintenance"),
+            "reserved": v.get("reserved", 0),
             "active_maintenance_tickets": maint.get("active_tickets"),
             "active_maintenances": maint.get("active_tickets"),
             "active_rentals": today.get("in_progress"),
@@ -988,7 +983,6 @@ class DashboardWidget(QWidget):
         self._card_maintenance.set_title(t("dashboard.active_maintenances"))
         self._card_available.set_title(t("dashboard.available_fleet"))
         self._card_rented.set_title(t("dashboard.rented_fleet"))
-        self._card_reserved.set_title(t("dashboard.reserved_fleet"))
         self._card_fleet_maintenance.set_title(t("dashboard.maintenance_fleet"))
         self._top_box.setTitle(t("dashboard.top_rented"))
 

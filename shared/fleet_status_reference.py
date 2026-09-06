@@ -46,9 +46,7 @@ from zoneinfo import ZoneInfo
 
 # ONE naive-datetime policy across the whole product: a datetime that lost its
 # tzinfo (e.g. a SQLite round-trip) is read as business-local wall time, exactly
-# as shared.money_time.to_business does. Previously this module read a naive
-# value as UTC while the revenue engine read it as Casablanca — a latent ~1 h
-# split (v1.1.0 audit P2-4 / earlier forensics). Now unified.
+# as shared.money_time.to_business does.
 _BUSINESS_TZ = ZoneInfo("Africa/Casablanca")
 
 STRUCTURAL_STATUSES = ("SOLD", "INACTIVE")

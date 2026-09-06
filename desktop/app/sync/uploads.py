@@ -318,25 +318,25 @@ def replace_marker_in_entities(session: Session, marker: str, remote_url: str):
             if r.driving_license_image == marker:
                 r.driving_license_image = remote_url
 
-        # Clients: photo + two-sided documents (recto + verso)
+        # Clients: photo + the five document slots (CIN recto/verso,
+        # permis recto/verso, contrat). Every column a document can live in
+        # must be listed here, or an offline-added document would keep its
+        # `pending_uploads/...` marker forever.
+        CLIENT_DOC_COLUMNS = (
+            "photo_url",
+            "identity_card_image", "identity_card_image_back",
+            "driving_license_image", "driving_license_image_back",
+            "contract_image",
+        )
+        from sqlalchemy import or_
         clients = session.query(LocalClient).filter(
-            (LocalClient.photo_url == marker)
-            | (LocalClient.identity_card_image == marker)
-            | (LocalClient.identity_card_image_back == marker)
-            | (LocalClient.driving_license_image == marker)
-            | (LocalClient.driving_license_image_back == marker)
+            or_(*(getattr(LocalClient, col) == marker
+                  for col in CLIENT_DOC_COLUMNS))
         ).all()
         for c in clients:
-            if getattr(c, "photo_url", None) == marker:
-                c.photo_url = remote_url
-            if getattr(c, "identity_card_image", None) == marker:
-                c.identity_card_image = remote_url
-            if getattr(c, "identity_card_image_back", None) == marker:
-                c.identity_card_image_back = remote_url
-            if getattr(c, "driving_license_image", None) == marker:
-                c.driving_license_image = remote_url
-            if getattr(c, "driving_license_image_back", None) == marker:
-                c.driving_license_image_back = remote_url
+            for col in CLIENT_DOC_COLUMNS:
+                if getattr(c, col, None) == marker:
+                    setattr(c, col, remote_url)
 
         # SyncQueue: replace in JSON payloads
         queue_items = session.query(SyncQueueItem).filter(

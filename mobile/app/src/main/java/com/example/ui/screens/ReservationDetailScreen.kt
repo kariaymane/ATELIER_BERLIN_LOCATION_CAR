@@ -109,8 +109,20 @@ fun ReservationDetailScreen(
                 color = ExecutiveTextPrimary
             )
 
-            ReservationStatusBadge(status = reservation.status)
+            if (reservation.status == ReservationStatus.ANNULEE &&
+                reservation.cancellationReason?.contains("MAINTENANCE", ignoreCase = true) == true) {
+                com.example.ui.components.StatusBadge(
+                    text = "Annulée — Maintenance urgente",
+                    backgroundColor = StatusRedBg,
+                    textColor = StatusRedText,
+                    dotColor = StatusRedDot
+                )
+            } else {
+                ReservationStatusBadge(status = reservation.status)
+            }
         }
+
+        val context = androidx.compose.ui.platform.LocalContext.current
 
         Column(
             modifier = Modifier
@@ -153,6 +165,94 @@ fun ReservationDetailScreen(
                         DetailItem(label = "Email", value = reservation.clientEmail)
                     }
                     DetailItem(label = "Statut Paiement", value = reservation.paymentStatus)
+
+                    if (reservation.status == ReservationStatus.ANNULEE) {
+                        val reasonText = if (reservation.cancellationReason?.contains("MAINTENANCE", ignoreCase = true) == true) {
+                            "Maintenance urgente"
+                        } else {
+                            reservation.cancellationReason ?: "Annulation manuelle"
+                        }
+                        DetailItem(label = "Motif d'annulation", value = reasonText)
+                    }
+
+                    val hasCin = reservation.identityCardImage.isNotBlank()
+                    val hasPermis = reservation.drivingLicenseImage.isNotBlank()
+
+                    if (hasCin || hasPermis) {
+                        HorizontalDivider(
+                            modifier = Modifier.padding(vertical = 10.dp),
+                            thickness = 1.dp,
+                            color = ExecutiveBorder
+                        )
+
+                        Text(
+                            text = "Documents",
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = ExecutiveTextPrimary
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+
+                        if (hasCin) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 4.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "Carte d'identité (CIN)",
+                                    fontSize = 13.sp,
+                                    color = ExecutiveTextSecondary
+                                )
+                                OutlinedButton(
+                                    onClick = {
+                                        val url = com.example.util.ImageUrlResolver.resolve(reservation.identityCardImage, viewModel.getBaseUrl())
+                                        try {
+                                            val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url))
+                                            context.startActivity(intent)
+                                        } catch (_: Exception) {}
+                                    },
+                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier.height(32.dp)
+                                ) {
+                                    Text("Voir", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = ExecutivePrimaryGreen)
+                                }
+                            }
+                        }
+
+                        if (hasPermis) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 4.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "Permis de conduire",
+                                    fontSize = 13.sp,
+                                    color = ExecutiveTextSecondary
+                                )
+                                OutlinedButton(
+                                    onClick = {
+                                        val url = com.example.util.ImageUrlResolver.resolve(reservation.drivingLicenseImage, viewModel.getBaseUrl())
+                                        try {
+                                            val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url))
+                                            context.startActivity(intent)
+                                        } catch (_: Exception) {}
+                                    },
+                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier.height(32.dp)
+                                ) {
+                                    Text("Voir", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = ExecutivePrimaryGreen)
+                                }
+                            }
+                        }
+                    }
                 }
             }
 

@@ -53,6 +53,19 @@ class ClientRepository(BaseRepository[Client]):
         clients = list(result.scalars().all())
         return clients, total
 
+    async def count_reservations(self, client_id: UUID) -> int:
+        """How many reservations reference this client.
+
+        Drives the deletion strategy: a client with linked reservations holds
+        business history and is deactivated, never physically removed.
+        """
+        res = await self._session.execute(
+            select(func.count(Reservation.id)).where(
+                Reservation.customer_id == client_id
+            )
+        )
+        return int(res.scalar() or 0)
+
     async def get_by_phone(self, phone: str) -> Optional[Client]:
         if not phone:
             return None

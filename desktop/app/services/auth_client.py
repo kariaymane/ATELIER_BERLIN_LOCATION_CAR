@@ -1,11 +1,8 @@
 """
 AuthClient — the ONE desktop authentication client.
 
-Before this module the desktop had two login implementations:
-`LoginWorker._authenticate_online` (raw httpx, 4s timeout, no retry — the
-path the screen actually used) and `ApiClient.login` (robust, retrying —
-effectively dead code). Every "login keeps breaking" fix landed in the wrong
-one (FORENSIC_ROOT_CAUSE_ANALYSIS.md §1.1, §2).
+This is the unified login implementation for the desktop application,
+replacing fragmented previous paths.
 
 This is now the only symbol allowed to call `/api/v1/auth/*` from the
 desktop. It:
@@ -25,6 +22,8 @@ from enum import Enum
 from typing import Optional
 
 import httpx
+
+from app.i18n import t
 
 logger = logging.getLogger(__name__)
 
@@ -57,12 +56,31 @@ OUTCOME_I18N = {
 }
 
 
+def format_retry_delay(seconds: int | None) -> str:
+    """Render the server's remaining lockout/rate-limit delay.
+
+    The value always comes from the server (``retry_after_seconds`` or the
+    ``Retry-After`` header). With no server value we say nothing about timing
+    rather than promising a duration the desktop does not know.
+    """
+    if not seconds or seconds <= 0:
+        return ""
+    if seconds < 60:
+        return t("login.retry_under_a_minute")
+    minutes = (seconds + 59) // 60
+    return t("login.retry_in_minutes").replace("{minutes}", str(minutes))
+
+
 @dataclass
 class AuthResult:
     outcome: AuthOutcome
     data: dict = field(default_factory=dict)
     http_status: Optional[int] = None
     detail: str = ""
+    # Server-reported remaining delay (seconds) for ACCOUNT_LOCKED /
+    # RATE_LIMITED. The desktop never computes its own: it shows this or
+    # nothing.
+    retry_after_seconds: Optional[int] = None
 
     @property
     def ok(self) -> bool:
@@ -120,22 +138,59 @@ class AuthClient:
         return AuthResult(AuthOutcome.NETWORK_UNREACHABLE, detail=str(last_exc))
 
     def _classify(self, r: httpx.Response) -> AuthResult:
+        """Map an HTTP login response onto one outcome.
+
+        The backend sends a machine-readable ``error_code`` next to the
+        localized ``detail`` (see backend/app/api/v1/auth.py). We branch on the
+        status code and that code — never on words inside the message, which
+        used to match "lock" in unrelated text and missed the Arabic lockout
+        message entirely.
+        """
         if r.status_code == 200:
             return AuthResult(AuthOutcome.SUCCESS, data=r.json(), http_status=200)
         detail = ""
+        error_code = None
+        retry_after = None
         try:
             body = r.json()
-            detail = body.get("detail") if isinstance(body, dict) else str(body)
+            if isinstance(body, dict):
+                detail = body.get("detail")
+                error_code = body.get("error_code")
+                retry_after = body.get("retry_after_seconds")
+            else:
+                detail = str(body)
             if isinstance(detail, list):  # pydantic 422
                 detail = "; ".join(str(d.get("msg", d)) for d in detail)
         except Exception:
             detail = r.text[:200]
-        low = (detail or "").lower()
+
+        if retry_after is None:
+            try:
+                retry_after = int(r.headers.get("Retry-After", ""))
+            except (TypeError, ValueError):
+                retry_after = None
+
+        # A lockout is reported by code. 401 is accepted alongside 429 only for
+        # version tolerance against a backend that has not been redeployed yet.
+        if error_code == "ACCOUNT_LOCKED":
+            return AuthResult(
+                AuthOutcome.ACCOUNT_LOCKED,
+                http_status=r.status_code,
+                detail=detail,
+                retry_after_seconds=retry_after,
+            )
+        if error_code == "ACCOUNT_DISABLED":
+            return AuthResult(
+                AuthOutcome.INVALID_CREDENTIALS, http_status=r.status_code, detail=detail
+            )
         if r.status_code == 429:
-            return AuthResult(AuthOutcome.RATE_LIMITED, http_status=429, detail=detail)
+            return AuthResult(
+                AuthOutcome.RATE_LIMITED,
+                http_status=429,
+                detail=detail,
+                retry_after_seconds=retry_after,
+            )
         if r.status_code in (400, 401, 403, 422):
-            if "lock" in low or "verrou" in low or "bloqu" in low:
-                return AuthResult(AuthOutcome.ACCOUNT_LOCKED, http_status=r.status_code, detail=detail)
             return AuthResult(AuthOutcome.INVALID_CREDENTIALS, http_status=r.status_code, detail=detail)
         return AuthResult(AuthOutcome.SERVER_ERROR, http_status=r.status_code, detail=detail)
 

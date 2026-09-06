@@ -12,6 +12,7 @@ class Client(Base, TimestampMixin, VersionMixin):
     last_name = Column(String(100), nullable=False)
     email = Column(String(255), nullable=True, index=True)
     phone = Column(String(20), nullable=True, index=True)
+    address = Column(Text, nullable=True)
     cin_number = Column(String(50), nullable=True, index=True)
     # Identity documents are two-sided (recto/verso). The legacy single-image
     # columns are the RECTO/front; the *_back columns hold the VERSO/back and
@@ -21,6 +22,8 @@ class Client(Base, TimestampMixin, VersionMixin):
     license_number = Column(String(50), nullable=True)
     driving_license_image = Column(Text, nullable=True)
     driving_license_image_back = Column(Text, nullable=True)
+    # Signed rental contract scan — the fifth client document slot.
+    contract_image = Column(Text, nullable=True)
     photo_url = Column(Text, nullable=True)
     notes = Column(Text, nullable=True)
     status = Column(String(20), nullable=False, default="ACTIVE")

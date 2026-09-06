@@ -1,20 +1,44 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://ai.google.dev/static/site-assets/images/share-ais-513315318.png" />
-</div>
+# ATELIER BERLIN LOCATION CAR — Android Mobile App
 
-# Run and deploy your AI Studio app
+The Android companion application for **ATELIER BERLIN LOCATION CAR**, providing mobile supervision, fleet status monitoring, and real-time operations dashboard.
 
-This contains everything you need to run your app locally.
+## Architecture
 
-View your app in AI Studio: https://ai.studio/apps/fbee3d8c-106e-4284-af96-22ab0c3212c6
+- **UI**: Jetpack Compose, Material 3 design system, responsive RTL & Arabic support.
+- **Networking**: Retrofit 2, OkHttp with `AuthInterceptor` and automatic token refresh via `TokenAuthenticator`.
+- **Realtime**: WebSockets connection for live updates between workstation and mobile devices.
+- **Local Cache**: Android Room database for offline persistence and instant screen loading.
+- **Security**: Cleartext HTTP traffic is blocked via network security configuration (`network_security_config.xml`). No credentials or database URLs are baked into the APK.
 
-## Run Locally
+## Development & Build
 
-**Prerequisites:**  Node.js
+### Prerequisites
 
+- JDK 17
+- Android SDK (API Level 36, minimum SDK 24)
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+### Build Debug APK
+
+```bash
+cd mobile
+./gradlew clean assembleDebug
+```
+
+### Run Unit Tests
+
+```bash
+cd mobile
+./gradlew testDebugUnitTest
+```
+
+### Release Signing
+
+Release builds require signing credentials provided via environment variables (kept outside version control):
+
+```bash
+export KEYSTORE_PATH=/path/to/keystore.jks
+export STORE_PASSWORD=...
+export KEY_PASSWORD=...
+export KEY_ALIAS=...
+./gradlew clean assembleRelease
+```

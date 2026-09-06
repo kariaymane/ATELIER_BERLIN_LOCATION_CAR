@@ -11,7 +11,7 @@ services:
       POSTGRES_USER: rental_app
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme_dev_only}
     ports:
-      - "5432:5432"  # Remove in production — use private network only
+      - "127.0.0.1:5432:5432"  # Local loopback only — never expose to public network interfaces
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql

@@ -125,7 +125,7 @@ async def test_active_rental_overlapping_maintenance_preserves_realised_revenue(
     # Re-fetch reservation
     await db_session.refresh(res)
     assert res.status == "CANCELLED"
-    assert res.cancellation_reason == "MAINTENANCE"
+    assert res.cancellation_reason in ("MAINTENANCE", "MAINTENANCE_URGENT")
 
     # Post-check revenue: MUST NOT DROP TO ZERO!
     post_rev = await revenue_between(db_session, month_start, month_end, now=now)
@@ -167,7 +167,7 @@ async def test_reserved_rental_cancelled_by_maintenance_contributes_zero(client:
 
     await db_session.refresh(res)
     assert res.status == "CANCELLED"
-    assert res.cancellation_reason == "MAINTENANCE"
+    assert res.cancellation_reason in ("MAINTENANCE", "MAINTENANCE_URGENT")
 
     # Revenue for future cancelled booking is 0
     post_rev = await revenue_between(db_session, now, now + timedelta(days=10), now=now)
@@ -303,7 +303,7 @@ async def test_interrupted_rental_revenue_is_stable_and_not_full_contract(client
     resp = await client.post("/api/v1/maintenance", json=payload, headers=headers)
     assert resp.status_code in (200, 201), resp.text
     await db_session.refresh(res)
-    assert res.status == "CANCELLED" and res.cancellation_reason == "MAINTENANCE"
+    assert res.status == "CANCELLED" and res.cancellation_reason in ("MAINTENANCE", "MAINTENANCE_URGENT")
     assert res.cancelled_at is not None, "cancelled_at must be recorded"
 
     year_start = now.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
@@ -378,4 +378,4 @@ async def test_patch_activating_maintenance_over_in_progress_rental_requires_con
     )
     assert r_patch2.status_code in (200, 201), r_patch2.text
     await db_session.refresh(res)
-    assert res.status == "CANCELLED" and res.cancellation_reason == "MAINTENANCE"
+    assert res.status == "CANCELLED" and res.cancellation_reason in ("MAINTENANCE", "MAINTENANCE_URGENT")

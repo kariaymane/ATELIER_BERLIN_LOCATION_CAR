@@ -76,9 +76,6 @@ interface MaintenanceDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertTicket(ticket: MaintenanceEntity)
 
-    @Query("UPDATE maintenance SET step = :step WHERE id = :id")
-    suspend fun updateTicketStep(id: String, step: String)
-
     @Query("UPDATE maintenance SET status = :status WHERE id = :id")
     suspend fun updateTicketStatus(id: String, status: String)
 

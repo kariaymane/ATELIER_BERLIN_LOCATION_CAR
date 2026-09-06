@@ -117,8 +117,7 @@ class ApiClient:
                 return None
 
     def _do_refresh(self) -> bool:
-        """Refresh the access token via the ONE AuthClient (single refresh
-        path — see FORENSIC_ROOT_CAUSE_ANALYSIS.md §1.1)."""
+        """Refresh the access token via AuthClient (single refresh path)."""
         from app.services.auth_client import AuthClient
 
         data = AuthClient(self._base_url).refresh(self._refresh_token)
@@ -400,9 +399,28 @@ class ApiClient:
             return {"error": r.json().get("detail", "Error")}
         return None
 
-    def delete_client(self, cid: str) -> bool:
+    def delete_client(self, cid: str):
+        """Delete a client through the canonical endpoint.
+
+        The server decides the strategy from the relations that exist:
+        DELETED (no reservation) or DEACTIVATED (history preserved). Returns
+        that body so the UI can report what actually happened; False when the
+        call did not succeed.
+        """
         r = self._request("delete", f"/api/v1/clients/{cid}")
-        return r is not None and r.status_code in (200, 204)
+        if r is None:
+            # Unreachable — the caller queues the intent for later.
+            return {"http_error": "NETWORK"}
+        if r.status_code not in (200, 204):
+            # The server answered and REFUSED (403, 404, ...). Retrying would
+            # only fail again, so this is reported as a refusal, not a network
+            # problem.
+            return {"http_error": r.status_code}
+        try:
+            body = r.json()
+            return body if isinstance(body, dict) else {"strategy": "DELETED"}
+        except Exception:
+            return {"strategy": "DELETED"}
 
     def get_client_history(self, cid: str) -> Optional[dict]:
         r = self._request("get", f"/api/v1/clients/{cid}/history")

@@ -30,6 +30,8 @@ from app.repositories.audit_repository import AuditRepository
 from app.i18n import get_message
 import logging
 
+from app.schemas.client import DOCUMENT_FIELDS, is_own_upload_ref
+
 logger = logging.getLogger(__name__)
 
 
@@ -225,6 +227,8 @@ class SyncService:
                     raw_images = [u.strip() for u in payload["image_url"].split(",") if u.strip()]
                 for idx, img in enumerate(raw_images):
                     img_url = img if isinstance(img, str) else img.get("image_url", "")
+                    if img_url and not is_own_upload_ref(img_url):
+                        continue
                     if img_url:
                         v_img = VehicleImage(
                             vehicle_id=vehicle.id,
@@ -394,7 +398,7 @@ class SyncService:
                 v = (await self._session.execute(select(Vehicle).where(Vehicle.id == m.vehicle_id))).scalar_one_or_none()
                 # Raw MAINTENANCE hold ONLY for a currently-active window — a
                 # future-dated ticket must not create a second status authority
-                # that contradicts the canonical derivation (forensic P0-B).
+                # that contradicts the canonical derivation.
                 if v and v.status not in ("SOLD", "INACTIVE") and _maintenance_active_now(m):
                     v.status = "MAINTENANCE"
                     v.version += 1
@@ -466,12 +470,14 @@ class SyncService:
                 last_name=payload.get("last_name", "").strip(),
                 email=payload.get("email", "").strip().lower() if payload.get("email") else None,
                 phone=payload.get("phone", "").strip() if payload.get("phone") else None,
+                address=payload.get("address", "").strip() if payload.get("address") else None,
                 cin_number=payload.get("cin_number", "").strip() if payload.get("cin_number") else None,
                 identity_card_image=payload.get("identity_card_image"),
                 identity_card_image_back=payload.get("identity_card_image_back"),
                 license_number=payload.get("license_number", "").strip() if payload.get("license_number") else None,
                 driving_license_image=payload.get("driving_license_image"),
                 driving_license_image_back=payload.get("driving_license_image_back"),
+                contract_image=payload.get("contract_image"),
                 photo_url=payload.get("photo_url"),
                 notes=payload.get("notes"),
                 status=payload.get("status", "ACTIVE"),
@@ -492,9 +498,33 @@ class SyncService:
             if client.version > client_version:
                 return {"status": "conflict", "server_version": client.version}
 
-            for field in ["first_name", "last_name", "email", "phone", "cin_number", "identity_card_image", "identity_card_image_back", "license_number", "driving_license_image", "driving_license_image_back", "photo_url", "notes", "status"]:
-                if field in payload and payload[field] is not None:
-                    setattr(client, field, payload[field])
+            # Mirrors ClientService.update_client: a field PRESENT in the
+            # payload is applied even when null/empty — that is a deliberate
+            # CLEAR. A field absent from the payload is left untouched. Only
+            # the NOT NULL columns refuse to be emptied.
+            NON_CLEARABLE = {"first_name", "last_name", "status"}
+            for field in ["first_name", "last_name", "email", "phone", "address",
+                          "cin_number", "identity_card_image", "identity_card_image_back",
+                          "license_number", "driving_license_image",
+                          "driving_license_image_back", "contract_image",
+                          "photo_url", "notes", "status"]:
+                if field not in payload:
+                    continue
+                value = payload[field]
+                if isinstance(value, str):
+                    value = value.strip() or None
+                if value is None and field in NON_CLEARABLE:
+                    continue
+                # The offline push path writes the same document fields the REST
+                # schema guards, but from a raw dict — so the same rule has to be
+                # applied here, or sync becomes the way around it.
+                if field in DOCUMENT_FIELDS and value is not None:
+                    if not is_own_upload_ref(value):
+                        return {
+                            "status": "rejected",
+                            "error": f"Référence de document invalide pour '{field}'.",
+                        }
+                setattr(client, field, value)
 
             client.version += 1
             await self._session.flush()
@@ -507,10 +537,23 @@ class SyncService:
             client = (await self._session.execute(select(Client).where(Client.id == UUID(entity_id)))).scalar_one_or_none()
             if not client:
                 return {"status": "ok", "message": "Already deleted"}
-            client.status = "INACTIVE"
-            client.version += 1
+            # Same business rule as ClientService.delete_client: a client with
+            # linked reservations keeps its history and is DEACTIVATED; a
+            # client with none is physically removed.
+            linked = (await self._session.execute(
+                select(func.count(Reservation.id)).where(
+                    Reservation.customer_id == client.id
+                )
+            )).scalar() or 0
+            if linked:
+                client.status = "INACTIVE"
+                client.version += 1
+                await self._session.flush()
+                return {"status": "ok", "server_version": client.version,
+                        "strategy": "DEACTIVATED"}
+            await self._session.delete(client)
             await self._session.flush()
-            return {"status": "ok", "server_version": client.version}
+            return {"status": "ok", "strategy": "DELETED"}
         except Exception as e:
             raise
 

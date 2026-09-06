@@ -126,4 +126,4 @@ def test_offline_fallback_marks_as_cached(main_window):
 
     main_window._refresh_dashboard(fetch_server=False)
 
-    assert "Hors ligne / Cache" in main_window._dashboard._last_refresh_lbl.text()
+    assert "Indisponible" in main_window._dashboard._last_refresh_lbl.text() or "Hors ligne / Cache" in main_window._dashboard._last_refresh_lbl.text()

@@ -117,7 +117,7 @@ async def test_dashboard_vehicles_and_stats_endpoints_agree(client, db_session: 
     vstats = (await client.get("/api/v1/vehicles/stats", headers=h)).json()["status_counts"]
 
     # dashboard internal consistency
-    assert dash["available"] + dash["reserved"] + dash["rented"] + dash["maintenance"] == dash["total_vehicles"] == 3
+    assert dash["available"] + dash["rented"] + dash["maintenance"] == dash["total_vehicles"] == 3
     assert dash["active_maintenance_tickets"] == dash["maintenance"] == 1
     assert dash["rented"] == 1
 

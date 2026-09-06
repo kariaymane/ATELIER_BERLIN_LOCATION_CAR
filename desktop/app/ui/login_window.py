@@ -11,16 +11,15 @@ from PySide6.QtGui import QFont
 
 from app.i18n import t, is_rtl, set_language, load_translations
 from app.config import get_saved_language, save_language, API_BASE_URL
-from app.services.auth_client import AuthClient, AuthOutcome
+from app.services.auth_client import AuthClient, AuthOutcome, format_retry_delay
 import logging
 
 logger = logging.getLogger(__name__)
 
 
 class WarmupWorker(QThread):
-    """Fire a /health ping so a suspended Fly machine is starting while the
-    operator is still typing their password (kills the cold-start login
-    failure — FORENSIC_ROOT_CAUSE_ANALYSIS.md §2)."""
+    """Fire a /health ping so a suspended server machine is starting while the
+    operator is still typing their password (mitigates cold-start delays)."""
 
     def run(self):
         try:
@@ -36,9 +35,12 @@ class LoginWorker(QThread):
     the server could not be reached or errored — never when the server
     actively rejected the credentials.
     """
-    # dict on success; on failure: (i18n_key, detail)
+    # dict on success; on failure: (i18n_key, detail, retry_after_seconds)
+    # retry_after_seconds is the server's own remaining delay for a lockout or
+    # rate limit (0 when the server did not report one). The desktop never
+    # computes a countdown of its own.
     succeeded = Signal(dict)
-    rejected = Signal(str, str)
+    rejected = Signal(str, str, int)
 
     def __init__(self, email: str, password: str, parent=None):
         super().__init__(parent)
@@ -65,7 +67,9 @@ class LoginWorker(QThread):
             if result.is_server_side_rejection:
                 # Wrong password / locked account — offline cache must NOT
                 # paper over it.
-                self.rejected.emit(result.i18n_key, result.detail or "")
+                self.rejected.emit(
+                    result.i18n_key, result.detail or "", result.retry_after_seconds or 0
+                )
                 return
 
             # NETWORK_UNREACHABLE / SERVER_ERROR / RATE_LIMITED / CONFIG_ERROR
@@ -75,10 +79,12 @@ class LoginWorker(QThread):
                 user_data["offline"] = True
                 self.succeeded.emit(user_data)
             else:
-                self.rejected.emit(result.i18n_key, result.detail or "")
+                self.rejected.emit(
+                    result.i18n_key, result.detail or "", result.retry_after_seconds or 0
+                )
         except Exception as e:
             logger.exception("Unexpected error in login worker: %s", e)
-            self.rejected.emit("login.err_server", str(e))
+            self.rejected.emit("login.err_server", str(e), 0)
 
     @staticmethod
     def _shape(data: dict) -> dict:
@@ -410,12 +416,19 @@ class LoginWindow(QWidget):
         self._login_btn.setText(t("login.login_button"))
         self.login_success.emit(user_data)
 
-    def _on_login_rejected(self, i18n_key: str = "", detail: str = ""):
+    def _on_login_rejected(
+        self, i18n_key: str = "", detail: str = "", retry_after_seconds: int = 0
+    ):
         """i18n_key is one of login.err_* — one message per real cause, so a
         network failure never reads as 'identifiants incorrects'."""
         msg = t(i18n_key) if i18n_key else t("login.err_invalid_credentials")
         if i18n_key and msg == i18n_key:  # key missing from bundle
             msg = t("login.error")
+        if retry_after_seconds > 0 and i18n_key in (
+            "login.err_account_locked",
+            "login.err_rate_limited",
+        ):
+            msg = f"{msg} {format_retry_delay(retry_after_seconds)}"
         self._show_error(msg)
         self._login_btn.setEnabled(True)
         self._login_btn.setText(t("login.login_button"))

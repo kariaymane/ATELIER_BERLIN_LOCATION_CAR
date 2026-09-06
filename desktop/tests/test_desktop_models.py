@@ -59,7 +59,7 @@ def test_reservation_model_crud(setup_db):
     res = LocalReservation(
         id=r_id,
         vehicle_id=v_id,
-        customer_name="Aymane Kari",
+        customer_name="Client Test",
         customer_phone="+212600000000",
         start_datetime=now,
         end_datetime=now,
@@ -78,7 +78,7 @@ def test_reservation_model_crud(setup_db):
 
     saved = session.query(LocalReservation).filter_by(id=r_id).first()
     assert saved is not None
-    assert saved.customer_name == "Aymane Kari"
+    assert saved.customer_name == "Client Test"
     assert saved.total_price == 1350.0
 
     session.delete(saved)

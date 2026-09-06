@@ -31,11 +31,12 @@ async def upload_client_image(
     is_jpeg = content.startswith(b'\xff\xd8\xff')
     is_png = content.startswith(b'\x89PNG\r\n\x1a\n')
     is_webp = content.startswith(b'RIFF') and len(content) >= 12 and content[8:12] == b'WEBP'
+    is_pdf = content.startswith(b'%PDF-')
 
-    if not (is_jpeg or is_png or is_webp):
+    if not (is_jpeg or is_png or is_webp or is_pdf):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Fichier image invalide. Seuls JPG, PNG, WEBP sont autorisés.",
+            detail="Fichier document invalide. Seuls JPG, PNG, WEBP, PDF sont autorisés.",
         )
 
     upload_dir = Path("uploads/clients")
@@ -46,6 +47,8 @@ async def upload_client_image(
         ext = ".png"
     elif is_webp:
         ext = ".webp"
+    elif is_pdf:
+        ext = ".pdf"
     filename = f"{uuid.uuid4().hex}{ext}"
     target_path = upload_dir / filename
 
@@ -61,12 +64,14 @@ def _to_response(c) -> ClientResponse:
         last_name=c.last_name,
         email=c.email,
         phone=c.phone,
+        address=getattr(c, "address", None),
         cin_number=getattr(c, "cin_number", None),
         identity_card_image=c.identity_card_image,
         identity_card_image_back=getattr(c, "identity_card_image_back", None),
         license_number=getattr(c, "license_number", None),
         driving_license_image=c.driving_license_image,
         driving_license_image_back=getattr(c, "driving_license_image_back", None),
+        contract_image=getattr(c, "contract_image", None),
         photo_url=getattr(c, "photo_url", None),
         notes=getattr(c, "notes", None),
         status=getattr(c, "status", "ACTIVE"),

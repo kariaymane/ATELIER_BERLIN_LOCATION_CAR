@@ -129,9 +129,8 @@ async def test_backend_and_desktop_snapshots_are_identical(db_session):
     assert desktop_dto == backend_dto
 
     # And the picture itself is the expected one.
-    assert backend_dto["vehicles"]["ready_to_rent"] == 1
+    assert backend_dto["vehicles"]["ready_to_rent"] == 2
     assert backend_dto["vehicles"]["active_rental"] == 1
-    assert backend_dto["vehicles"]["reserved"] == 1
     assert backend_dto["vehicles"]["maintenance"] == 1
     assert backend_dto["vehicles"]["excluded_structural"] == 1
     assert backend_dto["integrity"]["ok"] is True

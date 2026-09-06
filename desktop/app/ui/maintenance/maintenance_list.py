@@ -157,7 +157,6 @@ class MaintenanceFormDialog(QDialog):
             "start_datetime": start.toPython().replace(tzinfo=ZoneInfo("Africa/Casablanca")).astimezone(timezone.utc).isoformat(),
             "expected_end_datetime": end.toPython().replace(tzinfo=ZoneInfo("Africa/Casablanca")).astimezone(timezone.utc).isoformat(),
             "estimated_cost": self._cost.value(),
-            "step": "DIAGNOSTIC",
             "status": "ACTIVE",
         })
         self.accept()
@@ -240,7 +239,7 @@ class MaintenanceWidget(QWidget):
             t("maintenance.col_type"),
             t("maintenance.col_desc"),
             t("maintenance.col_return"),
-            t("maintenance.col_step"),
+            t("maintenance.col_status"),
             t("maintenance.col_actions")
         ])
 
@@ -293,7 +292,7 @@ class MaintenanceWidget(QWidget):
             t("maintenance.col_type"),
             t("maintenance.col_desc"),
             t("maintenance.col_return"),
-            t("maintenance.col_step"),
+            t("maintenance.col_status"),
             t("maintenance.col_actions")
         ])
         self.refresh_data()
@@ -386,40 +385,39 @@ class MaintenanceWidget(QWidget):
                     return_date = str(m.get("expected_end_datetime"))[:10]
             self._table.setItem(i, 3, QTableWidgetItem(return_date))
 
-            # 4. Étape (Badge)
-            step = m.get("step") or "DIAGNOSTIC"
-            step_display = t(f"maintenance_steps.{step}")
+            # 4. Statut (Badge) — strictly derived by time
+            now_utc = datetime.now(timezone.utc)
+            end_str = m.get("actual_end_datetime") or m.get("expected_end_datetime")
+            end_dt = parse_datetime_utc(end_str) if end_str else None
+            raw_status = (m.get("status") or "").upper()
+
+            if raw_status == "COMPLETED" or (end_dt and now_utc >= end_dt):
+                status_display = t("maintenance.status_completed")
+                badge_prop = "badge_success"
+            elif raw_status == "CANCELLED":
+                status_display = t("status.CANCELLED")
+                badge_prop = "badge_danger"
+            else:
+                status_display = t("maintenance.status_active")
+                badge_prop = "badge_warning"
 
             badge_widget = QWidget()
             bw_layout = QHBoxLayout(badge_widget)
             bw_layout.setContentsMargins(4, 2, 4, 2)
-            badge_lbl = QLabel(step_display)
+            badge_lbl = QLabel(status_display)
             badge_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
             badge_lbl.setFont(QFont("Hanken Grotesk", 9, QFont.Weight.Bold))
-
-            if step in ("EN ATTENTE", "DIAGNOSTIC"):
-                badge_lbl.setProperty("class", "badge_warning")
-            elif step in ("REPARATION", "CONTROLE"):
-                badge_lbl.setProperty("class", "badge_info")
-            else:
-                badge_lbl.setProperty("class", "badge_success")
+            badge_lbl.setProperty("class", badge_prop)
 
             bw_layout.addWidget(badge_lbl)
             self._table.setCellWidget(i, 4, badge_widget)
 
-            # 5. Actions (Étape suivante / Terminer)
-            if m.get("status") == "ACTIVE" and self._user_role in ("ADMIN", "MANAGER"):
+            # 5. Actions (Terminer uniquement)
+            if (raw_status == "ACTIVE" and (not end_dt or now_utc < end_dt)) and self._user_role in ("ADMIN", "MANAGER"):
                 act_widget = QWidget()
                 act_layout = QHBoxLayout(act_widget)
                 act_layout.setContentsMargins(4, 4, 4, 4)
                 act_layout.setSpacing(6)
-
-                if step != "TERMINE":
-                    next_btn = QPushButton(t("maintenance.action_next_step"))
-                    next_btn.setFont(QFont("Hanken Grotesk", 9, QFont.Weight.Bold))
-                    next_btn.setStyleSheet("background-color: #F0F4EF; color: #2D5233; border: 1px solid #D5DFD3; border-radius: 4px; padding: 4px 8px;")
-                    next_btn.clicked.connect(lambda _, mid=m.get("id"), cur_s=step: self._advance_step(mid, cur_s))
-                    act_layout.addWidget(next_btn)
 
                 finish_btn = QPushButton(t("maintenance.action_finish"))
                 finish_btn.setFont(QFont("Hanken Grotesk", 9, QFont.Weight.Bold))
@@ -431,58 +429,22 @@ class MaintenanceWidget(QWidget):
             else:
                 self._table.setCellWidget(i, 5, QWidget())
 
-    def _advance_step(self, maint_id: str, current_step: str = None):
-        if current_step is None:
-            rs = get_local_session()
-            try:
-                m = rs.query(LocalMaintenance).filter_by(id=maint_id).first()
-                current_step = m.step if m else "DIAGNOSTIC"
-            finally:
-                rs.close()
-
-        steps = ["EN ATTENTE", "DIAGNOSTIC", "REPARATION", "CONTROLE", "TERMINE"]
-        try:
-            curr_idx = steps.index(current_step)
-            next_step = steps[curr_idx + 1] if curr_idx + 1 < len(steps) else "TERMINE"
-        except ValueError:
-            next_step = "REPARATION"
-
-        def _apply(session):
-            m = session.query(LocalMaintenance).filter_by(id=maint_id).first()
-            if not m:
-                return
-            now_iso = datetime.now(timezone.utc).isoformat()
-            m.step = next_step
-            m.updated_at = now_iso
-            m.version += 1
-            SyncQueue(session, self._device_id, self._user_id).enqueue(
-                "maintenance", m.id, "UPDATE", {"id": m.id, "step": next_step})
-
-        # Canonical write path: one transaction; on commit the store reloads
-        # and every view converges; on failure it rolls back and publishes
-        # NOTHING (no false 'state changed').
-        try:
-            self._store.mutate(_apply)
-        except Exception as e:
-            logger.error("Failed to advance maintenance step: %s", e, exc_info=True)
-            QMessageBox.critical(self, t("common.error"), t("common.error"))
-            return
-        self.maintenance_updated.emit()  # -> MainWindow triggers a background sync
-
     def _finish_maintenance(self, maint_id: str):
         def _apply(session):
             m = session.query(LocalMaintenance).filter_by(id=maint_id).first()
             if not m:
                 return
             now_iso = datetime.now(timezone.utc).isoformat()
+            # Closing a maintenance is one fact: it ended now. Status and the
+            # end instant are the whole model — there is no workflow step to
+            # advance.
             m.status = "COMPLETED"
-            m.step = "TERMINE"
             m.actual_end_datetime = now_iso
             m.updated_at = now_iso
             m.version += 1
             SyncQueue(session, self._device_id, self._user_id).enqueue(
                 "maintenance", m.id, "UPDATE",
-                {"id": m.id, "status": "COMPLETED", "step": "TERMINE"})
+                {"id": m.id, "status": "COMPLETED", "actual_end_datetime": now_iso})
 
         try:
             self._store.mutate(_apply)

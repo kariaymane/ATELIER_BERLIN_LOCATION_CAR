@@ -23,9 +23,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
-import com.example.data.model.MaintenanceStep
 import com.example.data.model.MaintenanceTicket
 import com.example.data.model.Reservation
+import com.example.data.model.ReservationStatus
 import com.example.data.model.Vehicle
 import com.example.ui.theme.*
 
@@ -170,7 +170,17 @@ fun ReservationCard(
                         overflow = TextOverflow.Ellipsis
                     )
                 }
-                ReservationStatusBadge(status = reservation.status)
+                if (reservation.status == ReservationStatus.ANNULEE &&
+                    reservation.cancellationReason?.contains("MAINTENANCE", ignoreCase = true) == true) {
+                    StatusBadge(
+                        text = "Annulée — Maintenance",
+                        backgroundColor = StatusRedBg,
+                        textColor = StatusRedText,
+                        dotColor = StatusRedDot
+                    )
+                } else {
+                    ReservationStatusBadge(status = reservation.status)
+                }
             }
 
             Spacer(modifier = Modifier.height(8.dp))
@@ -243,20 +253,9 @@ fun MaintenanceCard(
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val steps = listOf(
-        MaintenanceStep.DIAGNOSTIC,
-        MaintenanceStep.REPARATION,
-        MaintenanceStep.CONTROLE,
-        MaintenanceStep.TERMINEE
-    )
-
-    val currentStepIndex = when (ticket.step) {
-        MaintenanceStep.DIAGNOSTIC -> 0
-        MaintenanceStep.REPARATION -> 1
-        MaintenanceStep.CONTROLE -> 2
-        MaintenanceStep.TERMINEE -> 3
-        else -> 0
-    }
+    val isCompleted = ticket.isCompleted
+    val isCancelled = ticket.isCancelled
+    val statusText = ticket.effectiveStatusDisplay
 
     Surface(
         modifier = modifier
@@ -297,10 +296,27 @@ fun MaintenanceCard(
                         overflow = TextOverflow.Ellipsis
                     )
                 }
-                MaintenanceStepBadge(step = ticket.step)
+                StatusBadge(
+                    text = statusText,
+                    backgroundColor = when {
+                        isCancelled -> StatusRedBg
+                        isCompleted -> StatusGreenBg
+                        else -> StatusGoldBg
+                    },
+                    textColor = when {
+                        isCancelled -> StatusRedText
+                        isCompleted -> StatusGreenText
+                        else -> StatusGoldText
+                    },
+                    dotColor = when {
+                        isCancelled -> StatusRedDot
+                        isCompleted -> StatusGreenDot
+                        else -> StatusGoldDot
+                    }
+                )
             }
 
-            Spacer(modifier = Modifier.height(6.dp))
+            Spacer(modifier = Modifier.height(8.dp))
 
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
@@ -319,67 +335,34 @@ fun MaintenanceCard(
                 )
             }
 
-            Spacer(modifier = Modifier.height(4.dp))
+            Spacer(modifier = Modifier.height(6.dp))
 
-            Text(
-                text = "Date : ${ticket.scheduledDate}",
-                fontSize = 12.sp,
-                color = ExecutiveTextSecondary
-            )
-
-            Spacer(modifier = Modifier.height(14.dp))
-
-            // Multi-step progress line matching screenshot 10
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                steps.forEachIndexed { index, step ->
-                    val isDone = index <= currentStepIndex
-
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(22.dp)
-                                .clip(CircleShape)
-                                .background(if (isDone) ExecutivePrimaryGreen else ExecutiveSurfaceVariant)
-                                .border(
-                                    1.dp,
-                                    if (isDone) ExecutivePrimaryGreen else ExecutiveBorder,
-                                    CircleShape
-                                ),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            if (isDone) {
-                                Icon(
-                                    imageVector = Icons.Default.Check,
-                                    contentDescription = null,
-                                    tint = Color.White,
-                                    modifier = Modifier.size(12.dp)
-                                )
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.height(4.dp))
-
-                        Text(
-                            text = when (step) {
-                                MaintenanceStep.DIAGNOSTIC -> "Diagnostic"
-                                MaintenanceStep.REPARATION -> "Réparation"
-                                MaintenanceStep.CONTROLE -> "Tests"
-                                MaintenanceStep.TERMINEE -> "Finalisé"
-                                else -> step.label
-                            },
-                            fontSize = 10.sp,
-                            fontWeight = if (isDone) FontWeight.Bold else FontWeight.Normal,
-                            color = if (isDone) ExecutivePrimaryGreen else ExecutiveTextTertiary,
-                            maxLines = 1
-                        )
-                    }
+                // The maintenance PERIOD is what defines its status, so the
+                // card shows both edges. It wraps instead of being clipped and
+                // yields its width to the cost on the right.
+                Text(
+                    text = if (ticket.scheduledEndDate.isNotBlank())
+                        "Du ${ticket.scheduledDate} au ${ticket.scheduledEndDate}"
+                    else
+                        "Début : ${ticket.scheduledDate}",
+                    fontSize = 12.sp,
+                    color = ExecutiveTextSecondary,
+                    modifier = Modifier.weight(1f, fill = false)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                val cost = ticket.actual_cost ?: ticket.estimatedCost.toDouble()
+                if (cost > 0.0) {
+                    Text(
+                        text = "${String.format("%.0f", cost)} DH",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = ExecutivePrimaryGreen
+                    )
                 }
             }
         }

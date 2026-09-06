@@ -191,7 +191,12 @@ fun DashboardScreen(
 
             Spacer(modifier = Modifier.height(14.dp))
 
-            // 2x2 Grid of Fleet Count Cards matching screenshot 1
+            val ready = metrics?.readyVehicles ?: 0
+            val rented = metrics?.rentedVehicles ?: 0
+            val maintenance = metrics?.maintenanceVehicles ?: 0
+            val total = ready + rented + maintenance
+
+            // 3 Fleet Count Cards: Prêts à louer, En location, En maintenance
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -204,14 +209,14 @@ fun DashboardScreen(
                 ) {
                     FleetCountCard(
                         title = "Prêts à louer",
-                        count = metrics?.readyVehicles ?: 0,
+                        count = ready,
                         icon = Icons.Default.DirectionsCar,
                         iconColor = StatusGreenDot,
                         modifier = Modifier.weight(1f)
                     )
                     FleetCountCard(
                         title = "En location",
-                        count = metrics?.rentedVehicles ?: 0,
+                        count = rented,
                         icon = Icons.Default.AltRoute,
                         iconColor = StatusOrangeDot,
                         modifier = Modifier.weight(1f)
@@ -222,21 +227,28 @@ fun DashboardScreen(
                     horizontalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
                     FleetCountCard(
-                        title = "Réservés",
-                        count = metrics?.reservedVehicles ?: 0,
-                        icon = Icons.Default.CalendarMonth,
-                        iconColor = StatusGoldDot,
-                        modifier = Modifier.weight(1f)
-                    )
-                    FleetCountCard(
                         title = "En maintenance",
-                        count = metrics?.maintenanceVehicles ?: 0,
+                        count = maintenance,
                         icon = Icons.Default.Build,
                         iconColor = StatusRedDot,
                         modifier = Modifier.weight(1f)
                     )
                 }
             }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // Reconciliation line: {ready} prêts + {rented} en location + {maintenance} en maintenance = {total} véhicules actifs
+            Text(
+                text = "$ready prêts + $rented en location + $maintenance en maintenance = $total véhicules actifs",
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Medium,
+                color = ExecutiveTextSecondary,
+                textAlign = TextAlign.Center,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp)
+            )
 
             Spacer(modifier = Modifier.height(28.dp))
 

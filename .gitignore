@@ -71,13 +71,19 @@ desktop/app/data/device_id.txt
 # ─── Backups and scratch files ──────────────────────────────────────────────
 backups/
 .backups/
+*.sql
+!docker/postgres/init.sql
+*.dump
+*.backup
+*.backup.*
 *.bak
 *.bak.*
-*.backup.*
 *.old
 *.orig
 *.rej
 *.tmp
+*.tar.gz
+*.tgz
 fly.toml.backup-*
 window_dump.xml
 

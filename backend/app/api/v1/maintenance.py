@@ -39,6 +39,15 @@ def _get_origin(request: Request, current_user: dict) -> str:
     return "Desktop"
 
 def _maintenance_response(m: Maintenance, v: Vehicle | None = None) -> MaintenanceResponse:
+    eff_status = m.status
+    if eff_status != "CANCELLED":
+        _now = datetime.now(timezone.utc)
+        _end = _as_utc(m.actual_end_datetime or m.expected_end_datetime)
+        if _end is not None and _end <= _now:
+            eff_status = "COMPLETED"
+        elif eff_status != "COMPLETED":
+            eff_status = "ACTIVE"
+
     resp = MaintenanceResponse(
         id=m.id,
         vehicle_id=m.vehicle_id,
@@ -52,7 +61,7 @@ def _maintenance_response(m: Maintenance, v: Vehicle | None = None) -> Maintenan
         estimated_cost=m.estimated_cost,
         actual_cost=m.actual_cost,
         step=m.step,
-        status=m.status,
+        status=eff_status,
         notes=m.notes,
         created_by=m.created_by,
         created_at=m.created_at,
@@ -174,6 +183,16 @@ async def create_maintenance(
 
     actual_cost = parts_cost + body.labor_cost + body.other_cost
 
+    _now = datetime.now(timezone.utc)
+    _m_start = _as_utc(body.start_datetime)
+    _m_end = _as_utc(body.actual_end_datetime or body.expected_end_datetime)
+    init_status = body.status
+    if not init_status or init_status not in ("COMPLETED", "CANCELLED"):
+        if _m_end is not None and _m_end <= _now:
+            init_status = "COMPLETED"
+        else:
+            init_status = "ACTIVE"
+
     new_maint = Maintenance(
         vehicle_id=body.vehicle_id,
         type=body.type,
@@ -203,7 +222,7 @@ async def create_maintenance(
         next_maintenance_date=body.next_maintenance_date,
         next_maintenance_mileage=body.next_maintenance_mileage,
         step=body.step or "EN ATTENTE",
-        status=body.status or "ACTIVE",
+        status=init_status,
         notes=body.notes,
         created_by=_extract_user_id(current_user),
         parts=db_parts
@@ -213,18 +232,6 @@ async def create_maintenance(
 
     # Raw ``vehicle.status`` carries only STRUCTURAL state (SOLD / INACTIVE)
     # plus a TRANSIENT hold for a maintenance that is active RIGHT NOW.
-    # Canonical effective status is always derived from the maintenance
-    # SCHEDULE (app.services.fleet_status, half-open [start, end)). A
-    # future-dated ticket must NOT flip the raw column — doing so created a
-    # second, contradictory status authority (forensic P0-B): the Vehicles
-    # list / Dashboard showed AVAILABLE (derived) while the detail view showed
-    # MAINTENANCE (raw). When the window opens the interval rule flips every
-    # effective-status observer automatically; nothing needs the raw flag.
-    _now = datetime.now(timezone.utc)
-    _m_start = _as_utc(new_maint.start_datetime)
-    # COALESCE(actual_end, expected_end) — actual_end wins (canonical order:
-    # shared/fleet_status_reference._maintenance_end).
-    _m_end = _as_utc(new_maint.actual_end_datetime or new_maint.expected_end_datetime)
     _active_now = (
         (new_maint.status or "").upper() not in ("CANCELLED", "COMPLETED")
         and _m_start is not None and _m_start <= _now
@@ -234,31 +241,41 @@ async def create_maintenance(
         vehicle.status = "MAINTENANCE"
         vehicle.version += 1
 
-    # CANONICAL: maintenance wins. Atomically cancel every RESERVED / ACTIVE
-    # reservation that overlaps this maintenance period — same transaction as
-    # the maintenance insert + vehicle flag, so all views converge on commit.
+    # Overlap logic: maintenance is considered URGENT iff its dates overlap
+    # an existing active/reserved reservation (maint_start < res_end AND maint_end > res_start).
+    # Overlapping non-terminal reservations are automatically cancelled with MAINTENANCE_URGENT.
     cancelled_reservation_ids: list[str] = []
     if (new_maint.status or "").upper() not in ("CANCELLED", "COMPLETED"):
         from app.repositories.rental_repository import RentalRepository
         from app.repositories.audit_repository import AuditRepository
-        # None => open-ended; the helper applies FAR_FUTURE.
         maint_end = new_maint.expected_end_datetime or new_maint.actual_end_datetime
         rental_repo = RentalRepository(db)
 
-        # Policy B Guard: Active in-progress rental requires explicit operator confirmation
-        overlapping_active = await rental_repo.get_overlapping_active_rentals(
-            body.vehicle_id, new_maint.start_datetime, maint_end
-        )
-        if overlapping_active and not getattr(body, "confirm_interruption", False):
-            names = ", ".join(f"#{r.id} ({r.customer_name})" for r in overlapping_active)
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=f"Vehicle currently has active in-progress rental(s): {names}. Confirmation required to interrupt active rental for maintenance (confirm_interruption=true).",
+        # Legacy guard: if confirm_interruption is explicitly False, require confirmation
+        if getattr(body, "confirm_interruption", None) is False:
+            overlapping_active = await rental_repo.get_overlapping_active_rentals(
+                body.vehicle_id, new_maint.start_datetime, maint_end
             )
+            if overlapping_active:
+                names = ", ".join(f"#{r.id} ({r.customer_name})" for r in overlapping_active)
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=f"Vehicle currently has active in-progress rental(s): {names}. Confirmation required to interrupt active rental for maintenance (confirm_interruption=true).",
+                )
 
+        maint_motif = new_maint.description or new_maint.title or "Maintenance urgente"
         cancelled = await rental_repo.cancel_overlapping_reservations(
-            body.vehicle_id, new_maint.start_datetime, maint_end
+            body.vehicle_id,
+            new_maint.start_datetime,
+            maint_end,
+            reason="MAINTENANCE_URGENT",
+            description=maint_motif,
+            maintenance_id=new_maint.id,
         )
+        if cancelled:
+            urgent_note = f"[MAINTENANCE URGENTE] Annulation automatique de {len(cancelled)} réservation(s) chevauchante(s)."
+            new_maint.notes = f"{new_maint.notes}\n{urgent_note}" if new_maint.notes else urgent_note
+
         audit = AuditRepository(db)
         for res in cancelled:
             cancelled_reservation_ids.append(str(res.id))
@@ -270,8 +287,9 @@ async def create_maintenance(
                 old_values={"status": "RESERVED_OR_ACTIVE"},
                 new_values={
                     "status": "CANCELLED",
-                    "cancellation_reason": "MAINTENANCE",
+                    "cancellation_reason": "MAINTENANCE_URGENT",
                     "cause_maintenance_id": str(new_maint.id),
+                    "motif": maint_motif,
                 },
             )
 
@@ -330,85 +348,6 @@ async def create_maintenance(
         select(Maintenance)
         .options(_selectinload(Maintenance.parts))
         .where(Maintenance.id == new_maint.id)
-    )
-    return reloaded.scalar_one()
-
-@router.post("/{maintenance_id}/advance", response_model=MaintenanceResponse)
-async def advance_maintenance_step(
-    maintenance_id: UUID,
-    request: Request,
-    db: AsyncSession = Depends(get_db),
-    current_user: dict = Depends(require_perm(Permission.MAINTENANCE_UPDATE)),
-):
-    """
-    Advance maintenance workflow step.
-    """
-    steps = ["EN ATTENTE", "DIAGNOSTIC", "REPARATION", "CONTROLE", "TERMINE"]
-    query = select(Maintenance).where(Maintenance.id == maintenance_id)
-    result = await db.execute(query)
-    m = result.scalar_one_or_none()
-    if not m:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Maintenance not found")
-
-    vehicle = None
-    if m.step in steps:
-        idx = steps.index(m.step)
-        if idx < len(steps) - 1:
-            m.step = steps[idx + 1]
-            m.version += 1
-            if m.step == "TERMINE":
-                m.status = "COMPLETED"
-                m.actual_end_datetime = datetime.now(timezone.utc)
-                # Free vehicle
-                v_res = await db.execute(select(Vehicle).where(Vehicle.id == m.vehicle_id))
-                vehicle = v_res.scalar_one_or_none()
-                # Free the vehicle. Only clear a transient MAINTENANCE hold —
-                # structural states (SOLD / INACTIVE) are preserved.
-                if vehicle and vehicle.status == "MAINTENANCE":
-                    vehicle.status = "AVAILABLE"
-                    vehicle.version += 1
-
-    await db.commit()
-    await db.refresh(m)
-
-    origin = _get_origin(request, current_user)
-    v_reg = vehicle.registration if vehicle else "Véhicule"
-    v_title = f"{vehicle.brand} {vehicle.model}" if vehicle else v_reg
-
-    # Persist Notification if completed
-    if m.status == "COMPLETED" or m.step == "TERMINE":
-        from app.services.notification_service import NotificationService
-        notif_service = NotificationService(db)
-        await notif_service.create_notification(
-            vehicle_id=m.vehicle_id,
-            type="MAINTENANCE_COMPLETED",
-            severity="info",
-            title=f"✅ Maintenance terminée : {v_title}",
-            message=f"Véhicule {v_reg} est sorti de maintenance depuis {origin}.",
-            due_date=datetime.now(timezone.utc).date(),
-            user_id=_extract_user_id(current_user),
-            origin=origin,
-        )
-        await db.commit()
-
-    await broadcaster.broadcast_event(
-        event_type="MAINTENANCE_UPDATED",
-        entity_type="maintenance",
-        entity_id=str(m.id),
-        message=f"🔧 Ticket maintenance {m.id} avancé à l'étape {m.step} depuis {origin}.",
-        origin=origin,
-        vehicle_id=str(m.vehicle_id),
-        vehicle_registration=v_reg,
-        data={"maintenance_id": str(m.id), "status": m.status, "step": m.step}
-    )
-
-    # Re-query with eager-loaded parts so response serialization cannot hit a
-    # detached / lazy-load instance (same pattern as create).
-    from sqlalchemy.orm import selectinload as _selectinload
-    reloaded = await db.execute(
-        select(Maintenance)
-        .options(_selectinload(Maintenance.parts))
-        .where(Maintenance.id == m.id)
     )
     return reloaded.scalar_one()
 

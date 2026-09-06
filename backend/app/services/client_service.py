@@ -21,12 +21,14 @@ class ClientService:
             last_name=data.last_name.strip(),
             email=data.email.strip().lower() if data.email else None,
             phone=data.phone.strip() if data.phone else None,
+            address=data.address.strip() if data.address else None,
             cin_number=data.cin_number.strip() if data.cin_number else None,
             identity_card_image=data.identity_card_image,
             identity_card_image_back=data.identity_card_image_back,
             license_number=data.license_number.strip() if data.license_number else None,
             driving_license_image=data.driving_license_image,
             driving_license_image_back=data.driving_license_image_back,
+            contract_image=data.contract_image,
             photo_url=data.photo_url,
             notes=data.notes,
             status="ACTIVE",
@@ -53,17 +55,30 @@ class ClientService:
         if not client:
             return {"error": get_message("client.not_found", lang)}
 
+        # `exclude_unset` keeps the request's intent intact: a field the caller
+        # never mentioned is left alone, while a field explicitly sent as null
+        # (or as an empty string) is a deliberate CLEAR. Only the columns the
+        # schema declares NOT NULL are protected from being emptied.
         update_data = data.model_dump(exclude_unset=True)
+        NON_CLEARABLE = {"first_name", "last_name", "status"}
         old_values = {}
         new_values = {}
 
         for k, v in update_data.items():
-            if v is not None:
-                old_val = getattr(client, k)
-                if old_val != v:
-                    old_values[k] = str(old_val) if old_val is not None else None
-                    setattr(client, k, v.strip() if isinstance(v, str) else v)
-                    new_values[k] = str(v)
+            if isinstance(v, str):
+                v = v.strip()
+                # An emptied optional field means "remove this value".
+                if v == "":
+                    v = None
+            if v is None and k in NON_CLEARABLE:
+                # Identity and lifecycle columns are NOT NULL — ignore the clear
+                # rather than raising, so the rest of the update still applies.
+                continue
+            old_val = getattr(client, k, None)
+            if old_val != v:
+                old_values[k] = str(old_val) if old_val is not None else None
+                setattr(client, k, v)
+                new_values[k] = str(v) if v is not None else None
 
         client.version += 1
         await self._session.commit()
@@ -100,17 +115,49 @@ class ClientService:
         if not client:
             return {"error": get_message("client.not_found", lang)}
 
-        client.status = "INACTIVE"
-        client.version += 1
-        await self._session.commit()
+        # Deletion must respect the relations that already exist. A client
+        # referenced by reservations carries business history (revenue, rental
+        # days, audit trail) that must never be destroyed, and the
+        # reservations.customer_id FK would be nulled out — so that client is
+        # DEACTIVATED (the strategy this system already uses). A client with no
+        # reservation at all holds no history and is physically removed.
+        linked = await self._repo.count_reservations(client_id)
+
+        if linked:
+            client.status = "INACTIVE"
+            client.version += 1
+            await self._audit.create(
+                entity_type="client",
+                action="DEACTIVATED",
+                entity_id=client.id,
+                user_id=deleted_by,
+                old_values={"linked_reservations": str(linked)},
+            )
+            await self._session.commit()
+            return {
+                "message": "Client désactivé (réservations liées conservées)",
+                "strategy": "DEACTIVATED",
+                "linked_reservations": linked,
+            }
 
         await self._audit.create(
             entity_type="client",
-            action="DEACTIVATED",
+            action="DELETED",
             entity_id=client.id,
             user_id=deleted_by,
+            old_values={
+                "name": f"{client.first_name} {client.last_name}",
+                "phone": client.phone,
+                "cin": client.cin_number,
+            },
         )
-        return {"message": "Client désactivé avec succès"}
+        await self._session.delete(client)
+        await self._session.commit()
+        return {
+            "message": "Client supprimé avec succès",
+            "strategy": "DELETED",
+            "linked_reservations": 0,
+        }
 
     async def get_client_history(self, client_id: UUID) -> list[dict]:
         client = await self._repo.get_by_id(client_id)

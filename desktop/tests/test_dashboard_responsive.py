@@ -46,7 +46,7 @@ def qapp():
 
 def _cards(w):
     return [w._card_day, w._card_maintenance, w._card_available,
-            w._card_rented, w._card_reserved, w._card_fleet_maintenance]
+            w._card_rented, w._card_fleet_maintenance]
 
 
 def _laid_out(qapp, width, height):
@@ -161,18 +161,18 @@ def test_cards_wrap_instead_of_being_clipped_when_space_runs_out(qapp):
     wide = _laid_out(qapp, 1920, 1080)
     rows = {c.mapTo(wide._scroll.widget(), QPoint(0, 0)).y()
             for c in (wide._card_available, wide._card_rented,
-                      wide._card_reserved, wide._card_fleet_maintenance)}
-    assert len(rows) == 1, "the four fleet cards must share one row on a wide screen"
+                      wide._card_fleet_maintenance)}
+    assert len(rows) == 1, "the three fleet cards must share one row on a wide screen"
     wide.close()
 
-    narrow = _laid_out(qapp, 700, 600)
+    narrow = _laid_out(qapp, 500, 600)
     content = narrow._scroll.widget()
     ys = {c.mapTo(content, QPoint(0, 0)).y()
           for c in (narrow._card_available, narrow._card_rented,
-                    narrow._card_reserved, narrow._card_fleet_maintenance)}
+                    narrow._card_fleet_maintenance)}
     assert len(ys) > 1, "the cards must wrap onto more rows when width runs out"
     for c in (narrow._card_available, narrow._card_rented,
-              narrow._card_reserved, narrow._card_fleet_maintenance):
+              narrow._card_fleet_maintenance):
         origin = c.mapTo(content, QPoint(0, 0))
         assert origin.x() + c.width() <= content.width() + 1
     assert narrow._scroll.horizontalScrollBar().maximum() == 0

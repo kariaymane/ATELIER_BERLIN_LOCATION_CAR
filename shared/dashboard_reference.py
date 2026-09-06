@@ -68,7 +68,7 @@ INVARIANTS checked before returning (reported in ``integrity``, logged on
 violation, never silently returned as contradictory numbers):
 
   I1  every bucket count >= 0
-  I2  ready_to_rent + active_rental + reserved + maintenance == vehicles.total
+  I2  ready_to_rent + active_rental + maintenance == vehicles.total
   I3  active fleet + structural == fleet size (nothing lost, nothing counted twice)
   I4  revenue.amount >= 0 and revenue.rental_days >= 0
   I5  top_vehicles ordered by rental_count DESC
@@ -179,7 +179,6 @@ def fleet_section(vehicles, reservations, maintenances, now) -> tuple[dict, dict
     )
     counts = {
         EFFECTIVE_AVAILABLE: 0,
-        EFFECTIVE_RESERVED: 0,
         EFFECTIVE_RENTED: 0,
         EFFECTIVE_MAINTENANCE: 0,
     }
@@ -187,13 +186,15 @@ def fleet_section(vehicles, reservations, maintenances, now) -> tuple[dict, dict
     for st in per_vehicle.values():
         if st in counts:
             counts[st] += 1
+        elif st == EFFECTIVE_RESERVED:
+            # Vehicles with future reservations are ready to rent right now
+            counts[EFFECTIVE_AVAILABLE] += 1
         elif st in STRUCTURAL_STATUSES:
             structural += 1
     return {
         "total": sum(counts.values()),
         "ready_to_rent": counts[EFFECTIVE_AVAILABLE],
         "active_rental": counts[EFFECTIVE_RENTED],
-        "reserved": counts[EFFECTIVE_RESERVED],
         "maintenance": counts[EFFECTIVE_MAINTENANCE],
         "excluded_structural": structural,
         "fleet_size": len(per_vehicle),
@@ -341,14 +342,14 @@ def validate(dto: dict) -> dict:
     rev = dto["revenue"]
     violations: list[str] = []
 
-    for key in ("total", "ready_to_rent", "active_rental", "reserved", "maintenance"):
+    for key in ("total", "ready_to_rent", "active_rental", "maintenance"):
         if v[key] < 0:
             violations.append(f"vehicles.{key} is negative ({v[key]})")
 
-    bucket_sum = v["ready_to_rent"] + v["active_rental"] + v["reserved"] + v["maintenance"]
+    bucket_sum = v["ready_to_rent"] + v["active_rental"] + v["maintenance"]
     if bucket_sum != v["total"]:
         violations.append(
-            "fleet does not reconcile: ready_to_rent+active_rental+reserved+"
+            "fleet does not reconcile: ready_to_rent+active_rental+"
             f"maintenance={bucket_sum} != total={v['total']}"
         )
     if v["total"] + v["excluded_structural"] != v["fleet_size"]:
@@ -446,16 +447,9 @@ def legacy_overview(vehicles, reservations, maintenances, now=None) -> dict:
     out = {
         "total_vehicles": fleet["total"],
         "available": fleet["ready_to_rent"],
-        "reserved": fleet["reserved"],
         "rented": fleet["active_rental"],
         "maintenance": fleet["maintenance"],
         "active_rentals": today["in_progress"],
-        "reserved_rentals": sum(
-            1 for r in reservations
-            if (r.get("status") or "").strip().upper() == "RESERVED"
-            and _parse(r.get("start_datetime")) is not None
-            and _parse(r.get("start_datetime")) > now_utc
-        ),
         "active_maintenance_tickets": maint["open_tickets"],
         "active_maintenances": maint["active_tickets"],
         "today_returns": today["ending_today"],

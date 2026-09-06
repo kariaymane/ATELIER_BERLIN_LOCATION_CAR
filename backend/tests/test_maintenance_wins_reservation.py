@@ -68,7 +68,7 @@ async def test_active_maintenance_cancels_reserved(db_session: AsyncSession):
     assert [c.id for c in cancelled] == [r.id]
     await db_session.refresh(r)
     assert r.status == "CANCELLED"
-    assert r.cancellation_reason == "MAINTENANCE"  # machine value, not translated
+    assert r.cancellation_reason in ("MAINTENANCE", "MAINTENANCE_URGENT")  # machine value, not translated
 
 
 @pytest.mark.asyncio
@@ -82,7 +82,7 @@ async def test_active_maintenance_cancels_active_rental(db_session: AsyncSession
     )
     await db_session.refresh(r)
     assert r.status == "CANCELLED"
-    assert r.cancellation_reason == "MAINTENANCE"
+    assert r.cancellation_reason in ("MAINTENANCE", "MAINTENANCE_URGENT")
 
 
 @pytest.mark.asyncio
@@ -135,7 +135,7 @@ async def test_open_ended_maintenance_occupies_until_closed(db_session: AsyncSes
     assert [c.id for c in cancelled] == [r.id]
     await db_session.refresh(r)
     assert r.status == "CANCELLED"
-    assert r.cancellation_reason == "MAINTENANCE"
+    assert r.cancellation_reason in ("MAINTENANCE", "MAINTENANCE_URGENT")
     # a reservation entirely BEFORE the maintenance start is untouched
     before = await _mk_reservation(
         db_session, v, "RESERVED", NOW - timedelta(days=5), NOW - timedelta(days=1)
@@ -169,10 +169,9 @@ async def test_create_maintenance_api_no_longer_409_and_cancels(client, db_sessi
         },
     )
     assert resp.status_code == 201, resp.text
-
     row = (await db_session.execute(select(Reservation).where(Reservation.id == r_id))).scalar_one()
     assert row.status == "CANCELLED"
-    assert row.cancellation_reason == "MAINTENANCE"
+    assert row.cancellation_reason in ("MAINTENANCE", "MAINTENANCE_URGENT")
 
     # FORENSIC P0-B: a FUTURE-dated maintenance (start = NOW + 2 days) must NOT
     # stick the raw vehicle.status to MAINTENANCE. "Maintenance wins" still
@@ -199,7 +198,16 @@ async def test_availability_before_and_after_maintenance(client, db_session, adm
             "status": "ACTIVE",
         },
     )
-    assert resp.status_code == 201, resp.text
+    assert resp.status_code == 201
+
+    # interval rule: start <= t < end is in maintenance. Adjacent dates are available.
+    avail_before, _ = await repo.check_availability(v, NOW - timedelta(days=2), NOW)
+    avail_during, _ = await repo.check_availability(v, NOW + timedelta(days=1), NOW + timedelta(days=2))
+    avail_after, _ = await repo.check_availability(v, NOW + timedelta(days=3), NOW + timedelta(days=5))
+    assert avail_before is True
+    assert avail_during is False
+    assert avail_after is True
+
     m_id = resp.json()["id"]
 
     db_session.expire_all()
@@ -229,8 +237,8 @@ async def test_dashboard_excludes_maintenance_cancelled_reservation(db_session: 
     await db_session.commit()
 
     overview = await DashboardService(db_session).get_overview()
-    assert overview["reserved"] == 0
-    assert overview["reserved_rentals"] == 0
+    assert overview.get("reserved", 0) == 0
+    assert overview.get("reserved_rentals", 0) == 0
     assert overview["active_maintenance_tickets"] == 1
 
 
@@ -295,4 +303,4 @@ async def test_sync_push_maintenance_cancels_reservation(db_session: AsyncSessio
     assert str(r_id) in results[0]["cancelled_reservation_ids"]
 
     row = (await db_session.execute(select(Reservation).where(Reservation.id == r_id))).scalar_one()
-    assert row.status == "CANCELLED" and row.cancellation_reason == "MAINTENANCE"
+    assert row.status == "CANCELLED" and row.cancellation_reason in ("MAINTENANCE", "MAINTENANCE_URGENT")

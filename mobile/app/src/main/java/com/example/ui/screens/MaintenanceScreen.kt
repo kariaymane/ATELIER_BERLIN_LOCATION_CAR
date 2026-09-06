@@ -13,7 +13,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import com.example.data.model.MaintenanceStep
 import com.example.ui.components.*
 import com.example.ui.theme.*
 import com.example.ui.viewmodel.FleetViewModel
@@ -31,17 +30,14 @@ fun MaintenanceScreen(
 
     val filterScrollState = rememberScrollState()
 
-    val filterOptions = listOf("Tous", "En attente", "Diagnostic", "Réparation", "Contrôle", "Terminé")
+    val filterOptions = listOf("Tous", "En cours", "Terminée")
 
     val filteredTickets = remember(maintenances, statusFilter) {
         maintenances.filter { ticket ->
             when (statusFilter) {
                 "Tous" -> true
-                "En attente" -> ticket.step == MaintenanceStep.EN_ATTENTE
-                "Diagnostic" -> ticket.step == MaintenanceStep.DIAGNOSTIC
-                "Réparation" -> ticket.step == MaintenanceStep.REPARATION
-                "Contrôle" -> ticket.step == MaintenanceStep.CONTROLE
-                "Terminé" -> ticket.step == MaintenanceStep.TERMINEE
+                "En cours" -> !ticket.isCompleted && !ticket.isCancelled
+                "Terminée" -> ticket.isCompleted
                 else -> true
             }
         }

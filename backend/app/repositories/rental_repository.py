@@ -93,7 +93,9 @@ class RentalRepository(BaseRepository[Reservation]):
         vehicle_id: UUID,
         maint_start: datetime,
         maint_end: Optional[datetime],
-        reason: str = "MAINTENANCE",
+        reason: str = "MAINTENANCE_URGENT",
+        description: Optional[str] = None,
+        maintenance_id: Optional[UUID] = None,
     ) -> list[Reservation]:
         """Cancel every blocking reservation that overlaps a maintenance period.
 
@@ -150,6 +152,16 @@ class RentalRepository(BaseRepository[Reservation]):
             # return realises the whole rental, not more).
             _end = to_business(res.end_datetime) if res.end_datetime else None
             res.cancelled_at = min(cancelled_instant, _end) if _end else cancelled_instant
+            note_parts = ["[Annulation Maintenance Urgente]"]
+            if maintenance_id:
+                note_parts.append(f"Ref: {maintenance_id}")
+            if description:
+                note_parts.append(f"Motif: {description}")
+            note_addition = " - ".join(note_parts)
+            if res.notes:
+                res.notes = f"{res.notes}\n{note_addition}"
+            else:
+                res.notes = note_addition
             res.version += 1
         if affected:
             await self._session.flush()

@@ -77,9 +77,8 @@ data class MaintenanceEntity(
     val serviceItem: String,
     val title: String? = null,
     val description: String,
-    val diagnosis: String? = null,
-    val repair_description: String? = null,
     val scheduledDate: String,
+    val scheduledEndDate: String = "",
     val expected_end_datetime: String? = null,
     val actual_end_datetime: String? = null,
     val mileage: Double? = null,
@@ -100,7 +99,6 @@ data class MaintenanceEntity(
     val actual_cost: Double? = null,
     val next_maintenance_date: String? = null,
     val next_maintenance_mileage: Double? = null,
-    val step: String,
     val status: String,
     val priority: String,
     val notes: String,
@@ -108,8 +106,8 @@ data class MaintenanceEntity(
     // `scheduledDate` above stays the localized display string.
     val startDatetimeIso: String? = null
 ) {
-    fun toDomain() = MaintenanceTicket(id, vehicleId, vehicleName, vehiclePlate, serviceItem, title, description, diagnosis, repair_description, scheduledDate, expected_end_datetime, actual_end_datetime, mileage, location, technician, invoice_number, oil_brand, oil_viscosity, oil_quantity, oil_filter_changed, air_filter_changed, fuel_filter_changed, cabin_filter_changed, estimatedCost, parts_cost, labor_cost, other_cost, actual_cost, next_maintenance_date, next_maintenance_mileage, MaintenanceStep.fromApi(step), status, priority, notes, startIso = startDatetimeIso)
-    companion object { fun fromDomain(m: MaintenanceTicket) = MaintenanceEntity(m.id, m.vehicleId, m.vehicleName, m.vehiclePlate, m.serviceItem, m.title, m.description, m.diagnosis, m.repair_description, m.scheduledDate, m.expected_end_datetime, m.actual_end_datetime, m.mileage, m.location, m.technician, m.invoice_number, m.oil_brand, m.oil_viscosity, m.oil_quantity, m.oil_filter_changed, m.air_filter_changed, m.fuel_filter_changed, m.cabin_filter_changed, m.estimatedCost, m.parts_cost, m.labor_cost, m.other_cost, m.actual_cost, m.next_maintenance_date, m.next_maintenance_mileage, m.step.label, m.status, m.priority, m.notes, m.startIso) }
+    fun toDomain() = MaintenanceTicket(id, vehicleId, vehicleName, vehiclePlate, serviceItem, title, description, scheduledDate, scheduledEndDate, expected_end_datetime, actual_end_datetime, mileage, location, technician, invoice_number, oil_brand, oil_viscosity, oil_quantity, oil_filter_changed, air_filter_changed, fuel_filter_changed, cabin_filter_changed, estimatedCost, parts_cost, labor_cost, other_cost, actual_cost, next_maintenance_date, next_maintenance_mileage, status, priority, notes, startIso = startDatetimeIso)
+    companion object { fun fromDomain(m: MaintenanceTicket) = MaintenanceEntity(m.id, m.vehicleId, m.vehicleName, m.vehiclePlate, m.serviceItem, m.title, m.description, m.scheduledDate, m.scheduledEndDate, m.expected_end_datetime, m.actual_end_datetime, m.mileage, m.location, m.technician, m.invoice_number, m.oil_brand, m.oil_viscosity, m.oil_quantity, m.oil_filter_changed, m.air_filter_changed, m.fuel_filter_changed, m.cabin_filter_changed, m.estimatedCost, m.parts_cost, m.labor_cost, m.other_cost, m.actual_cost, m.next_maintenance_date, m.next_maintenance_mileage, m.status, m.priority, m.notes, m.startIso) }
 }
 
 @Entity(

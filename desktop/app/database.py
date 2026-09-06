@@ -119,6 +119,10 @@ def init_local_db():
                 conn.execute(text("ALTER TABLE clients ADD COLUMN identity_card_image_back TEXT"))
             if "driving_license_image_back" not in col_names:
                 conn.execute(text("ALTER TABLE clients ADD COLUMN driving_license_image_back TEXT"))
+            if "address" not in col_names:
+                conn.execute(text("ALTER TABLE clients ADD COLUMN address TEXT"))
+            if "contract_image" not in col_names:
+                conn.execute(text("ALTER TABLE clients ADD COLUMN contract_image TEXT"))
             conn.commit()
         except Exception as e:
             logger.warning("Auto-migration check notice (clients): %s", e)

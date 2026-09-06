@@ -67,7 +67,7 @@ def is_revenue_eligible(res: dict) -> bool:
         return False
     if status == CANCELLED:
         reason = str(res.get("cancellation_reason", "")).strip().upper()
-        if reason == "MAINTENANCE" or res.get("realised_revenue_preserved"):
+        if reason in ("MAINTENANCE", "MAINTENANCE_URGENT") or res.get("realised_revenue_preserved"):
             return True
         return False
     return True
@@ -120,7 +120,7 @@ def _realised_day_dates(res: dict, now: datetime):
     status = str(res.get("status") or "").strip().upper()
     reason = str(res.get("cancellation_reason") or "").strip().upper()
 
-    if status == CANCELLED and (reason == "MAINTENANCE" or res.get("realised_revenue_preserved")):
+    if status == CANCELLED and (reason in ("MAINTENANCE", "MAINTENANCE_URGENT") or res.get("realised_revenue_preserved")):
         # Interrupted rental: only the days realised BEFORE the interruption
         # count, and that number must never grow afterwards (a closed period's
         # revenue is immutable). Cap the clock at the cancellation instant;

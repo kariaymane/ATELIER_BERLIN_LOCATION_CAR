@@ -28,7 +28,6 @@ if env_url and ("production" in env_url.lower() or "prod" in env_url.lower() or 
 # so the prod code path — TIMESTAMP(timezone=True) aware round-trips, tstzrange
 # GIST exclusion constraints, NUMERIC summation — is actually exercised. Locally
 # and by default, the fast in-memory SQLite path is used.
-# (FORENSIC_ROOT_CAUSE_ANALYSIS.md §1.2)
 _test_db = os.environ.get("TEST_DATABASE_URL", "").strip()
 if _test_db and ("production" in _test_db.lower() or "fly" in _test_db.lower() or "supabase" in _test_db.lower()):
     raise RuntimeError("DANGER: TEST_DATABASE_URL points at production. Aborted.")
@@ -130,6 +129,25 @@ async def test_engine():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
     await engine.dispose()
+
+
+@pytest.fixture(autouse=True)
+def reset_rate_limiter():
+    """Give every test a fresh per-IP login budget.
+
+    slowapi's limiter keeps its counters in process-global storage keyed by
+    client IP, and every test shares 127.0.0.1. Without this reset the auth
+    tests (which deliberately spend failed attempts) would exhaust the
+    10/minute budget and make unrelated tests fail with a rate-limit 429.
+    This resets the counter only — the limit itself stays enforced, and each
+    test still sees the real limiter.
+    """
+    from app.security.middleware import limiter
+    try:
+        limiter.reset()
+    except Exception:  # storage backend without reset(); harmless
+        pass
+    yield
 
 
 @pytest_asyncio.fixture(autouse=True)

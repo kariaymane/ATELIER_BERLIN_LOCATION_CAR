@@ -12,7 +12,7 @@ enum class VehicleStatus(val label: String, val apiValue: String) {
         /**
          * Canonical backend/shared status token -> UI enum. STRUCTURAL states
          * (SOLD / INACTIVE) must NOT collapse to DISPONIBLE — that let a sold
-         * or retired vehicle read as bookable (forensic P2). An absent value
+         * or retired vehicle read as bookable. An absent value
          * follows the backend default (AVAILABLE); an unrecognised token is
          * treated as INACTIF so it can never silently present as available.
          */
@@ -115,26 +115,6 @@ data class Reservation(
     val cancelledAtIso: String? = null,
 )
 
-enum class MaintenanceStep(val label: String, val order: Int) {
-    EN_ATTENTE("En attente", 0),
-    DIAGNOSTIC("Diagnostic", 1),
-    REPARATION("Réparation", 2),
-    CONTROLE("Contrôle", 3),
-    TERMINEE("Terminé", 4);
-
-    companion object {
-        fun fromApi(value: String?): MaintenanceStep {
-            return when (value?.uppercase()?.replace("_", " ")) {
-                "DIAGNOSTIC", "DIAG" -> DIAGNOSTIC
-                "REPARATION", "RÉPARATION" -> REPARATION
-                "CONTROLE", "CONTRÔLE", "TESTS" -> CONTROLE
-                "TERMINEE", "TERMINÉ", "FINALISÉ", "COMPLETED" -> TERMINEE
-                else -> EN_ATTENTE
-            }
-        }
-    }
-}
-
 data class MaintenancePart(
     val id: String? = null,
     val part_name: String,
@@ -152,9 +132,8 @@ data class MaintenanceTicket(
     val serviceItem: String = "Entretien", // Maps to type
     val title: String? = null,
     val description: String = "",
-    val diagnosis: String? = null,
-    val repair_description: String? = null,
-    val scheduledDate: String = "", // Maps to start_datetime
+    val scheduledDate: String = "", // Maps to start_datetime (display)
+    val scheduledEndDate: String = "", // End of the period (display)
     val expected_end_datetime: String? = null,
     val actual_end_datetime: String? = null,
     val mileage: Double? = null,
@@ -175,14 +154,51 @@ data class MaintenanceTicket(
     val actual_cost: Double? = null, // Maps to total_cost
     val next_maintenance_date: String? = null,
     val next_maintenance_mileage: Double? = null,
-    val step: MaintenanceStep = MaintenanceStep.DIAGNOSTIC,
     val status: String = "ACTIVE",
     val priority: String = "Haute",
     val notes: String = "",
     val parts: List<MaintenancePart> = emptyList(),
     // Raw ISO-8601 UTC start (machine-parseable; `scheduledDate` is display).
     val startIso: String? = null
-)
+) {
+    /** The end of the maintenance period: the real end if one was recorded,
+     *  otherwise the planned end. */
+    val effectiveEndIso: String?
+        get() = actual_end_datetime ?: expected_end_datetime
+
+    /**
+     * TERMINÉE as soon as `now >= end`. There is no manual step to advance and
+     * no "finaliser" action: a maintenance is defined by its period, exactly
+     * like the Desktop derives it in
+     * `desktop/app/ui/maintenance/maintenance_list.py`. An explicit COMPLETED
+     * status from the server still wins, so a maintenance closed early is
+     * reported closed.
+     */
+    val isCompleted: Boolean
+        get() {
+            val raw = status.trim().uppercase()
+            if (raw == "COMPLETED" || raw == "TERMINEE" || raw == "TERMINÉ") return true
+            val endMillis = com.example.data.fleet.FleetStatus.parseUtcMillis(effectiveEndIso)
+            return endMillis != null && System.currentTimeMillis() >= endMillis
+        }
+
+    val isCancelled: Boolean
+        get() = status.trim().uppercase() == "CANCELLED"
+
+    val effectiveStatusDisplay: String
+        get() = when {
+            isCancelled -> "Annulée"
+            isCompleted -> "Terminée"
+            else -> "En cours"
+        }
+
+    /** The reason the vehicle went in: the free title when one was entered,
+     *  otherwise the maintenance type. Never blank. */
+    val motif: String
+        get() = title?.takeIf { it.isNotBlank() }
+            ?: serviceItem.takeIf { it.isNotBlank() }
+            ?: "Maintenance"
+}
 
 data class PerformanceMetrics(
     val todayBookings: Int,

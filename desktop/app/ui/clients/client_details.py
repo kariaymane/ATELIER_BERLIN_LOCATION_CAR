@@ -30,17 +30,18 @@ logger = logging.getLogger(__name__)
 
 
 
-class HoverableImageLabel(QLabel):
+class DocumentImageLabel(QLabel):
     """Displays a document image centered by the layout, aspect ratio always
     preserved, never stretched or clipped. Large / portrait / landscape scans
-    all fit. Hovering shows an enlarged preview.
+    all fit.
+
+    NO mouse interaction — the [Voir] button is the sole control for opening
+    documents. No hover popup, no clickable area, no cursor change.
     """
 
     def __init__(self, placeholder_text, parent=None):
         super().__init__(placeholder_text, parent)
-        self.setMouseTracking(True)
         self.full_pixmap = None
-        self._hover_popup = None
         self._rescaling = False  # re-entrancy guard for setPixmap/resizeEvent
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.setMinimumSize(260, 170)
@@ -77,29 +78,6 @@ class HoverableImageLabel(QLabel):
         super().resizeEvent(event)
         self._update_pixmap_scale()
 
-    def enterEvent(self, event):
-        if self.full_pixmap and not self.full_pixmap.isNull():
-            if not self._hover_popup:
-                self._hover_popup = QLabel()
-                self._hover_popup.setWindowFlags(Qt.WindowType.ToolTip | Qt.WindowType.FramelessWindowHint)
-                self._hover_popup.setStyleSheet("background: white; border: 2px solid #D5DDD3; border-radius: 8px;")
-                self._hover_popup.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            scaled = self.full_pixmap.scaled(600, 400, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
-            self._hover_popup.setPixmap(scaled)
-            self._hover_popup.setFixedSize(scaled.size().width() + 10, scaled.size().height() + 10)
-            
-            # Show below the cursor/label
-            import PySide6.QtGui as QtGui
-            pos = QtGui.QCursor.pos()
-            self._hover_popup.move(pos.x() + 15, pos.y() + 15)
-            self._hover_popup.show()
-        super().enterEvent(event)
-
-    def leaveEvent(self, event):
-        if self._hover_popup:
-            self._hover_popup.hide()
-        super().leaveEvent(event)
-
 
 class ClientReportFetcher(QThread):
     """Fetches the canonical client rental report off the UI thread."""
@@ -126,11 +104,16 @@ class ClientReportFetcher(QThread):
 class ClientDetailsDialog(QDialog):
     """Full-screen style details dialog for one client."""
 
-    def __init__(self, client_row: dict, api_client=None, parent=None):
+    def __init__(self, client_row: dict, api_client=None, parent=None,
+                 device_id: str = "", user_id: str = ""):
         super().__init__(parent)
         self._client = dict(client_row or {})
         self._client_id = str(self._client.get("id") or "")
         self._api = api_client
+        # Identity stamped on any sync-queue item this window enqueues. The
+        # ApiClient does not carry it — MainWindow owns it.
+        self._device_id = device_id
+        self._user_id = user_id
         self._fetcher = None
         self.setWindowTitle(t("clients.client_details"))
         self.resize(1080, 720)
@@ -162,13 +145,16 @@ class ClientDetailsDialog(QDialog):
                     "identity_card_image_back": getattr(local, "identity_card_image_back", None),
                     "driving_license_image": local.driving_license_image,
                     "driving_license_image_back": getattr(local, "driving_license_image_back", None),
+                    "contract_image": getattr(local, "contract_image", None),
                     "photo_url": getattr(local, "photo_url", None),
+                    "address": getattr(local, "address", None),
+                    "license_number": getattr(local, "license_number", None),
                     "notes": local.notes,
                     "status": local.status,
                 }
                 title = f"{self._client.get('first_name', '')} {self._client.get('last_name', '')}".strip() or "—"
                 self._name_lbl.setText(title)
-                for key in ("id", "phone", "email", "cin_number"):
+                for key in ("id", "phone", "address", "email", "cin_number"):
                     if key in self._info_labels:
                         self._info_labels[key].setText(self._display(self._client.get(key)))
                 self._load_document_thumbnails()
@@ -196,6 +182,27 @@ class ClientDetailsDialog(QDialog):
         self._mode_lbl.setStyleSheet(
             "color: #975A16; background: #FEF3C7; border-radius: 6px; padding: 4px 10px;")
         header.addWidget(self._mode_lbl)
+
+        # Client lifecycle actions. Both are explicit, labeled buttons —
+        # never a hidden gesture on a row.
+        self._edit_btn = QPushButton(f"✎ {t('clients.edit_client')}")
+        self._edit_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._edit_btn.setMinimumHeight(34)
+        self._edit_btn.setStyleSheet(
+            "background-color: #EBF3EA; color: #1E4D38; font-weight: bold; "
+            "border: 1px solid #C4DFC0; border-radius: 6px; padding: 6px 14px;")
+        self._edit_btn.clicked.connect(self._on_edit_client)
+        header.addWidget(self._edit_btn)
+
+        self._delete_btn = QPushButton(f"🗑 {t('clients.delete_client')}")
+        self._delete_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._delete_btn.setMinimumHeight(34)
+        self._delete_btn.setStyleSheet(
+            "background-color: #FEE2E2; color: #B91C1C; font-weight: bold; "
+            "border: 1px solid #FCA5A5; border-radius: 6px; padding: 6px 14px;")
+        self._delete_btn.clicked.connect(self._on_delete_client)
+        header.addWidget(self._delete_btn)
+
         close = QPushButton("✕")
         close.setFixedSize(34, 34)
         close.clicked.connect(self.accept)
@@ -210,10 +217,11 @@ class ClientDetailsDialog(QDialog):
         info_layout.setContentsMargins(16, 12, 16, 12)
         info_layout.setSpacing(26)
         self._info_labels = {}
-        for key in ("id", "phone", "email", "cin_number"):
+        for key in ("id", "phone", "address", "email", "cin_number"):
             box = QVBoxLayout()
             cap = QLabel({
                 "id": "ID", "phone": t("clients.col_phone"),
+                "address": t("clients.col_address"),
                 "email": t("clients.col_email"), "cin_number": t("clients.col_cin"),
             }[key])
             cap.setStyleSheet("color: #6B7264; font-size: 11px;")
@@ -260,6 +268,7 @@ class ClientDetailsDialog(QDialog):
             ("identity_card_image_back", "docs_cin_verso", 0, 1),
             ("driving_license_image", "docs_license_recto", 1, 0),
             ("driving_license_image_back", "docs_license_verso", 1, 1),
+            ("contract_image", "docs_contract", 2, 0),
         )
         for key, label_key, row, col in doc_slots:
             cell = QVBoxLayout()
@@ -267,18 +276,29 @@ class ClientDetailsDialog(QDialog):
             cap = QLabel(t(f"clients.{label_key}"))
             cap.setAlignment(Qt.AlignmentFlag.AlignCenter)
             cap.setStyleSheet("color: #6B7264; font-size: 11px; font-weight: 600;")
-            thumb = HoverableImageLabel(t("clients.doc_missing"))
+            thumb = DocumentImageLabel(t("clients.doc_missing"))
             thumb.setStyleSheet(
                 "background: #FFFFFF; border: 1px solid #D5DDD3; border-radius: 8px; color: #9CA3AF; font-size: 10px;")
             self._doc_thumbs[key] = thumb
             self._doc_captions[key] = cap
             cell.addWidget(cap)
             cell.addWidget(thumb, 1)
+
+            view_btn = QPushButton(f"👁 {t('clients.view_doc')}")
+            view_btn.setStyleSheet(
+                "background-color: #EBF3EA; color: #1E4D38; font-weight: bold; "
+                "border: 1px solid #C4DFC0; border-radius: 4px; padding: 4px 8px;"
+            )
+            view_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            view_btn.clicked.connect(lambda _, k=key: self._view_document(k))
+            cell.addWidget(view_btn)
+
             grid.addLayout(cell, row, col)
         grid.setColumnStretch(0, 1)
         grid.setColumnStretch(1, 1)
         grid.setRowStretch(0, 1)
         grid.setRowStretch(1, 1)
+        grid.setRowStretch(2, 1)
         id_outer.addWidget(grid_host, 1)
         layout.addWidget(id_frame)
 
@@ -555,10 +575,26 @@ class ClientDetailsDialog(QDialog):
         for key, thumb in self._doc_thumbs.items():
             url = self._client.get(key)
             if not url:
-                continue  # keep "Document non disponible"
+                thumb.full_pixmap = None
+                thumb.clear()
+                thumb.setText(t("clients.doc_missing"))
+                continue
+            if not self._is_previewable(url):
+                # A PDF (typically the signed contract) has no image preview.
+                # Say so plainly instead of leaving a spinner that never
+                # resolves — the document is on file and [Voir] opens it.
+                thumb.full_pixmap = None
+                thumb.clear()
+                thumb.setText(f"📄\n{t('clients.doc_present')}")
+                continue
             thumb.setProperty("cache_key", f"{self._client_id}_{cache._build_url(url)}")
             thumb.setText("⏳")
             cache.get_image(url, vehicle_id=self._client_id)
+
+    @staticmethod
+    def _is_previewable(url: str) -> bool:
+        """Only raster documents can be shown as a thumbnail."""
+        return not str(url).split("?")[0].lower().endswith(".pdf")
 
     def _on_doc_image_loaded(self, cache_key: str, pixmap):
         if not pixmap or pixmap.isNull():
@@ -568,3 +604,136 @@ class ClientDetailsDialog(QDialog):
                 thumb.setText("")
                 thumb.setPixmap(pixmap)
                 break
+
+    def _view_document(self, key: str):
+        url = self._client.get(key)
+        if not url:
+            QMessageBox.information(self, "Information", t("clients.doc_missing"))
+            return
+        from app.utils.document_viewer import view_document
+        view_document(url, api_client=self._api, parent=self)
+
+    # ── Client lifecycle: modify / delete ────────────────────────
+
+    def _on_edit_client(self):
+        """Open the edition dialog. On success the window refreshes at once."""
+        from app.ui.clients.client_edit import ClientEditDialog
+        dlg = ClientEditDialog(
+            self._client, api_client=self._api, parent=self,
+            device_id=self._device_id, user_id=self._user_id)
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            # `_reload_client_locally` re-reads the committed row and repaints
+            # the header, the identity fields and the document thumbnails; the
+            # canonical server report is re-fetched on top of it.
+            self._reload_client_locally()
+            self._load()
+
+    def _count_local_reservations(self) -> int:
+        """Reservations referencing this client in the local cache.
+
+        Mirrors the backend rule so the confirmation tells the user which
+        strategy will actually apply BEFORE they commit to it.
+        """
+        try:
+            from app.database import get_local_session
+            from app.models.reservation import LocalReservation
+            session = get_local_session()
+            try:
+                return session.query(LocalReservation).filter_by(
+                    customer_id=self._client_id).count()
+            finally:
+                session.close()
+        except Exception as e:
+            logger.debug("Local reservation count note: %s", e)
+            return 0
+
+    def _on_delete_client(self):
+        """Delete the client, respecting the relations that already exist.
+
+        A client with reservations carries business history that must not be
+        destroyed (and whose FK would be nulled out), so the server DEACTIVATES
+        it. A client with no relation at all is physically removed. The
+        confirmation states plainly which of the two will happen.
+        """
+        name = f"{self._client.get('first_name', '')} {self._client.get('last_name', '')}".strip() or "—"
+        linked = self._count_local_reservations()
+
+        if linked:
+            question = t("clients.delete_deactivate_body", name=name, count=linked)
+        else:
+            question = t("clients.delete_confirm_body", name=name)
+
+        confirm = QMessageBox.question(
+            self,
+            t("clients.delete_confirm_title"),
+            question,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if confirm != QMessageBox.StandardButton.Yes:
+            return
+
+        # The server owns the decision; `linked` only pre-computes the same
+        # rule so the confirmation above could state it. Three outcomes, kept
+        # apart exactly as in the edition dialog:
+        #   accepted    -> apply the strategy the server actually used.
+        #   refused     -> stop; replaying it would only fail again.
+        #   unreachable -> apply locally and queue the intent.
+        strategy = "DEACTIVATED" if linked else "DELETED"
+        reachable = True
+        if self._api is not None:
+            result = self._api.delete_client(self._client_id)
+            if isinstance(result, dict) and "http_error" in result:
+                if result["http_error"] == "NETWORK":
+                    reachable = False
+                else:
+                    QMessageBox.warning(self, t("common.error"),
+                                        t("clients.delete_failed"))
+                    return
+            elif isinstance(result, dict):
+                strategy = result.get("strategy", strategy)
+            elif not result:
+                reachable = False
+        else:
+            reachable = False
+
+        try:
+            self._apply_delete_locally(strategy, queue_sync=not reachable)
+        except Exception as e:
+            logger.error("Local client delete failed: %s", e)
+            QMessageBox.critical(self, t("common.error"), t("clients.delete_failed"))
+            return
+
+        QMessageBox.information(
+            self, t("common.success"),
+            t("clients.deleted_ok") if strategy == "DELETED"
+            else t("clients.deactivated_ok"))
+        self.accept()
+
+    def _apply_delete_locally(self, strategy: str, queue_sync: bool):
+        """Apply the same strategy to the local cache in one transaction."""
+        from app.state.domain_store import get_domain_store
+        from app.models.client import LocalClient
+
+        client_id = self._client_id
+        device_id = self._device_id
+        user_id = self._user_id
+        now_iso = datetime.now(timezone.utc).isoformat()
+
+        def _mutate(session):
+            row = session.query(LocalClient).filter_by(id=client_id).one_or_none()
+            if row is None:
+                return
+            if strategy == "DELETED":
+                session.delete(row)
+            else:
+                row.status = "INACTIVE"
+                row.updated_at = now_iso
+                row.version = (row.version or 1) + 1
+            if queue_sync:
+                from app.sync.queue import SyncQueue
+                SyncQueue(session, device_id, user_id).enqueue(
+                    "client", client_id, "DELETE", {"id": client_id})
+
+        # One commit, one published revision — `mutate` fans out to every view.
+        get_domain_store().mutate(_mutate)

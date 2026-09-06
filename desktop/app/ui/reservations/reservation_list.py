@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTabWidget, QScrollArea, QFrame,
     QPushButton, QLabel, QGridLayout, QTableWidget, QTableWidgetItem,
     QHeaderView, QMessageBox, QDialog, QFormLayout, QLineEdit, QDateTimeEdit,
-    QDoubleSpinBox, QStyleFactory,
+    QDoubleSpinBox, QStyleFactory, QSizePolicy,
 )
 from PySide6.QtCore import Qt, Signal, QDateTime, QDate, QTime
 from PySide6.QtGui import QFont, QPalette, QColor
@@ -71,31 +71,31 @@ class ReservationFormDialog(QDialog):
         # Customer Info
         self._customer_name = QLineEdit()
         self._customer_phone = QLineEdit()
+        self._customer_address = QLineEdit()
         self._customer_email = QLineEdit()
         self._customer_cin = QLineEdit()
         self._selected_client_id = None
+        # path attribute -> its short state QLabel (see _create_doc_row)
+        self._doc_state_labels = {}
         self._id_card_path = ""
         self._id_card_back_path = ""
         self._license_path = ""
         self._license_back_path = ""
 
         self._id_card_btn = QPushButton(t("reservations.choose_image"))
-        self._id_card_btn.clicked.connect(self._choose_id_card)
         self._id_card_back_btn = QPushButton(t("reservations.choose_image"))
-        self._id_card_back_btn.clicked.connect(self._choose_id_card_back)
         self._license_btn = QPushButton(t("reservations.choose_image"))
-        self._license_btn.clicked.connect(self._choose_license)
         self._license_back_btn = QPushButton(t("reservations.choose_image"))
-        self._license_back_btn.clicked.connect(self._choose_license_back)
 
         form.addRow(t("reservations.client_name"), self._customer_name)
         form.addRow(t("reservations.client_phone"), self._customer_phone)
+        form.addRow(t("clients.col_address"), self._customer_address)
         form.addRow(t("reservations.email_client"), self._customer_email)
         form.addRow(t("clients.col_cin") if t("clients.col_cin") != "clients.col_cin" else "CIN", self._customer_cin)
-        form.addRow(t("clients.docs_cin_recto"), self._id_card_btn)
-        form.addRow(t("clients.docs_cin_verso"), self._id_card_back_btn)
-        form.addRow(t("clients.docs_license_recto"), self._license_btn)
-        form.addRow(t("clients.docs_license_verso"), self._license_back_btn)
+        form.addRow(t("clients.docs_cin_recto"), self._create_doc_row(self._id_card_btn, "_id_card_path", self._choose_id_card))
+        form.addRow(t("clients.docs_cin_verso"), self._create_doc_row(self._id_card_back_btn, "_id_card_back_path", self._choose_id_card_back))
+        form.addRow(t("clients.docs_license_recto"), self._create_doc_row(self._license_btn, "_license_path", self._choose_license))
+        form.addRow(t("clients.docs_license_verso"), self._create_doc_row(self._license_back_btn, "_license_back_path", self._choose_license_back))
 
         # Dates
         from PySide6.QtCore import QTime
@@ -147,26 +147,134 @@ class ReservationFormDialog(QDialog):
         btns.addWidget(self.save_btn)
         layout.addLayout(btns)
 
+    def _create_doc_row(self, btn, path_attr: str, choose_fn):
+        """One document row: [Choisir] — short state — [Voir].
+
+        The file path is NEVER rendered here. A stored document is a long
+        generated filename; putting it on the chooser button stretched that
+        button across the row and pushed [Voir] out of reach. The chooser now
+        keeps a fixed label, the state is a short human string in its own
+        non-expanding label, and [Voir] has a fixed width so nothing can grow
+        over it or off the row.
+        """
+        btn.clicked.connect(choose_fn)
+        btn.setFixedWidth(120)
+        btn.setMinimumHeight(28)
+        w = QWidget()
+        h = QHBoxLayout(w)
+        h.setContentsMargins(0, 0, 0, 0)
+        h.setSpacing(6)
+        h.addWidget(btn)
+
+        state = QLabel(t("clients.doc_absent"))
+        state.setStyleSheet("color: #9CA3AF; font-size: 11px;")
+        state.setWordWrap(False)
+        # Elide rather than expand: a long value can never reach the button.
+        state.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        self._doc_state_labels[path_attr] = state
+        h.addWidget(state, 1)
+
+        v_btn = QPushButton(f"👁 {t('clients.view_doc')}")
+        v_btn.setFixedWidth(90)
+        v_btn.setMinimumHeight(28)
+        v_btn.setStyleSheet(
+            "background-color: #EBF3EA; color: #1E4D38; font-weight: bold; "
+            "border: 1px solid #C4DFC0; border-radius: 4px; padding: 4px 10px;"
+        )
+        v_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        v_btn.clicked.connect(lambda: self._view_doc(getattr(self, path_attr, "")))
+        h.addWidget(v_btn)
+        return w
+
+    def _set_doc_state(self, path_attr: str, present: bool):
+        """Update one document row's state label. Never shows a path."""
+        label = self._doc_state_labels.get(path_attr)
+        if label is None:
+            return
+        if present:
+            label.setText(f"✓ {t('clients.doc_present')}")
+            label.setStyleSheet("color: #1E4D38; font-size: 11px;")
+        else:
+            label.setText(t("clients.doc_absent"))
+            label.setStyleSheet("color: #9CA3AF; font-size: 11px;")
+
+    def _view_doc(self, path: str):
+        if not path:
+            QMessageBox.information(self, "Information", "Aucun document sélectionné.")
+            return
+        from app.utils.document_viewer import view_document
+        view_document(path, api_client=self._api, parent=self)
+
+    # Every client column the reservation form can display or reuse. Kept in
+    # one place so a selection can never load a partial client.
+    CLIENT_FIELDS = (
+        "first_name", "last_name", "phone", "address", "email",
+        "cin_number", "license_number", "notes",
+        "identity_card_image", "identity_card_image_back",
+        "driving_license_image", "driving_license_image_back",
+        "contract_image",
+    )
+
     def _load_clients_for_selection(self):
-        """Existing clients from the local cache (offline-safe)."""
+        """Existing clients, with their FULL record and their documents.
+
+        Source of truth is the DomainStore snapshot — the state reconciled from
+        PostgreSQL — so selecting a client in a new reservation reuses the
+        server's own values. The local SQLite table is the offline fallback.
+        Every column in CLIENT_FIELDS is loaded: a selection must never produce
+        a half-filled client.
+        """
+        try:
+            from app.state.domain_store import get_domain_store
+            snap = get_domain_store().snapshot
+            rows = list(getattr(snap, "clients", ()) or ())
+            if rows:
+                return [
+                    {"id": str(c.get("id")),
+                     **{f: (c.get(f) or "") for f in self.CLIENT_FIELDS}}
+                    for c in rows
+                    if (c.get("status") or "ACTIVE").upper() != "INACTIVE"
+                ]
+        except Exception as e:
+            logger.debug("DomainStore client load note: %s", e)
+
         try:
             session = get_local_session()
             try:
                 rows = session.query(LocalClient).order_by(
                     LocalClient.last_name, LocalClient.first_name).all()
-                return [{
-                    "id": c.id,
-                    "first_name": c.first_name or "",
-                    "last_name": c.last_name or "",
-                    "phone": c.phone or "",
-                    "email": c.email or "",
-                    "cin_number": c.cin_number or "",
-                } for c in rows]
+                return [
+                    {"id": c.id,
+                     **{f: (getattr(c, f, "") or "") for f in self.CLIENT_FIELDS}}
+                    for c in rows
+                    if (getattr(c, "status", "ACTIVE") or "ACTIVE").upper() != "INACTIVE"
+                ]
             finally:
                 session.close()
         except Exception as e:
             logger.warning("Client list load failed: %s", e)
             return []
+
+    def _fetch_canonical_client(self, client_id: str, fallback: dict) -> dict:
+        """Return the server's record for this client, or `fallback` offline.
+
+        Only fields the server actually returns override the cached ones, so a
+        partial response can never blank out a document path we already hold.
+        """
+        if self._api is None:
+            return fallback
+        try:
+            remote = self._api.get_client(client_id)
+        except Exception as e:
+            logger.info("Canonical client fetch failed for %s: %s", client_id, e)
+            return fallback
+        if not isinstance(remote, dict) or not remote.get("id"):
+            return fallback
+        merged = dict(fallback)
+        for field in self.CLIENT_FIELDS:
+            if remote.get(field) is not None:
+                merged[field] = remote.get(field) or ""
+        return merged
 
     def _on_client_selected(self, index: int):
         client_id = self._client_combo.currentData()
@@ -177,16 +285,41 @@ class ReservationFormDialog(QDialog):
         if client_id:
             for c in self._clients_cache:
                 if c.get("id") == client_id:
+                    # Prefer the AUTHORITATIVE server record. Selecting an
+                    # existing client must show what PostgreSQL holds for it,
+                    # not a possibly stale local copy — including every
+                    # document already on file.
+                    c = self._fetch_canonical_client(client_id, c)
+
                     name = f"{c.get('first_name', '')} {c.get('last_name', '')}".strip()
                     phone = c.get("phone", "") or ""
+                    address = c.get("address", "") or ""
                     email = c.get("email", "") or ""
                     cin = c.get("cin_number", "") or ""
                     self._customer_name.setText(name)
                     self._customer_phone.setText(phone)
+                    self._customer_address.setText(address)
                     self._customer_email.setText(email)
                     self._customer_cin.setText(cin)
+
+                    self._id_card_path = c.get("identity_card_image") or ""
+                    self._id_card_back_path = c.get("identity_card_image_back") or ""
+                    self._license_path = c.get("driving_license_image") or ""
+                    self._license_back_path = c.get("driving_license_image_back") or ""
+
+                    for attr, path_value, button in (
+                        ("_id_card_path", self._id_card_path, self._id_card_btn),
+                        ("_id_card_back_path", self._id_card_back_path, self._id_card_back_btn),
+                        ("_license_path", self._license_path, self._license_btn),
+                        ("_license_back_path", self._license_back_path, self._license_back_btn),
+                    ):
+                        button.setText(t("clients.doc_replace") if path_value
+                                       else t("reservations.choose_image"))
+                        self._set_doc_state(attr, bool(path_value))
+
                     self._loaded_client_fields = {
-                        "name": name, "phone": phone, "email": email, "cin": cin,
+                        "name": name, "phone": phone, "address": address,
+                        "email": email, "cin": cin,
                     }
                     break
         else:
@@ -194,10 +327,19 @@ class ReservationFormDialog(QDialog):
             # selection. Every field starts blank.
             self._customer_name.clear()
             self._customer_phone.clear()
+            self._customer_address.clear()
             self._customer_email.clear()
             self._customer_cin.clear()
             self._id_card_path = self._id_card_back_path = ""
             self._license_path = self._license_back_path = ""
+            for attr, button in (
+                ("_id_card_path", self._id_card_btn),
+                ("_id_card_back_path", self._id_card_back_btn),
+                ("_license_path", self._license_btn),
+                ("_license_back_path", self._license_back_btn),
+            ):
+                button.setText(t("reservations.choose_image"))
+                self._set_doc_state(attr, False)
 
     def _recalculate(self):
         start = self._start_dt.dateTime()
@@ -274,10 +416,12 @@ class ReservationFormDialog(QDialog):
     def _pick_document(self, attr: str, button, caption: str):
         from PySide6.QtWidgets import QFileDialog
         path, _ = QFileDialog.getOpenFileName(
-            self, caption, "", "Images (*.png *.jpg *.jpeg *.webp *.bmp)")
+            self, caption, "", "Documents (*.png *.jpg *.jpeg *.webp *.bmp *.pdf);;Images (*.png *.jpg *.jpeg *.webp *.bmp);;PDF (*.pdf)")
         if path:
             setattr(self, attr, path)
-            button.setText(path.split("/")[-1])
+            # The chooser's label stays constant — the path is never rendered.
+            button.setText(t("clients.doc_replace"))
+            self._set_doc_state(attr, True)
 
     def _choose_id_card(self):
         self._pick_document("_id_card_path", self._id_card_btn, t("clients.docs_cin_recto"))
@@ -352,6 +496,7 @@ class ReservationFormDialog(QDialog):
             current = {
                 "name": self._customer_name.text().strip(),
                 "phone": self._customer_phone.text().strip(),
+                "address": self._customer_address.text().strip(),
                 "email": self._customer_email.text().strip(),
                 "cin": self._customer_cin.text().strip(),
             }
@@ -365,6 +510,7 @@ class ReservationFormDialog(QDialog):
             "client_field_updates": client_field_updates,
             "customer_name": self.customer_name.text().strip(),
             "customer_phone": self._customer_phone.text().strip(),
+            "customer_address": self._customer_address.text().strip(),
             "customer_email": self._customer_email.text().strip(),
             "customer_cin": self._customer_cin.text().strip(),
             "identity_card_image": id_url,
@@ -378,7 +524,7 @@ class ReservationFormDialog(QDialog):
             "total_price": self._calculated_total,
             "deposit": 0.0,
             "payment_status": "PENDING",
-            "status": "RESERVED",
+            "status": "ACTIVE",
         })
         # Only close the dialog when the reservation was successfully
         # created.  On failure the dialog stays open so the user can
@@ -788,9 +934,9 @@ class ReservationWidget(QWidget):
             status = r.get("status")
             label_txt = t(f"status.{status}")
             reason = (r.get("cancellation_reason") or "")
-            is_maint_cancel = status == "CANCELLED" and reason.upper() == "MAINTENANCE"
+            is_maint_cancel = status == "CANCELLED" and "MAINTENANCE" in reason.upper()
             if is_maint_cancel:
-                label_txt = t("reservations.cancelled_due_to_maintenance")
+                label_txt = "Annulée — Maintenance urgente"
             badge_widget = QWidget()
             bw_layout = QHBoxLayout(badge_widget)
             bw_layout.setContentsMargins(4, 2, 4, 2)
@@ -798,7 +944,7 @@ class ReservationWidget(QWidget):
             badge_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
             badge_lbl.setFont(QFont("Hanken Grotesk", 9, QFont.Weight.Bold))
             if is_maint_cancel:
-                badge_lbl.setToolTip(t("reservations.cancelled_due_to_maintenance"))
+                badge_lbl.setToolTip("Annulée automatiquement suite à une maintenance urgente chevauchante")
 
             if status == "ACTIVE":
                 badge_lbl.setProperty("class", "badge_success")
@@ -812,26 +958,13 @@ class ReservationWidget(QWidget):
             bw_layout.addWidget(badge_lbl)
             table.setCellWidget(i, 4, badge_widget)
 
-            # 5. Action buttons
+            # 5. Action buttons — strictly limited to Annuler for active bookings
             act_widget = QWidget()
             act_layout = QHBoxLayout(act_widget)
             act_layout.setContentsMargins(4, 4, 4, 4)
             act_layout.setSpacing(6)
 
             if is_current and status in ("ACTIVE", "RESERVED") and self._user_role in ("ADMIN", "MANAGER"):
-                if status == "RESERVED":
-                    activate_btn = QPushButton(t("reservations.action_activate"))
-                    activate_btn.setFont(QFont("Hanken Grotesk", 9, QFont.Weight.Bold))
-                    activate_btn.setStyleSheet("background-color: #E7F0FE; color: #1D4ED8; border: 1px solid #BFDBFE; border-radius: 4px; padding: 4px 8px;")
-                    activate_btn.clicked.connect(lambda _, res_id=r.get("id"): self._activate_reservation(res_id))
-                    act_layout.addWidget(activate_btn)
-                elif status == "ACTIVE":
-                    complete_btn = QPushButton(t("reservations.action_complete"))
-                    complete_btn.setFont(QFont("Hanken Grotesk", 9, QFont.Weight.Bold))
-                    complete_btn.setStyleSheet("background-color: #E8F3E6; color: #235821; border: 1px solid #C4DFC0; border-radius: 4px; padding: 4px 8px;")
-                    complete_btn.clicked.connect(lambda _, res_id=r.get("id"): self._complete_reservation(res_id))
-                    act_layout.addWidget(complete_btn)
-
                 cancel_btn = QPushButton(t("reservations.action_cancel"))
                 cancel_btn.setFont(QFont("Hanken Grotesk", 9, QFont.Weight.Bold))
                 cancel_btn.setStyleSheet("background-color: #FEE2E2; color: #991B1B; border: 1px solid #FCA5A5; border-radius: 4px; padding: 4px 8px;")
@@ -1118,6 +1251,7 @@ class ReservationWidget(QWidget):
                     first_name=first_name,
                     last_name=last_name,
                     phone=data.get("customer_phone"),
+                    address=data.get("customer_address") or None,
                     email=data.get("customer_email"),
                     cin_number=data.get("customer_cin"),
                     identity_card_image=data.get("identity_card_image"),
@@ -1136,6 +1270,7 @@ class ReservationWidget(QWidget):
                     "first_name": new_client.first_name,
                     "last_name": new_client.last_name,
                     "phone": new_client.phone,
+                    "address": new_client.address,
                     "email": new_client.email,
                     "cin_number": new_client.cin_number,
                     "identity_card_image": new_client.identity_card_image,
@@ -1166,7 +1301,7 @@ class ReservationWidget(QWidget):
                     total_price=data.get("total_price", 0.0),
                     deposit=data.get("deposit", 0.0),
                     payment_status=data.get("payment_status", "PENDING"),
-                    status="RESERVED",
+                    status="ACTIVE",
                     created_at=now_iso,
                     updated_at=now_iso,
                     version=1
@@ -1196,6 +1331,7 @@ class ReservationWidget(QWidget):
                             existing_client.first_name = parts[0]
                             existing_client.last_name = parts[1] if len(parts) > 1 else ""
                         existing_client.phone = client_updates.get("phone") or None
+                        existing_client.address = client_updates.get("address") or None
                         existing_client.email = client_updates.get("email") or None
                         existing_client.cin_number = client_updates.get("cin") or None
                         existing_client.updated_at = now_iso
@@ -1205,6 +1341,7 @@ class ReservationWidget(QWidget):
                             "first_name": existing_client.first_name,
                             "last_name": existing_client.last_name,
                             "phone": existing_client.phone,
+                            "address": existing_client.address,
                             "email": existing_client.email,
                             "cin_number": existing_client.cin_number,
                             "version": existing_client.version,
@@ -1274,9 +1411,9 @@ class ReservationWidget(QWidget):
         finally:
             session.close()
 
-    def _set_reservation_status(self, res_id: str, new_status: str):
+    def _set_reservation_status(self, res_id: str, new_status: str, cancellation_reason: str = None):
         """Canonical write path for a manual reservation status change
-        (complete / cancel). One transaction via ``DomainStore.mutate()``: on
+        (cancel). One transaction via ``DomainStore.mutate()``: on
         commit the store reloads and every view converges; on failure it rolls
         back and publishes NOTHING.
         """
@@ -1286,10 +1423,15 @@ class ReservationWidget(QWidget):
                 return
             now_iso = datetime.now(timezone.utc).isoformat()
             res.status = new_status
+            if cancellation_reason:
+                res.cancellation_reason = cancellation_reason
             res.updated_at = now_iso
             res.version += 1
+            payload = {"id": res_id, "status": new_status}
+            if cancellation_reason:
+                payload["cancellation_reason"] = cancellation_reason
             SyncQueue(session, self._device_id, self._user_id).enqueue(
-                "reservation", res_id, "UPDATE", {"id": res_id, "status": new_status})
+                "reservation", res_id, "UPDATE", payload)
 
         try:
             self._store.mutate(_apply)
@@ -1297,17 +1439,21 @@ class ReservationWidget(QWidget):
             logger.error("Failed to set reservation %s -> %s: %s", res_id, new_status, e, exc_info=True)
             QMessageBox.critical(self, t("common.error"), t("common.error"))
             return
+
+        if self._api and getattr(self._api, "_access_token", ""):
+            try:
+                if new_status == "CANCELLED":
+                    self._api.cancel_rental(res_id)
+            except Exception as e:
+                logger.warning("Online cancel API call note: %s", e)
+
         self.reservation_created.emit()  # -> MainWindow triggers a background sync
 
     def _activate_reservation(self, res_id: str):
-        """RESERVED -> ACTIVE: an explicit operational bookkeeping transition
-        (e.g. confirming vehicle pickup at the counter). It does NOT gate the
-        "en location" / revenue KPIs, which are time-derived and already
-        count a RESERVED reservation covering `now` — see fleet_status.py."""
         self._set_reservation_status(res_id, "ACTIVE")
 
     def _complete_reservation(self, res_id: str):
         self._set_reservation_status(res_id, "COMPLETED")
 
     def _cancel_reservation(self, res_id: str):
-        self._set_reservation_status(res_id, "CANCELLED")
+        self._set_reservation_status(res_id, "CANCELLED", cancellation_reason="USER")

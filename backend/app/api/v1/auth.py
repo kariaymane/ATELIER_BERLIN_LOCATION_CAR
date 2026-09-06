@@ -3,6 +3,7 @@ Authentication API endpoints.
 Rate-limited login, token refresh, logout, password change.
 """
 from fastapi import APIRouter, Depends, Request, HTTPException, status
+from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -12,7 +13,11 @@ from app.schemas.auth import (
     RefreshRequest, RefreshResponse,
     PasswordChangeRequest, LogoutRequest,
 )
-from app.services.auth_service import AuthService
+from app.services.auth_service import (
+    AuthService,
+    ERROR_ACCOUNT_DISABLED,
+    ERROR_ACCOUNT_LOCKED,
+)
 from app.security.middleware import limiter
 from uuid import UUID
 import logging
@@ -20,6 +25,39 @@ import logging
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
+
+
+def _auth_failure_response(result: dict) -> JSONResponse:
+    """Map an :class:`AuthService` failure onto the HTTP auth contract.
+
+    - 401 — invalid credentials (the only cause that means "wrong email/password")
+    - 403 — the account exists and the password is right, but it is disabled
+    - 429 — an active lockout, carrying ``Retry-After`` and the server's own
+            remaining seconds so no client has to invent a countdown
+
+    ``detail`` stays a plain localized string for backward compatibility; the
+    machine-readable ``error_code`` is what clients branch on. A lockout is
+    distinguishable from the IP rate limiter (which also answers 429) because
+    only this response carries ``error_code = ACCOUNT_LOCKED``.
+    """
+    code = result.get("error_code")
+    payload: dict = {"detail": result["error"]}
+    if code:
+        payload["error_code"] = code
+
+    if code == ERROR_ACCOUNT_LOCKED:
+        retry_after = int(result.get("retry_after_seconds") or 0)
+        payload["retry_after_seconds"] = retry_after
+        return JSONResponse(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            content=payload,
+            headers={"Retry-After": str(retry_after)},
+        )
+
+    if code == ERROR_ACCOUNT_DISABLED:
+        return JSONResponse(status_code=status.HTTP_403_FORBIDDEN, content=payload)
+
+    return JSONResponse(status_code=status.HTTP_401_UNAUTHORIZED, content=payload)
 
 
 @router.post("/login", response_model=LoginResponse)
@@ -47,10 +85,7 @@ async def login(
     )
 
     if "error" in result:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=result["error"],
-        )
+        return _auth_failure_response(result)
 
     return result
 

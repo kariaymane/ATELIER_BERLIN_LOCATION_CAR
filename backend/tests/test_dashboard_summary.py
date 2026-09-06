@@ -71,11 +71,11 @@ async def _maint(db, veh, start, end=None, status="IN_PROGRESS"):
 
 def _buckets(dto):
     v = dto["vehicles"]
-    return v["ready_to_rent"], v["active_rental"], v["reserved"], v["maintenance"]
+    return v["ready_to_rent"], v["active_rental"], v["maintenance"]
 
 
 def _assert_reconciles(dto):
-    """§20 — the four buckets must partition the active fleet exactly."""
+    """§20 — the three buckets must partition the active fleet exactly."""
     v = dto["vehicles"]
     assert sum(_buckets(dto)) == v["total"], dto["vehicles"]
     assert all(b >= 0 for b in _buckets(dto))
@@ -99,7 +99,7 @@ class TestDashboardSnapshot:
         for i in range(3):
             await _veh(db_session, f"ZR-{i}")
         dto = await build_dashboard_snapshot(db_session)
-        assert _buckets(dto) == (3, 0, 0, 0)
+        assert _buckets(dto) == (3, 0, 0)
         assert dto["revenue"]["amount"] == 0.0
         assert dto["top_vehicles"] == []
         _assert_reconciles(dto)
@@ -110,7 +110,7 @@ class TestDashboardSnapshot:
         v = await _veh(db_session, "AR-1")
         await _res(db_session, v, now - timedelta(days=1), days=3, total=900.0)
         dto = await build_dashboard_snapshot(db_session, now=now)
-        assert _buckets(dto) == (0, 1, 0, 0)
+        assert _buckets(dto) == (0, 1, 0)
         assert dto["reservations_today"]["in_progress"] == 1
         _assert_reconciles(dto)
 
@@ -120,7 +120,7 @@ class TestDashboardSnapshot:
         v = await _veh(db_session, "FR-1")
         await _res(db_session, v, now + timedelta(days=5), days=2, total=600.0)
         dto = await build_dashboard_snapshot(db_session, now=now)
-        assert _buckets(dto) == (0, 0, 1, 0)
+        assert _buckets(dto) == (1, 0, 0)
         # A future booking has realised no days -> contributes no revenue yet.
         assert dto["revenue"]["amount"] == 0.0
         _assert_reconciles(dto)
@@ -131,7 +131,7 @@ class TestDashboardSnapshot:
         v = await _veh(db_session, "MT-1")
         await _maint(db_session, v, now - timedelta(hours=2), now + timedelta(days=1))
         dto = await build_dashboard_snapshot(db_session, now=now)
-        assert _buckets(dto) == (0, 0, 0, 1)
+        assert _buckets(dto) == (0, 0, 1)
         assert dto["maintenance"]["active_tickets"] == 1
         assert dto["maintenance"]["vehicles_in_maintenance"] == 1
         _assert_reconciles(dto)
@@ -146,7 +146,7 @@ class TestDashboardSnapshot:
                      status="CANCELLED")
         dto = await build_dashboard_snapshot(db_session, now=now)
         assert dto["maintenance"]["active_tickets"] == 0
-        assert _buckets(dto) == (2, 0, 0, 0)
+        assert _buckets(dto) == (2, 0, 0)
         _assert_reconciles(dto)
 
     async def test_overlapping_maintenance_counts_one_vehicle_two_tickets(self, db_session):
@@ -157,7 +157,7 @@ class TestDashboardSnapshot:
         dto = await build_dashboard_snapshot(db_session, now=now)
         assert dto["maintenance"]["active_tickets"] == 2
         assert dto["maintenance"]["vehicles_in_maintenance"] == 1
-        assert _buckets(dto) == (0, 0, 0, 1)
+        assert _buckets(dto) == (0, 0, 1)
         _assert_reconciles(dto)
 
     async def test_maintenance_with_no_end_occupies_until_closed(self, db_session):
@@ -165,7 +165,7 @@ class TestDashboardSnapshot:
         v = await _veh(db_session, "MT-5")
         await _maint(db_session, v, now - timedelta(days=30), None)
         dto = await build_dashboard_snapshot(db_session, now=now)
-        assert _buckets(dto) == (0, 0, 0, 1)
+        assert _buckets(dto) == (0, 0, 1)
 
     # 5 — cancelled reservation
     async def test_cancelled_reservation_never_inflates_anything(self, db_session):
@@ -176,7 +176,7 @@ class TestDashboardSnapshot:
         dto = await build_dashboard_snapshot(db_session, now=now, period="year")
         assert dto["revenue"]["amount"] == 0.0
         assert dto["top_vehicles"] == []
-        assert _buckets(dto) == (1, 0, 0, 0)   # the car is free again
+        assert _buckets(dto) == (1, 0, 0)   # the car is free again
         _assert_reconciles(dto)
 
     # 6 — completed rental
@@ -188,7 +188,7 @@ class TestDashboardSnapshot:
         dto = await build_dashboard_snapshot(db_session, now=now, period="year")
         assert dto["revenue"]["amount"] == 800.0
         assert dto["revenue"]["rental_days"] == 4
-        assert _buckets(dto) == (1, 0, 0, 0)
+        assert _buckets(dto) == (1, 0, 0)
         _assert_reconciles(dto)
 
     # 7 / 17 / 20 — multiple vehicles, exclusivity, reconciliation
@@ -205,7 +205,7 @@ class TestDashboardSnapshot:
         await _maint(db_session, v_maint, now - timedelta(hours=1), now + timedelta(days=1))
 
         dto = await build_dashboard_snapshot(db_session, now=now)
-        assert _buckets(dto) == (1, 1, 1, 1)
+        assert _buckets(dto) == (2, 1, 1)
         assert dto["vehicles"]["total"] == 4
         assert dto["vehicles"]["excluded_structural"] == 1
         assert dto["vehicles"]["fleet_size"] == 5
@@ -219,7 +219,7 @@ class TestDashboardSnapshot:
         await _res(db_session, v, now - timedelta(days=1), days=4)
         await _maint(db_session, v, now - timedelta(hours=1), now + timedelta(days=1))
         dto = await build_dashboard_snapshot(db_session, now=now)
-        assert _buckets(dto) == (0, 1 - 1, 0, 1)
+        assert _buckets(dto) == (0, 0, 1)
         _assert_reconciles(dto)
 
     async def test_active_rental_beats_a_future_reservation_on_the_same_car(self, db_session):
@@ -228,7 +228,7 @@ class TestDashboardSnapshot:
         await _res(db_session, v, now - timedelta(days=1), days=2)
         await _res(db_session, v, now + timedelta(days=10), days=2)
         dto = await build_dashboard_snapshot(db_session, now=now)
-        assert _buckets(dto) == (0, 1, 0, 0)
+        assert _buckets(dto) == (0, 1, 0)
         _assert_reconciles(dto)
 
     # 8 / 9 / 19 — multiple rentals, history, Top-5 ranking
@@ -292,7 +292,7 @@ class TestDashboardSnapshot:
         assert dto["reservations_today"]["starting_today"] == 1
         assert dto["reservations_today"]["count"] == 1
         assert dto["reservations_today"]["ending_today"] == 0
-        assert _buckets(dto) == (0, 1, 0, 0)
+        assert _buckets(dto) == (0, 1, 0)
 
     async def test_rental_ending_today_counts_in_returns(self, db_session):
         now = datetime.now(TZ).replace(hour=12, minute=0, second=0, microsecond=0)
@@ -321,7 +321,6 @@ class TestDashboardSnapshot:
         prev = await build_dashboard_snapshot(db_session, now=one_tick_before, period="today")
         assert prev["reservations_today"]["starting_today"] == 0
         assert prev["revenue"]["amount"] == 0.0
-        assert prev["vehicles"]["reserved"] == 0  # COMPLETED never blocks
 
     async def test_timezone_boundary_uses_casablanca_not_utc(self, db_session):
         """23:30 Casablanca on the 15th is 22:30 UTC on the 15th; a UTC-based
@@ -375,7 +374,7 @@ class TestDashboardSnapshot:
         await _res(db_session, v, now - timedelta(days=1), days=4)
         this_month = await build_dashboard_snapshot(db_session, now=now, period="month")
         last_year = await build_dashboard_snapshot(db_session, now=now, period="last_year")
-        assert _buckets(this_month) == _buckets(last_year) == (0, 1, 0, 0)
+        assert _buckets(this_month) == _buckets(last_year) == (0, 1, 0)
         assert (this_month["reservations_today"]["in_progress"]
                 == last_year["reservations_today"]["in_progress"] == 1)
         assert last_year["revenue"]["amount"] == 0.0
@@ -395,7 +394,7 @@ class TestDashboardSnapshot:
         db_session.add(r2)
         await db_session.commit()
         dto = await build_dashboard_snapshot(db_session, now=now)
-        assert _buckets(dto) == (0, 1, 0, 0)
+        assert _buckets(dto) == (0, 1, 0)
         _assert_reconciles(dto)
 
     # 16 — refresh after mutation
@@ -403,16 +402,16 @@ class TestDashboardSnapshot:
         now = datetime.now(TZ)
         v = await _veh(db_session, "MU-1")
         before = await build_dashboard_snapshot(db_session, now=now)
-        assert _buckets(before) == (1, 0, 0, 0)
+        assert _buckets(before) == (1, 0, 0)
 
         r = await _res(db_session, v, now - timedelta(hours=1), days=2, total=400.0)
         after_rent = await build_dashboard_snapshot(db_session, now=now)
-        assert _buckets(after_rent) == (0, 1, 0, 0)
+        assert _buckets(after_rent) == (0, 1, 0)
 
         r.status = "CANCELLED"
         await db_session.commit()
         after_cancel = await build_dashboard_snapshot(db_session, now=now)
-        assert _buckets(after_cancel) == (1, 0, 0, 0)
+        assert _buckets(after_cancel) == (1, 0, 0)
         assert after_cancel["revenue"]["amount"] == 0.0
 
     async def test_generated_at_is_one_instant_for_the_whole_snapshot(self, db_session):
@@ -507,6 +506,5 @@ class TestDashboardSummaryEndpoint:
         assert legacy["total_vehicles"] == summary["vehicles"]["total"]
         assert legacy["available"] == summary["vehicles"]["ready_to_rent"]
         assert legacy["rented"] == summary["vehicles"]["active_rental"]
-        assert legacy["reserved"] == summary["vehicles"]["reserved"]
         assert legacy["maintenance"] == summary["vehicles"]["maintenance"]
         assert legacy["month_revenue"] == summary["revenue"]["amount"]

@@ -133,6 +133,14 @@ fun ClientDetailScreen(clientId: String, viewModel: FleetViewModel) {
             }
             else -> {
                 val s = report!!.summary
+
+                client?.let { c ->
+                    ClientContactBlock(c)
+                    Spacer(Modifier.height(10.dp))
+                    ClientDocumentsBlock(c, viewModel)
+                    Spacer(Modifier.height(12.dp))
+                }
+
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     KpiCard("Locations", "${s.totalRentals}", Modifier.weight(1f))
                     KpiCard("Jours", "${s.totalDays}", Modifier.weight(1f))
@@ -187,6 +195,113 @@ fun ClientDetailScreen(clientId: String, viewModel: FleetViewModel) {
                                 modifier = Modifier.padding(top = 6.dp, bottom = 20.dp)
                             )
                         }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** Contact details, matching what the Desktop Client window shows. */
+@Composable
+private fun ClientContactBlock(client: com.example.data.api.ClientDto) {
+    val rows = listOfNotNull(
+        client.phone?.takeIf { it.isNotBlank() }?.let { "Téléphone" to it },
+        client.address?.takeIf { it.isNotBlank() }?.let { "Adresse" to it },
+        client.email?.takeIf { it.isNotBlank() }?.let { "Email" to it },
+        client.cinNumber?.takeIf { it.isNotBlank() }?.let { "CIN" to it },
+        client.licenseNumber?.takeIf { it.isNotBlank() }?.let { "N° Permis" to it },
+    )
+    if (rows.isEmpty()) return
+
+    Card(shape = RoundedCornerShape(12.dp)) {
+        Column(Modifier.padding(14.dp)) {
+            Text("Coordonnées", fontWeight = FontWeight.Bold, fontSize = 15.sp,
+                color = ClientSurface)
+            Spacer(Modifier.height(8.dp))
+            rows.forEach { (label, value) ->
+                Row(
+                    Modifier.fillMaxWidth().padding(vertical = 3.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.Top
+                ) {
+                    Text(label, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
+                        color = ClientMuted)
+                    Spacer(Modifier.width(12.dp))
+                    // Wraps instead of being clipped: a long address stays readable.
+                    Text(
+                        value, fontSize = 13.sp,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.weight(1f, fill = false),
+                        textAlign = androidx.compose.ui.text.style.TextAlign.End
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Client documents: NAME → [Voir], exactly as on the Desktop.
+ *
+ * The stored path is NEVER rendered — it is a long generated filename and
+ * showing it is what used to cover the button. [Voir] is the only control
+ * that opens a document, and it keeps a fixed size at the end of its row.
+ */
+@Composable
+private fun ClientDocumentsBlock(
+    client: com.example.data.api.ClientDto,
+    viewModel: FleetViewModel
+) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val documents = listOfNotNull(
+        client.identityCardImage?.takeIf { it.isNotBlank() }?.let { "CIN recto" to it },
+        client.identityCardImageBack?.takeIf { it.isNotBlank() }?.let { "CIN verso" to it },
+        client.drivingLicenseImage?.takeIf { it.isNotBlank() }?.let { "Permis recto" to it },
+        client.drivingLicenseImageBack?.takeIf { it.isNotBlank() }?.let { "Permis verso" to it },
+        client.contractImage?.takeIf { it.isNotBlank() }?.let { "Contrat" to it },
+    )
+
+    Card(shape = RoundedCornerShape(12.dp)) {
+        Column(Modifier.padding(14.dp)) {
+            Text("Documents", fontWeight = FontWeight.Bold, fontSize = 15.sp,
+                color = ClientSurface)
+            Spacer(Modifier.height(8.dp))
+
+            if (documents.isEmpty()) {
+                Text("Aucun document", fontSize = 13.sp, color = ClientMuted)
+                return@Column
+            }
+
+            documents.forEach { (name, path) ->
+                Row(
+                    Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        name, fontSize = 13.sp,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Spacer(Modifier.width(12.dp))
+                    OutlinedButton(
+                        onClick = {
+                            val url = com.example.util.ImageUrlResolver.resolve(
+                                path, viewModel.getBaseUrl())
+                            try {
+                                context.startActivity(
+                                    android.content.Intent(
+                                        android.content.Intent.ACTION_VIEW,
+                                        android.net.Uri.parse(url)))
+                            } catch (_: Exception) {}
+                        },
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.height(32.dp)
+                    ) {
+                        Text("Voir", fontSize = 12.sp, fontWeight = FontWeight.Bold,
+                            color = ClientSurface)
                     }
                 }
             }

@@ -133,6 +133,7 @@ def test_activate_button_only_offered_for_reserved_rows(window):
 
 
 def test_activate_button_offered_for_reserved_rows(window):
+    """Under 100% online specification, activate button is removed. Only Annuler is offered."""
     _seed_reservation(status="RESERVED")
     window._reservations.refresh_data()
     table = window._reservations._table
@@ -140,4 +141,4 @@ def test_activate_button_offered_for_reserved_rows(window):
     from PySide6.QtWidgets import QPushButton
     from app.i18n import t
     texts = [b.text() for b in action_widget.findChildren(QPushButton)]
-    assert t("reservations.action_activate") in texts
+    assert t("reservations.action_activate") not in texts

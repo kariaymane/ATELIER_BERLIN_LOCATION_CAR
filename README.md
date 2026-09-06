@@ -1,43 +1,76 @@
 # Atelier Berlin Location Car
 
-A complete, cross-platform car rental management system.
+A complete, enterprise-grade, cross-platform car rental management system.
 
-## Architecture
+---
 
-The system consists of three main components:
+## Architecture Overview
 
-1. **Backend (FastAPI & PostgreSQL)**
-   - REST API
-   - Real-time WebSockets
-   - Role-Based Access Control (RBAC)
-   - Alembic database migrations
+The system consists of three integrated components backed by an authoritative relational database:
 
-2. **Desktop Client (PySide6 / Qt)**
-   - Primary management interface for staff
-   - Offline-first capabilities with local SQLite cache
-   - Background Synchronization Engine (`SyncEngine`)
-   - Vehicle, Reservation, and Maintenance management
+1. **Backend API (FastAPI & PostgreSQL)**
+   - High-performance asynchronous REST API
+   - Real-time event updates via WebSockets
+   - Role-Based Access Control (RBAC) and JWT authentication
+   - Database schema migrations via Alembic
+   - Private network data isolation
 
-3. **Mobile App (Android / Kotlin / Jetpack Compose)**
-   - Dashboard for quick access
-   - Real-time updates via WebSockets
-   - Local persistence with Room database
-   - Secure token management
+2. **Desktop Application (PySide6 / Qt)**
+   - Comprehensive workstation interface for fleet operators and staff
+   - Offline resilience with local caching and background `SyncEngine`
+   - Fleet inventory, reservation scheduling, document viewing, and maintenance lifecycle
 
-## Setup & Development
+3. **Mobile Application (Android / Kotlin / Jetpack Compose)**
+   - Modern native mobile companion app
+   - Real-time fleet metrics and status monitoring
+   - Local persistence via Room database
+   - Secure token lifecycle management
 
-### Backend
+---
+
+## Repository Structure
+
+```text
+├── backend/          # FastAPI application, Alembic migrations, test suites
+├── desktop/          # PySide6 desktop client and UI test suites
+├── mobile/           # Android application (Kotlin / Jetpack Compose)
+├── shared/           # Cross-runtime domain models, business logic & schemas
+├── docker/           # Production container builds & local compose stack
+├── packaging/        # Packaging definitions and release build scripts
+├── scripts/          # Operational tools and data reconciliation utilities
+├── docs/             # Documentation and user guides
+├── .github/          # CI/CD workflows and automated release pipelines
+├── LICENSE           # MIT License
+├── README.md         # Project overview and setup instructions
+└── SECURITY.md       # Security policy and vulnerability disclosure process
+```
+
+---
+
+## Getting Started
+
+### Prerequisites
+
+- Python 3.11+
+- PostgreSQL 15+ (or Docker)
+- Android SDK / JDK 17 (for mobile build)
+
+### 1. Backend Setup
+
 ```bash
 cd backend
-cp ../.env.example .env   # then fill in the placeholders
+cp ../.env.example .env   # Configure environment variables
 python -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
 alembic upgrade head
-uvicorn app.main:app --reload
+uvicorn app.main:app --reload --port 8000
 ```
 
-### Desktop
+The API will be accessible at `http://localhost:8000` with documentation at `http://localhost:8000/docs`.
+
+### 2. Desktop Application Setup
+
 ```bash
 cd desktop
 python -m venv venv
@@ -47,52 +80,46 @@ export PYTHONPATH=$(pwd)
 python app/main.py
 ```
 
-### Mobile
+### 3. Mobile Application Setup
+
 ```bash
 cd mobile
 ./gradlew clean assembleDebug
 ```
 
-A **release** build needs the signing identity, which is deliberately kept
-outside this repository so it can never be committed:
+For release signing, configure keystore parameters via environment variables or CI secrets as described in `.github/workflows/android-release.yml`.
+
+---
+
+## Testing & Quality Assurance
+
+Run the automated test suites from their respective directories:
 
 ```bash
-export KEYSTORE_PATH=/path/to/production-upload-key.jks
-export STORE_PASSWORD=... KEY_PASSWORD=... KEY_ALIAS=...
-./gradlew clean assembleRelease
+# Backend suite (API contracts, domain logic, security checks)
+pytest backend/tests/
+
+# Desktop suite (UI flows, sync engine, document viewer security)
+PYTHONPATH=desktop pytest desktop/tests/
+
+# Mobile unit tests
+cd mobile && ./gradlew test
 ```
 
-CI does the same through GitHub Actions secrets (`.github/workflows/android-release.yml`).
+---
 
-## Testing
-Run \`pytest\` in the \`backend\` and \`desktop\` directories respectively to execute the test suites.
+## Security & Compliance
 
-## Security
+- **Secrets Management**: Credentials and signing secrets are managed through isolated runtime environment secrets and never committed to source control.
+- **Access Control**: Passwords are cryptographically hashed using Argon2id. API requests require signed Bearer tokens with strict expiration and rotation policies.
+- **Workflow Isolation**: All GitHub Actions workflows operate under minimal read-only permissions (`contents: read`).
 
-- **Secrets** are never committed. The deployed API reads them from `fly secrets`;
-  CI reads them from GitHub Actions secrets; local development uses an untracked
-  `.env` seeded from `.env.example`.
-- **Passwords** are hashed with Argon2id. Access tokens live 15 minutes, refresh
-  tokens rotate on use and are stored only as SHA-256 hashes.
-- **Accounts lock** for 15 minutes after 5 failed logins; login is rate-limited.
-- **Client documents** are stored under unguessable UUID filenames, validated by
-  magic bytes on upload, and referenced only by `/static/uploads/...` paths —
-  clients refuse a document reference pointing anywhere else.
-- **Rotating the administrator password**: `POST /api/v1/auth/change-password`
-  (this revokes every refresh token), then update the `ADMIN_PASSWORD` Fly secret
-  so a future reseed matches.
+For details on vulnerability reporting and security standards, please see [SECURITY.md](SECURITY.md).
 
-## Repository layout
+---
 
-```
-backend/     FastAPI application, Alembic migrations, tests
-desktop/     PySide6 client and tests
-mobile/      Android (Kotlin / Jetpack Compose) client and tests
-shared/      Reference implementations shared by all three runtimes
-scripts/     Operational and verification scripts
-packaging/   Windows packaging (PyInstaller under Wine)
-docker/      Backend image and local compose stack
-```
+## Documentation
 
-Build outputs, database dumps, signing identities and historical engineering
-reports are kept outside the repository.
+- [User & Operational Guide](docs/USER_GUIDE.md)
+- [Security Policy](SECURITY.md)
+- [License](LICENSE)

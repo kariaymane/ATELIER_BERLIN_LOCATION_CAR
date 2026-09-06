@@ -15,13 +15,14 @@ import androidx.room.RoomDatabase
         NotificationEntity::class,
         SyncMetadataEntity::class
     ],
-    // v10 — ReservationEntity gains `cancellationReason` + `cancelledAtIso` so
-    // the offline revenue engine can preserve the days realised before a
-    // maintenance interruption (parity with backend/desktop). Schema change +
+    // v11 — the old step-based maintenance workflow is gone. MaintenanceEntity
+    // drops `step`, `diagnosis` and `repair_description`: a maintenance is now
+    // EN COURS or TERMINÉE, derived from its period (start / end / now), exactly
+    // as the Desktop derives it. Schema change +
     // `fallbackToDestructiveMigration` wipes the local mirror on first launch;
     // Room then re-runs a clean INITIAL bootstrap from FastAPI/PostgreSQL.
     // CACHE reset only — never touches the authoritative PostgreSQL data.
-    version = 10,
+    version = 11,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {

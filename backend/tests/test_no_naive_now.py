@@ -3,9 +3,9 @@ Guard: the revenue / dashboard / auth hot paths must derive time from the ONE
 contract (shared.money_time.now_business / datetime.now(tz)), never a naive
 `datetime.now()` / `datetime.utcnow()`.
 
-A bare naive now is what produced the recurring "can't subtract offset-naive
-and offset-aware datetime" 500s (FORENSIC_ROOT_CAUSE_ANALYSIS.md §7). This
-test fails the build the moment one reappears in a guarded module.
+A bare naive now is what produced recurring "can't subtract offset-naive
+and offset-aware datetime" 500 errors. This test fails the build the moment
+one reappears in a guarded module.
 """
 import pathlib
 import re

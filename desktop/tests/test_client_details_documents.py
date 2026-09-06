@@ -69,11 +69,13 @@ def _assert_fits_and_ratio(label, src_w, src_h):
     assert label.alignment() & Qt.AlignmentFlag.AlignCenter
 
 
-def test_four_document_slots_exist(qapp, request, seeded_client):
+def test_five_document_slots_exist(qapp, request, seeded_client):
+    """CIN recto/verso, permis recto/verso and the signed contract."""
     dlg = _open(qapp, request, seeded_client)
     assert set(dlg._doc_thumbs) == {
         "identity_card_image", "identity_card_image_back",
         "driving_license_image", "driving_license_image_back",
+        "contract_image",
     }
 
 

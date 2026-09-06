@@ -2,6 +2,7 @@ package com.example.data.repository
 
 import android.util.Log
 import com.example.data.api.ApiClient
+import com.example.data.api.AuthErrorMapper
 import com.example.data.api.JwtUtils
 import com.example.data.api.LoginRequestDto
 import com.example.data.api.RefreshRequestDto
@@ -229,16 +230,17 @@ class AuthRepository(
                 _currentUserSession.value = session
                 Result.success(session)
             } else {
-                val body = response.errorBody()?.string()?.lowercase().orEmpty()
-                val errorMsg = when {
-                    response.code() == 401 && ("verrou" in body || "bloqu" in body || "lock" in body) ->
-                        "Compte bloqué après plusieurs tentatives. Réessayez dans 15 minutes."
-                    response.code() == 401 || response.code() == 404 -> "E-mail ou mot de passe incorrect."
-                    response.code() == 403 -> "Accès refusé. Rôle non autorisé."
-                    response.code() == 429 -> "Trop de tentatives. Patientez une minute avant de réessayer."
-                    response.code() >= 500 -> "Le serveur a rencontré une erreur. Réessayez dans un instant."
-                    else -> "Erreur de connexion au serveur (${response.code()})."
-                }
+                // The backend is authoritative for WHY the login failed and,
+                // for a lockout, for HOW LONG it lasts. We branch on the status
+                // code plus the machine-readable error_code — never on words in
+                // the localized message — so a 401, a 5xx, a proxy error page
+                // or an expired token can never render as "compte bloqué".
+                val rawBody = response.errorBody()?.string()
+                val errorMsg = AuthErrorMapper.map(
+                    httpCode = response.code(),
+                    rawBody = rawBody,
+                    retryAfterHeader = response.headers()["Retry-After"]
+                )
                 Result.failure(Exception(errorMsg))
             }
         } catch (e: Throwable) {

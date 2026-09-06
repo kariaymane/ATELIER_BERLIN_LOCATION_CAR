@@ -14,7 +14,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.data.model.MaintenanceStep
 import com.example.data.model.ReservationStatus
 import com.example.data.model.VehicleStatus
 import com.example.ui.theme.*
@@ -128,43 +127,3 @@ fun ReservationStatusBadge(status: ReservationStatus, modifier: Modifier = Modif
     }
 }
 
-@Composable
-fun MaintenanceStepBadge(step: MaintenanceStep, modifier: Modifier = Modifier) {
-    when (step) {
-        MaintenanceStep.DIAGNOSTIC -> StatusBadge(
-            text = step.label,
-            backgroundColor = StatusGoldBg,
-            textColor = StatusGoldText,
-            dotColor = StatusGoldDot,
-            modifier = modifier
-        )
-        MaintenanceStep.REPARATION -> StatusBadge(
-            text = step.label,
-            backgroundColor = StatusOrangeBg,
-            textColor = StatusOrangeText,
-            dotColor = StatusOrangeDot,
-            modifier = modifier
-        )
-        MaintenanceStep.CONTROLE -> StatusBadge(
-            text = step.label,
-            backgroundColor = StatusGreenBg,
-            textColor = StatusGreenText,
-            dotColor = StatusGreenDot,
-            modifier = modifier
-        )
-        MaintenanceStep.TERMINEE -> StatusBadge(
-            text = step.label,
-            backgroundColor = StatusGrayBg,
-            textColor = StatusGrayText,
-            dotColor = StatusGrayDot,
-            modifier = modifier
-        )
-        MaintenanceStep.EN_ATTENTE -> StatusBadge(
-            text = step.label,
-            backgroundColor = StatusGoldBg,
-            textColor = StatusGoldText,
-            dotColor = StatusGoldDot,
-            modifier = modifier
-        )
-    }
-}

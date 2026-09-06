@@ -31,7 +31,7 @@ data class UserDto(
 @JsonClass(generateAdapter = true)
 data class LoginResponseDto(
     // Canonical backend contract (backend/app/schemas/auth.py::LoginResponse):
-    // flat fields only, NO nested `user` object. FORENSIC_ROOT_CAUSE_ANALYSIS.md §3.
+    // flat fields only, NO nested `user` object.
     @Json(name = "access_token") val accessToken: String,
     @Json(name = "refresh_token") val refreshToken: String? = null,
     @Json(name = "token_type") val tokenType: String = "bearer",
@@ -155,8 +155,6 @@ data class MaintenanceDto(
     @Json(name = "type") val type: String = "ENTRETIEN",
     @Json(name = "title") val title: String? = null,
     @Json(name = "description") val description: String? = null,
-    @Json(name = "diagnosis") val diagnosis: String? = null,
-    @Json(name = "repair_description") val repairDescription: String? = null,
     @Json(name = "start_datetime") val startDatetime: String? = null,
     @Json(name = "expected_end_datetime") val expectedEndDatetime: String? = null,
     @Json(name = "actual_end_datetime") val actualEndDatetime: String? = null,
@@ -178,7 +176,6 @@ data class MaintenanceDto(
     @Json(name = "actual_cost") val actualCost: Double? = null,
     @Json(name = "next_maintenance_date") val nextMaintenanceDate: String? = null,
     @Json(name = "next_maintenance_mileage") val nextMaintenanceMileage: Double? = null,
-    @Json(name = "step") val step: String = "EN ATTENTE",
     @Json(name = "status") val status: String = "ACTIVE",
     @Json(name = "notes") val notes: String? = null,
     @Json(name = "vehicle_brand") val vehicleBrand: String? = null,
@@ -206,7 +203,6 @@ data class MaintenanceCreateDto(
     @Json(name = "expected_end_datetime") val expectedEndDatetime: String? = null,
     @Json(name = "estimated_cost") val estimatedCost: Double? = null,
     @Json(name = "location") val location: String? = null,
-    @Json(name = "step") val step: String = "DIAGNOSTIC",
     @Json(name = "status") val status: String = "ACTIVE",
     @Json(name = "notes") val notes: String? = null
 )
@@ -317,12 +313,14 @@ data class ClientDto(
     @Json(name = "last_name") val lastName: String = "",
     @Json(name = "email") val email: String? = null,
     @Json(name = "phone") val phone: String? = null,
+    @Json(name = "address") val address: String? = null,
     @Json(name = "cin_number") val cinNumber: String? = null,
     @Json(name = "license_number") val licenseNumber: String? = null,
     @Json(name = "identity_card_image") val identityCardImage: String? = null,
     @Json(name = "identity_card_image_back") val identityCardImageBack: String? = null,
     @Json(name = "driving_license_image") val drivingLicenseImage: String? = null,
     @Json(name = "driving_license_image_back") val drivingLicenseImageBack: String? = null,
+    @Json(name = "contract_image") val contractImage: String? = null,
     @Json(name = "photo_url") val photoUrl: String? = null,
     @Json(name = "status") val status: String = "ACTIVE",
     @Json(name = "created_at") val createdAt: String? = null
