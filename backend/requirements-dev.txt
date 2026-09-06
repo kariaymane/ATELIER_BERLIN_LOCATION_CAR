@@ -1,0 +1,10 @@
+# Development and CI dependencies. Installs the runtime set, then the tools the
+# test suite needs. Never installed into the production image.
+
+-r requirements.txt
+
+pytest==8.4.1
+pytest-asyncio==0.26.0
+pytest-cov==6.2.1
+httpx==0.28.1
+aiosqlite>=0.20.0

@@ -1,149 +1,95 @@
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-*.egg-info/
-dist/
-build/
-eggs/
-*.egg
-.Python
-env/
-venv/
-.venv/
-
-# Environment
-.env
-*.env.local
-
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-
-# Database
-*.db
-*.sqlite
-*.sqlite3
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Logs
-*.log
-logs/
-
-# Coverage
-htmlcov/
-.coverage
-.coverage.*
-coverage.xml
-
-# pytest
-.pytest_cache/
-
-# Alembic
-migrations/versions/*.pyc
-
-# Uploads
-uploads/
-
-# Android / Kotlin Mobile
-mobile/.gradle/
-mobile/build/
-mobile/app/build/
-mobile/local.properties
-mobile/.idea/
-mobile/*.iml
-mobile/app/*.iml
-
-# Docker
-docker/.env
-
-# Backups
-backups/
-fly.toml.backup-*
-
-# Generated desktop build artifacts
-ATELIER_BERLIN_LOCATION_CAR_WINDOWS*/
-ATELIER_BERLIN_LOCATION_CAR_WINDOWS.zip
-
-# UI inspection dumps
-window_dump.xml
-
-# Environment / secrets
+# ─── Secrets and local environment ──────────────────────────────────────────
+# Never commit a real credential. Deployment secrets live in `fly secrets`,
+# CI secrets in GitHub Actions secrets, local values in an untracked .env.
 .env
 .env.*
 !.env.example
 backend/.env
 backend/.env.*
+docker/.env
+mobile/.env
 
-# Python
-__pycache__/
-*.pyc
-.venv/
-venv/
-
-# Build artifacts
-build/
-dist/
-*.egg-info/
-
-# Android
-.gradle/
-**/build/
+# Android signing identities. Losing control of one is unrecoverable: it can
+# never be rotated for an app already published under it. Keep them outside
+# this directory entirely and point KEYSTORE_PATH at them.
 *.jks
 *.keystore
 
-# Runtime data
+# ─── Python ─────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+.Python
+venv/
+.venv/
+env/
+
+# ─── Tests and coverage ─────────────────────────────────────────────────────
+.pytest_cache/
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+
+# ─── Build output ───────────────────────────────────────────────────────────
+build/
+dist/
+dist_final/
+artifacts_archive/
+packaging/windows/build/
+packaging/windows/dist/
+packaging/windows/venv_wine/
+
+# Release artifacts are published through GitHub Releases, not committed.
+ATELIER_BERLIN_LOCATION_CAR*.apk
+ATELIER_BERLIN_LOCATION_CAR*.exe
+ATELIER_BERLIN_LOCATION_CAR*.zip
+atelier-berlin-location-car-*.zip
+*.aab
+
+# ─── Android / Gradle ───────────────────────────────────────────────────────
+.gradle/
+**/build/
+mobile/local.properties
+mobile/.idea/
+mobile/.kotlin/
+mobile/captures/
+*.iml
+
+# ─── Runtime data ───────────────────────────────────────────────────────────
+# Client documents and local databases hold personal data. They belong on the
+# server volume and on the operator's machine, never in version control.
 uploads/
 *.db
 *.sqlite
 *.sqlite3
-
-# IDE
-.idea/
-.vscode/
-
-# OS
-.DS_Store
-
-# Local desktop identity
 desktop/app/data/device_id.txt
 
-# Local environment / secrets
-.env
-.env.*
-!.env.example
-
-# Python local environments
-venv/
-.venv/
-
-# Local databases / runtime
-*.db
-*.sqlite
-*.sqlite3
-
-# Generated files
-__pycache__/
-*.pyc
-ATELIER_BERLIN_LOCATION_CAR.exe
-app-debug.apk
-
-# Local delivery package folder
-dist_final/
-
-# Forensic backups
+# ─── Backups and scratch files ──────────────────────────────────────────────
+backups/
 .backups/
+*.bak
 *.bak.*
+*.backup.*
+*.old
+*.orig
+*.rej
+*.tmp
+fly.toml.backup-*
+window_dump.xml
 
-# mobile security release bundle (build output — not source)
-atelier-berlin-location-car-mobile-security-*.zip
-artifacts_archive/
-ATELIER_BERLIN_LOCATION_CAR*.apk
-ATELIER_BERLIN_LOCATION_CAR*.zip
+# ─── Logs ───────────────────────────────────────────────────────────────────
+*.log
+logs/
+
+# ─── Editors and OS ─────────────────────────────────────────────────────────
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
