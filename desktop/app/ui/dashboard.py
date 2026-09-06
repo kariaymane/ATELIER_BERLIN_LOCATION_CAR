@@ -268,17 +268,14 @@ class DashboardWidget(QWidget):
         # no capacity ratio, no progress bar. It is a live business figure, not
         # a utilisation gauge.
         self._card_rented = ExecutiveFleetCard(t("dashboard.rented_fleet"), "0")
-        self._card_reserved = ExecutiveFleetCard(t("dashboard.reserved_fleet"), "0")
         self._card_fleet_maintenance = ExecutiveFleetCard(t("dashboard.maintenance_fleet"), "0")
 
         self._card_available.setMinimumWidth(200)
         self._card_rented.setMinimumWidth(200)
-        self._card_reserved.setMinimumWidth(200)
         self._card_fleet_maintenance.setMinimumWidth(200)
 
         fleet_layout.addWidget(self._card_available)
         fleet_layout.addWidget(self._card_rented)
-        fleet_layout.addWidget(self._card_reserved)
         fleet_layout.addWidget(self._card_fleet_maintenance)
         layout.addLayout(fleet_layout)
 
@@ -506,7 +503,6 @@ class DashboardWidget(QWidget):
         self._card_maintenance.set_title(t("dashboard.active_maintenances"))
         self._card_available.set_title(t("dashboard.available_fleet"))
         self._card_rented.set_title(t("dashboard.rented_fleet"))
-        self._card_reserved.set_title(t("dashboard.reserved_fleet"))
         self._card_fleet_maintenance.set_title(t("dashboard.maintenance_fleet"))
         self._top_box.setTitle(t("dashboard.top_rented"))
 
@@ -583,7 +579,6 @@ class DashboardWidget(QWidget):
         d = self._overview_data
         self._card_available.set_count(str(d.get("available", 0)))
         self._card_rented.set_count(str(d.get("rented", 0)))
-        self._card_reserved.set_count(str(d.get("reserved", 0)))
         self._card_fleet_maintenance.set_count(str(d.get("maintenance", 0)))
 
     def _render_top_vehicles(self):

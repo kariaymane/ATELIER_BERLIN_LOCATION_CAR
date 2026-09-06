@@ -81,7 +81,7 @@ async def _create_initial_admin(settings):
             else:
                 logger.info("Admin user already exists")
     except Exception as e:
-        logger.error("Failed to create initial admin: %s", str(e))
+        logger.error("Initial administrator provisioning failed: %s", type(e).__name__)
 
 
 def create_app() -> FastAPI:
@@ -90,7 +90,7 @@ def create_app() -> FastAPI:
 
     app = FastAPI(
         title="ATELIER BERLIN LOCATION CAR API",
-        description="Professional car rental management system with offline-first sync",
+        description="Car rental management API",
         version="1.0.0",
         docs_url="/docs",
         redoc_url="/redoc",

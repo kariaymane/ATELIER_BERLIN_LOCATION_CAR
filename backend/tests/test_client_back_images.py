@@ -18,7 +18,7 @@ async def test_create_client_with_both_sides(client, admin_token):
         "/api/v1/clients/",
         headers={"Authorization": f"Bearer {admin_token}"},
         json={
-            "first_name": "Sara", "last_name": "B",
+            "first_name": "CustomerP", "last_name": "B",
             "identity_card_image": "/static/uploads/clients/cin_front.jpg",
             "identity_card_image_back": "/static/uploads/clients/cin_back.jpg",
             "driving_license_image": "/static/uploads/clients/lic_front.jpg",
@@ -39,7 +39,7 @@ async def test_update_back_only_keeps_front(client, admin_token):
         "/api/v1/clients/",
         headers={"Authorization": f"Bearer {admin_token}"},
         json={
-            "first_name": "Omar", "last_name": "K",
+            "first_name": "CustomerN", "last_name": "K",
             "identity_card_image": "/static/uploads/clients/front_original.jpg",
         },
     )

@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""Regenerate Android launcher icons from the approved Lily logo asset.
+"""Regenerate Android launcher icons from the application logo asset.
 
-Uses ONLY desktop/app/assets/images/logo_transparent_officiel.png as source.
+Uses mobile/app/src/main/res/drawable/logo_transparent_officiel.png as source.
 Writes mipmap webp launchers (square + round) at all densities.
 """
 from pathlib import Path
 
 from PIL import Image, ImageDraw
 
-ROOT = Path("/home/ayman/car-rental-system")
+ROOT = Path(__file__).resolve().parents[1]
 LOGO = ROOT / "mobile/app/src/main/res/drawable/logo_transparent_officiel.png"
 MIPMAP = ROOT / "mobile/app/src/main/res"
 

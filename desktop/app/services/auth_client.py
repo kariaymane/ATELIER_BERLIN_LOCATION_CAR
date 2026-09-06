@@ -1,20 +1,8 @@
-"""
-AuthClient — the ONE desktop authentication client.
+"""Desktop authentication transport with bounded retries and typed outcomes.
 
-Before this module the desktop had two login implementations:
-`LoginWorker._authenticate_online` (raw httpx, 4s timeout, no retry — the
-path the screen actually used) and `ApiClient.login` (robust, retrying —
-effectively dead code). Every "login keeps breaking" fix landed in the wrong
-one (FORENSIC_ROOT_CAUSE_ANALYSIS.md §1.1, §2).
-
-This is now the only symbol allowed to call `/api/v1/auth/*` from the
-desktop. It:
-  * uses a 5s connect / 30s read timeout with 2 backoff retries, because the
-    production Fly machine can cold-start and the first hit legitimately
-    takes >10s;
-  * returns a TYPED outcome so the UI can tell INVALID_CREDENTIALS from
-    NETWORK_UNREACHABLE from SERVER_ERROR from RATE_LIMITED — never again
-    "identifiants incorrects" for a flat network.
+Connection and read timeouts are separate so a slow server is not confused with
+rejected credentials. Callers distinguish authentication rejection, rate limits,
+server errors, and transport failures before deciding how to update local state.
 """
 from __future__ import annotations
 

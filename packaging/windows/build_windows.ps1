@@ -1,34 +1,32 @@
-# Windows Build Script for ATELIER BERLIN LOCATION CAR
+# Build on Windows using one authoritative PyInstaller specification.
 $ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
 
-Write-Host "Creating clean Python virtual environment..."
-python -m venv venv
-.\venv\Scripts\Activate.ps1
+$Root = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
+$Venv = Join-Path $PSScriptRoot ".venv"
+$Python = Join-Path $Venv "Scripts\python.exe"
 
-Write-Host "Installing dependencies..."
-pip install --upgrade pip
-pip install -r ..\..\desktop\requirements.txt
-pip install pyinstaller Pillow
-
-Write-Host "Building ATELIER BERLIN LOCATION CAR executable..."
-# Include PySide6 and standard dependencies
-pyinstaller --noconsole --name "ATELIER_BERLIN_LOCATION_CAR" `
-    --icon="..\..\desktop\app\assets\images\logo_transparent_officiel.png" `
-    --add-data="..\..\desktop\app\assets;app\assets" `
-    --add-data="..\..\desktop\app\i18n;app\i18n" `
-    --add-data="..\..\shared;shared" `
-    --hidden-import="PySide6.QtWebSockets" `
-    --hidden-import="PySide6.QtNetwork" `
-    --hidden-import="PySide6.QtCore" `
-    --hidden-import="PySide6.QtGui" `
-    --hidden-import="PySide6.QtWidgets" `
-    --clean `
-    ..\..\desktop\app\main.py
-
-Write-Host "Verifying executable..."
-if (Test-Path "dist\ATELIER_BERLIN_LOCATION_CAR\ATELIER_BERLIN_LOCATION_CAR.exe") {
-    Write-Host "Build SUCCESS: Executable created at dist\ATELIER_BERLIN_LOCATION_CAR\ATELIER_BERLIN_LOCATION_CAR.exe"
-} else {
-    Write-Host "Build FAILED: Executable not found!"
-    exit 1
+function Invoke-Checked {
+    param([string]$Command, [string[]]$CommandArgs)
+    & $Command @CommandArgs
+    if ($LASTEXITCODE -ne 0) {
+        throw "Build command failed with exit code $LASTEXITCODE."
+    }
 }
+
+Invoke-Checked -Command "python" -CommandArgs @("-m", "venv", $Venv)
+Invoke-Checked -Command $Python -CommandArgs @(
+    "-m", "pip", "install", "-r", (Join-Path $Root "desktop\requirements.txt"),
+    "pyinstaller>=6,<7", "Pillow>=11,<13"
+)
+Invoke-Checked -Command $Python -CommandArgs @(
+    "-m", "PyInstaller", "--noconfirm", "--clean",
+    "--distpath", (Join-Path $PSScriptRoot "dist"),
+    "--workpath", (Join-Path $PSScriptRoot "build"),
+    (Join-Path $PSScriptRoot "ATELIER_BERLIN_LOCATION_CAR.spec")
+)
+$Executable = Join-Path $PSScriptRoot "dist\ATELIER_BERLIN_LOCATION_CAR\ATELIER_BERLIN_LOCATION_CAR.exe"
+if (-not (Test-Path -LiteralPath $Executable)) {
+    throw "The expected Windows executable was not produced."
+}
+Write-Host "Windows desktop build completed: $Executable"

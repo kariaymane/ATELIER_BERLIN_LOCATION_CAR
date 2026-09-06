@@ -35,9 +35,9 @@ from app.models.vehicle import Vehicle
 
 async def _seed(db_session):
     client = Client(
-        id=uuid4(), first_name="Amina", last_name="Rachidi",
-        phone="+212600000001", email="amina@example.test",
-        cin_number="BE100001",
+        id=uuid4(), first_name="CustomerC", last_name="ExampleH",
+        phone="+12025550101", email="customerc@example.test",
+        cin_number="TEST-CIN-004",
     )
     va = Vehicle(
         registration="AAA-1-A-1", vin="1M8GDM9AXKP042788", brand="Dacia",
@@ -67,7 +67,7 @@ async def _seed(db_session):
     for vid, start, days, total, status in rows:
         db_session.add(Reservation(
             vehicle_id=vid, customer_id=client.id,
-            customer_name="Amina Rachidi", customer_phone="+212600000001",
+            customer_name="CustomerC ExampleH", customer_phone="+12025550101",
             start_datetime=start, end_datetime=start + timedelta(days=days),
             daily_price=100.0, num_days=days, total_price=total,
             deposit=0, status=status, payment_status="PENDING",
@@ -115,7 +115,7 @@ class TestClientRentalsReport:
         assert first["num_days"] == 4
 
     async def test_same_day_rental_counts_one_day(self, client: AsyncClient, admin_token, db_session):
-        c = Client(first_name="Same", last_name="Day", phone="+212600000002")
+        c = Client(first_name="Same", last_name="Day", phone="+12025550102")
         v = Vehicle(
             registration="SAME-1-A-1", vin="1M8GDM9AXKP042790", brand="Kia",
             model="Rio", year=2024, color="Rouge", fuel_type="GASOLINE",
@@ -145,7 +145,7 @@ class TestClientRentalsReport:
         assert s["total_amount"] == pytest.approx(200.0)
 
     async def test_zero_rental_client_all_zero(self, client: AsyncClient, admin_token, db_session):
-        c = Client(first_name="Zero", last_name="Rent", phone="+212600000003")
+        c = Client(first_name="Zero", last_name="Rent", phone="+12025550103")
         db_session.add(c)
         await db_session.commit()
         await db_session.refresh(c)
@@ -175,7 +175,7 @@ class TestClientRentalsReport:
         (start <= now < end), exactly like fleet_status.py — not merely
         `status == 'ACTIVE'`.
         """
-        c = Client(first_name="Time", last_name="Derived", phone="+212600000099")
+        c = Client(first_name="Time", last_name="Derived", phone="+12025550114")
         va = Vehicle(
             registration="TD-1-A-1", vin="1M8GDM9AXKP042791", brand="Kia",
             model="Picanto", year=2024, color="Bleu", fuel_type="GASOLINE",

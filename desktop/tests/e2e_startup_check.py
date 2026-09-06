@@ -31,7 +31,7 @@ def main() -> int:
     now = datetime.now(timezone.utc).isoformat()
     session.merge(LocalUser(
         id="e2e-user-1",
-        email="director@atelier.com",
+        email="director@example.test",
         username="director",
         password_hash=argon2.PasswordHasher().hash("E2eTest#2026"),
         full_name="E2E Director",
@@ -52,7 +52,7 @@ def main() -> int:
     sys.excepthook = track_exc
 
     login = LoginWindow()
-    login._email_input.setText("director@atelier.com")
+    login._email_input.setText("director@example.test")
     login._password_input.setText("E2eTest#2026")
 
     loop = QEventLoop()

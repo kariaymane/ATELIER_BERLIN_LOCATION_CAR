@@ -53,7 +53,7 @@ class TestRBAC:
         response = await client.post(
             "/api/v1/users/",
             json={
-                "email": "newuser@test.com", "username": "newuser",
+                "email": "newuser@example.test", "username": "newuser",
                 "password": "NewUser123!", "full_name": "New User",
                 "role": "EMPLOYEE",
             },
@@ -65,7 +65,7 @@ class TestRBAC:
         response = await client.post(
             "/api/v1/users/",
             json={
-                "email": "adminmade@test.com", "username": "adminmade",
+                "email": "adminmade@example.test", "username": "adminmade",
                 "password": "NewUser123!", "full_name": "Admin Made",
                 "role": "EMPLOYEE",
             },

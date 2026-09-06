@@ -4,7 +4,7 @@ contract (shared.money_time.now_business / datetime.now(tz)), never a naive
 `datetime.now()` / `datetime.utcnow()`.
 
 A bare naive now is what produced the recurring "can't subtract offset-naive
-and offset-aware datetime" 500s (FORENSIC_ROOT_CAUSE_ANALYSIS.md §7). This
+and offset-aware datetime" 500s (timezone-aware datetime policy, section 7). This
 test fails the build the moment one reappears in a guarded module.
 """
 import pathlib

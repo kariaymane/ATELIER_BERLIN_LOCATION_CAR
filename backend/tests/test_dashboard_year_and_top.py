@@ -1,5 +1,5 @@
 """
-Dashboard forensic — year-to-date revenue + "Top véhicules les plus loués".
+Dashboard regression — year-to-date revenue + "Top véhicules les plus loués".
 
 Root cause this covers: the dashboard's today/week/month revenue cards are
 legitimately 0 when nothing STARTED in that period (canonical

@@ -33,8 +33,8 @@ async def test_full_bootstrap_reconciles_all_four_domains():
     session.add(LocalVehicle(id="v-keep", registration="KEEP-V", vin="VIN-KEEP-00000001", brand="B", model="M", year=2024, color="N", fuel_type="D", transmission="M", status="AVAILABLE", created_at=now_iso, updated_at=now_iso))
     session.add(LocalVehicle(id="v-drop", registration="DROP-V", vin="VIN-DROP-00000002", brand="B", model="M", year=2024, color="N", fuel_type="D", transmission="M", status="AVAILABLE", created_at=now_iso, updated_at=now_iso))
 
-    session.add(LocalClient(id="c-keep", first_name="Jean", last_name="Keep", phone="0611111111", email="keep@example.com", status="ACTIVE", created_at=now_iso, updated_at=now_iso))
-    session.add(LocalClient(id="c-drop", first_name="Marc", last_name="Drop", phone="0622222222", email="drop@example.com", status="ACTIVE", created_at=now_iso, updated_at=now_iso))
+    session.add(LocalClient(id="c-keep", first_name="CustomerI", last_name="Keep", phone="+12025550125", email="keep@example.com", status="ACTIVE", created_at=now_iso, updated_at=now_iso))
+    session.add(LocalClient(id="c-drop", first_name="CustomerL", last_name="Drop", phone="+12025550127", email="drop@example.com", status="ACTIVE", created_at=now_iso, updated_at=now_iso))
 
     session.add(LocalReservation(id="r-keep", vehicle_id="v-keep", customer_name="Keep", start_datetime=now_iso, end_datetime=now_iso, daily_price=100, num_days=1, total_price=100, status="RESERVED", created_at=now_iso, updated_at=now_iso))
     session.add(LocalReservation(id="r-drop", vehicle_id="v-drop", customer_name="Drop", start_datetime=now_iso, end_datetime=now_iso, daily_price=100, num_days=1, total_price=100, status="RESERVED", created_at=now_iso, updated_at=now_iso))
@@ -54,8 +54,8 @@ async def test_full_bootstrap_reconciles_all_four_domains():
             {"id": "v-keep", "registration": "KEEP-V", "vin": "VIN-KEEP-00000001", "brand": "B", "model": "M", "year": 2024, "color": "N", "fuel_type": "D", "transmission": "M", "status": "AVAILABLE", "version": 2}
         ],
         "clients": [
-            {"id": "c-keep", "first_name": "Jean", "last_name": "Keep", "phone": "0611111111", "email": "keep@example.com", "status": "ACTIVE", "version": 2},
-            {"id": "c-new", "first_name": "Alice", "last_name": "New", "phone": "0633333333", "email": "new@example.com", "status": "ACTIVE", "version": 1}
+            {"id": "c-keep", "first_name": "CustomerI", "last_name": "Keep", "phone": "+12025550125", "email": "keep@example.com", "status": "ACTIVE", "version": 2},
+            {"id": "c-new", "first_name": "CustomerB", "last_name": "New", "phone": "+12025550128", "email": "new@example.com", "status": "ACTIVE", "version": 1}
         ],
         "rentals": [
             {"id": "r-keep", "vehicle_id": "v-keep", "customer_name": "Keep", "start_datetime": now_iso, "end_datetime": now_iso, "daily_price": 100, "num_days": 1, "total_price": 100, "status": "RESERVED", "version": 2}

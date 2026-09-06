@@ -341,7 +341,7 @@ def test_client_document_upload_reconciles_fields(session, monkeypatch, image_fi
     )
     now = datetime.now(timezone.utc).isoformat()
     c = LocalClient(
-        id="cli-1", first_name="Ali", last_name="Test",
+        id="cli-1", first_name="CustomerA", last_name="Test",
         driving_license_image=rec.marker,
         created_at=now, updated_at=now, version=1,
     )

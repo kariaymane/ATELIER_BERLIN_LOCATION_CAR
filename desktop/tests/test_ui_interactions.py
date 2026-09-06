@@ -41,7 +41,7 @@ def main_window(qapp):
 
     from app.ui.main_window import MainWindow
     mw = MainWindow({
-        "user_id": "ui-user-1", "email": "ui@test.local",
+        "user_id": "ui-user-1", "email": "ui@example.test",
         "username": "uitest", "full_name": "UI Tester",
         "role": "ADMIN", "access_token": "", "refresh_token": "",
         "offline": True,

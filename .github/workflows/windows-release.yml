@@ -1,24 +1,28 @@
-name: Windows Desktop Release
+name: Windows release build
 
 on:
   push:
-    tags: [ "v*" ]
+    tags: ["v*"]
+
+permissions:
+  contents: read
 
 jobs:
   build:
     runs-on: windows-latest
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
-          python-version: "3.13"
-      - name: Build Windows Executable
-        run: |
-          cd packaging/windows
-          .\build_windows.ps1
-      - name: Upload EXE
-        uses: actions/upload-artifact@v4
+          python-version: "3.12"
+      - name: Build Windows desktop
+        shell: pwsh
+        run: ./packaging/windows/build_windows.ps1
+      - name: Upload desktop package
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: Windows-Executable
+          name: atelier-berlin-windows-${{ github.ref_name }}
           path: packaging/windows/dist/ATELIER_BERLIN_LOCATION_CAR/
+          if-no-files-found: error
+          retention-days: 14

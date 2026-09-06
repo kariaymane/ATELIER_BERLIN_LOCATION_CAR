@@ -140,3 +140,12 @@ def test_vehicules_en_location_shows_only_the_count_no_denominator(qapp):
     from PySide6.QtWidgets import QLabel
     for lbl in widget._card_rented.findChildren(QLabel):
         assert "/" not in lbl.text() and " sur " not in lbl.text()
+
+
+def test_dashboard_has_only_supported_fleet_cards(qapp):
+    widget = DashboardWidget()
+    assert len(widget.findChildren(ExecutiveFleetCard)) == 3
+    assert widget._card_available is not None
+    assert widget._card_rented is not None
+    assert widget._card_fleet_maintenance is not None
+    widget.close()

@@ -66,7 +66,6 @@ def init_engine(database_url: str, echo: bool = False, settings=None):
             "pool_timeout": settings.DB_POOL_TIMEOUT,
             "pool_pre_ping": settings.DB_POOL_PRE_PING,
             "pool_recycle": settings.DB_POOL_RECYCLE,
-            "connect_args": {"ssl": False} if "postgresql" in database_url else {},
         }
         logger.info(
             "DB pool: size=%s overflow=%s timeout=%ss recycle=%ss pre_ping=%s "

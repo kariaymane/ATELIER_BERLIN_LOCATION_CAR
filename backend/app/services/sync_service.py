@@ -394,7 +394,7 @@ class SyncService:
                 v = (await self._session.execute(select(Vehicle).where(Vehicle.id == m.vehicle_id))).scalar_one_or_none()
                 # Raw MAINTENANCE hold ONLY for a currently-active window — a
                 # future-dated ticket must not create a second status authority
-                # that contradicts the canonical derivation (forensic P0-B).
+                # that contradicts the canonical derivation (regression P0-B).
                 if v and v.status not in ("SOLD", "INACTIVE") and _maintenance_active_now(m):
                     v.status = "MAINTENANCE"
                     v.version += 1

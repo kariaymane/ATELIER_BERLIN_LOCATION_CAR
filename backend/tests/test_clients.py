@@ -2,13 +2,13 @@ import pytest
 from httpx import AsyncClient
 
 SAMPLE_CLIENT = {
-    "first_name": "Karim",
-    "last_name": "El Idrissi",
-    "email": "karim.elidrissi@example.com",
-    "phone": "+212612345678",
-    "cin_number": "AB123456",
+    "first_name": "CustomerK",
+    "last_name": "El ExampleE",
+    "email": "customerk.elidrissi@example.com",
+    "phone": "+12025550118",
+    "cin_number": "TEST-CIN-002",
     "identity_card_image": "/static/uploads/clients/cin_test.jpg",
-    "license_number": "01/123456",
+    "license_number": "TEST-LIC-009",
     "driving_license_image": "/static/uploads/clients/permis_test.jpg",
     "photo_url": "/static/uploads/clients/photo_test.jpg",
     "notes": "Client VIP fidèle",
@@ -24,10 +24,10 @@ class TestClientCRUD:
         )
         assert response.status_code == 201
         data = response.json()
-        assert data["first_name"] == "Karim"
-        assert data["last_name"] == "El Idrissi"
-        assert data["cin_number"] == "AB123456"
-        assert data["license_number"] == "01/123456"
+        assert data["first_name"] == "CustomerK"
+        assert data["last_name"] == "El ExampleE"
+        assert data["cin_number"] == "TEST-CIN-002"
+        assert data["license_number"] == "TEST-LIC-009"
         assert data["photo_url"] == "/static/uploads/clients/photo_test.jpg"
         assert data["identity_card_image"] == "/static/uploads/clients/cin_test.jpg"
         assert data["driving_license_image"] == "/static/uploads/clients/permis_test.jpg"
@@ -63,7 +63,7 @@ class TestClientCRUD:
         assert get_resp.status_code == 200
         data = get_resp.json()
         assert data["id"] == client_id
-        assert data["first_name"] == "Karim"
+        assert data["first_name"] == "CustomerK"
 
     async def test_update_client(self, client: AsyncClient, admin_token: str):
         create_resp = await client.post(
@@ -75,12 +75,12 @@ class TestClientCRUD:
 
         update_resp = await client.put(
             f"/api/v1/clients/{client_id}",
-            json={"phone": "+212699887766", "notes": "Updated notes"},
+            json={"phone": "+12025550122", "notes": "Updated notes"},
             headers={"Authorization": f"Bearer {admin_token}"},
         )
         assert update_resp.status_code == 200
         data = update_resp.json()
-        assert data["phone"] == "+212699887766"
+        assert data["phone"] == "+12025550122"
         assert data["notes"] == "Updated notes"
 
     async def test_client_history(self, client: AsyncClient, admin_token: str):

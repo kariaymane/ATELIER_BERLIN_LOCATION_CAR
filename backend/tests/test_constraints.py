@@ -14,12 +14,12 @@ from app.auth.password import hash_password
 @pytest.mark.asyncio
 class TestConstraints:
     async def test_user_duplicate_email(self, db_session: AsyncSession):
-        u1 = User(id=uuid4(), email="dup@test.com", username="dup1",
+        u1 = User(id=uuid4(), email="dup@example.test", username="dup1",
                    password_hash=hash_password("Test123!"), full_name="Dup 1", role="EMPLOYEE")
         db_session.add(u1)
         await db_session.flush()
 
-        u2 = User(id=uuid4(), email="dup@test.com", username="dup2",
+        u2 = User(id=uuid4(), email="dup@example.test", username="dup2",
                    password_hash=hash_password("Test123!"), full_name="Dup 2", role="EMPLOYEE")
         db_session.add(u2)
         with pytest.raises(IntegrityError):
@@ -27,7 +27,7 @@ class TestConstraints:
         await db_session.rollback()
 
     async def test_user_invalid_role(self, db_session: AsyncSession):
-        u = User(id=uuid4(), email="badrole@test.com", username="badrole",
+        u = User(id=uuid4(), email="badrole@example.test", username="badrole",
                  password_hash=hash_password("Test123!"), full_name="Bad Role", role="SUPERUSER")
         db_session.add(u)
         with pytest.raises(IntegrityError):

@@ -1,5 +1,5 @@
 {
-  "_comment": "NORMATIVE cross-runtime revenue vectors (33 cases). backend/desktop/mobile revenue engines are asserted byte-for-byte against shared/revenue_reference.py on every case here. to_date is EXCLUSIVE. All dates business-local (Africa/Casablanca).",
+  "_comment": "Synthetic cross-runtime revenue vectors. Backend, desktop, and Android tests compare their engines with these expected values. to_date is exclusive; dates use the Africa/Casablanca business timezone.",
   "revenue_cases": [
     {
       "name": "zero_reservations",
@@ -931,162 +931,90 @@
       ]
     },
     {
-      "name": "production_live_golden_dataset",
-      "now": "2026-09-03T01:19:00+01:00",
+      "name": "synthetic_mixed_reservation_states",
+      "now": "2024-05-03T12:00:00+01:00",
       "reservations": [
         {
-          "id": "ddb6661a",
+          "id": "SYN-COMPLETE-A",
           "status": "COMPLETED",
-          "start_datetime": "2026-08-27T08:00:00+00:00",
-          "num_days": 8,
-          "daily_price": "450.00",
-          "total_price": "3600.00"
+          "start_datetime": "2024-04-28T09:00:00+01:00",
+          "num_days": 7,
+          "daily_price": "120.00",
+          "total_price": "840.00"
         },
         {
-          "id": "606e1a08",
+          "id": "SYN-COMPLETE-B",
           "status": "COMPLETED",
-          "start_datetime": "2026-08-27T08:00:00+00:00",
-          "num_days": 8,
-          "daily_price": "450.00",
-          "total_price": "3600.00"
+          "start_datetime": "2024-04-30T09:00:00+01:00",
+          "num_days": 10,
+          "daily_price": "80.00",
+          "total_price": "800.00"
         },
         {
-          "id": "5f6fb440",
-          "status": "COMPLETED",
-          "start_datetime": "2026-08-27T08:00:00+00:00",
-          "num_days": 71,
-          "daily_price": "450.00",
-          "total_price": "31950.00"
+          "id": "SYN-ACTIVE",
+          "status": "ACTIVE",
+          "start_datetime": "2024-05-01T09:00:00+01:00",
+          "num_days": 20,
+          "daily_price": "90.00",
+          "total_price": "1800.00"
         },
         {
-          "id": "d58bc8dc",
-          "status": "COMPLETED",
-          "start_datetime": "2026-08-29T08:00:00+00:00",
-          "num_days": 6,
-          "daily_price": "450.00",
-          "total_price": "2700.00"
+          "id": "SYN-RESERVED-CURRENT",
+          "status": "RESERVED",
+          "start_datetime": "2024-05-03T09:00:00+01:00",
+          "num_days": 2,
+          "daily_price": "70.00",
+          "total_price": "140.00"
         },
         {
-          "id": "d16be1a9",
-          "status": "CANCELLED",
-          "start_datetime": "2026-08-27T08:00:00+00:00",
-          "num_days": 9,
-          "daily_price": "450.00",
-          "total_price": "4050.00"
-        },
-        {
-          "id": "50d32a08",
-          "status": "CANCELLED",
-          "start_datetime": "2027-10-01T09:00:00+00:00",
-          "num_days": 4,
-          "daily_price": "100.00",
-          "total_price": "400.00"
-        },
-        {
-          "id": "e8e83d67",
-          "status": "CANCELLED",
-          "start_datetime": "2027-11-01T09:00:00+00:00",
+          "id": "SYN-RESERVED-FUTURE",
+          "status": "RESERVED",
+          "start_datetime": "2024-05-10T09:00:00+01:00",
           "num_days": 4,
           "daily_price": "150.00",
           "total_price": "600.00"
         },
         {
-          "id": "7c665b6d",
-          "status": "COMPLETED",
-          "start_datetime": "2026-08-27T08:00:00+00:00",
-          "num_days": 8,
-          "daily_price": "250.00",
-          "total_price": "2000.00"
-        },
-        {
-          "id": "833ab76f",
-          "status": "ACTIVE",
-          "start_datetime": "2026-08-31T08:00:00+00:00",
-          "num_days": 185,
-          "daily_price": "250.00",
-          "total_price": "46250.00"
-        },
-        {
-          "id": "cbf232d0",
-          "status": "RESERVED",
-          "start_datetime": "2026-09-02T08:00:00+00:00",
-          "num_days": 1,
-          "daily_price": "450.00",
-          "total_price": "450.00"
-        },
-        {
-          "id": "a184a822",
-          "status": "RESERVED",
-          "start_datetime": "2026-09-02T08:00:00+00:00",
-          "num_days": 1,
-          "daily_price": "450.00",
-          "total_price": "450.00"
-        },
-        {
-          "id": "7acc6aec",
+          "id": "SYN-CANCELLED",
           "status": "CANCELLED",
-          "start_datetime": "2026-08-25T16:27:54.738000+00:00",
-          "num_days": 1,
-          "daily_price": "250.00",
-          "total_price": "250.00"
+          "start_datetime": "2024-04-27T09:00:00+01:00",
+          "num_days": 100,
+          "daily_price": "10.00",
+          "total_price": "1000.00"
         },
         {
-          "id": "16e10721",
-          "status": "CANCELLED",
-          "start_datetime": "2026-08-26T15:17:30.536000+00:00",
-          "num_days": 224,
-          "daily_price": "250.00",
-          "total_price": "56000.00"
-        },
-        {
-          "id": "90f87394",
+          "id": "SYN-PREVIOUS-YEAR",
           "status": "COMPLETED",
-          "start_datetime": "2026-08-27T08:00:00+00:00",
-          "num_days": 6,
-          "daily_price": "250.00",
-          "total_price": "1500.00"
-        },
-        {
-          "id": "6abba093",
-          "status": "COMPLETED",
-          "start_datetime": "2026-08-27T08:00:00+00:00",
-          "num_days": 7,
-          "daily_price": "450.00",
-          "total_price": "3150.00"
-        },
-        {
-          "id": "fbaf55f8",
-          "status": "CANCELLED",
-          "start_datetime": "2026-12-23T08:00:00+00:00",
-          "num_days": 364,
-          "daily_price": "250.00",
-          "total_price": "91000.00"
+          "start_datetime": "2023-12-30T09:00:00+01:00",
+          "num_days": 4,
+          "daily_price": "110.00",
+          "total_price": "440.00"
         }
       ],
       "queries": [
         {
-          "from": "2026-09-03",
-          "to": "2026-09-04",
-          "expected_revenue": 2050.0,
-          "expected_days": 5
+          "from": "2024-05-03",
+          "to": "2024-05-04",
+          "expected_revenue": 360.0,
+          "expected_days": 4
         },
         {
-          "from": "2026-08-31",
-          "to": "2026-09-07",
-          "expected_revenue": 13050.0,
-          "expected_days": 33
+          "from": "2024-04-29",
+          "to": "2024-05-06",
+          "expected_revenue": 1540.0,
+          "expected_days": 16
         },
         {
-          "from": "2026-09-01",
-          "to": "2026-10-01",
-          "expected_revenue": 20850.0,
-          "expected_days": 49
+          "from": "2024-05-01",
+          "to": "2024-06-01",
+          "expected_revenue": 1540.0,
+          "expected_days": 17
         },
         {
-          "from": "2026-01-01",
-          "to": "2027-01-01",
-          "expected_revenue": 50150.0,
-          "expected_days": 119
+          "from": "2024-01-01",
+          "to": "2025-01-01",
+          "expected_revenue": 2200.0,
+          "expected_days": 23
         }
       ]
     },

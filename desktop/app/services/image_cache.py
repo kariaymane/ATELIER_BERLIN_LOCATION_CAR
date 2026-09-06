@@ -38,8 +38,6 @@ class ImageCache(QObject):
         from app.config import DATA_DIR
         candidate_paths = [
             DATA_DIR / clean_rel,
-            Path("/home/ayman/car-rental-system/backend/uploads/vehicles") / clean_rel,
-            Path("/home/ayman/car-rental-system/backend/uploads") / clean_rel,
             Path(img_path),
             Path(os.getcwd()) / "uploads" / "vehicles" / clean_rel,
         ]

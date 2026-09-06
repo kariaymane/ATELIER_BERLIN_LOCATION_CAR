@@ -18,9 +18,7 @@ logger = logging.getLogger(__name__)
 
 
 class WarmupWorker(QThread):
-    """Fire a /health ping so a suspended Fly machine is starting while the
-    operator is still typing their password (kills the cold-start login
-    failure — FORENSIC_ROOT_CAUSE_ANALYSIS.md §2)."""
+    """Warm the API connection while the operator enters credentials."""
 
     def run(self):
         try:
@@ -419,67 +417,6 @@ class LoginWindow(QWidget):
         self._show_error(msg)
         self._login_btn.setEnabled(True)
         self._login_btn.setText(t("login.login_button"))
-
-    def _try_local_login(self, email: str, password: str) -> bool:
-        """Helper for headless testing."""
-        self._email_input.setText(email)
-        self._password_input.setText(password)
-        self._authenticate_offline(email, password)
-        return True
-
-    def _cache_credentials(self, user_id: str = None, email: str = None, password: str = None, full_name: str = 'Admin', role: str = 'ADMIN'):
-        """Helper for test setup."""
-        user_data = {'user_id': user_id, 'email': email, 'full_name': full_name, 'role': role}
-        self._cache_credentials_locally(email, password, user_data)
-
-    def _cache_credentials_locally(self, email: str, password: str, user_data: dict):
-        """Securely store Argon2 hashed password and user metadata in SQLite for offline access."""
-        from app.database import get_local_session
-        from app.models.user import LocalUser
-        from datetime import datetime, timezone
-        import argon2
-
-        ph = argon2.PasswordHasher()
-        pwd_hash = ph.hash(password)
-
-        session = get_local_session()
-        try:
-            now = datetime.now(timezone.utc).isoformat()
-            user_id = user_data.get("user_id", "")
-            username = user_data.get("username", email.split("@")[0])
-
-            existing = session.query(LocalUser).filter(
-                (LocalUser.email == email) |
-                (LocalUser.username == username) |
-                (LocalUser.id == user_id)
-            ).first()
-
-            if existing:
-                if user_id:
-                    existing.id = user_id
-                existing.password_hash = pwd_hash
-                existing.role = user_data.get("role", existing.role)
-                existing.full_name = user_data.get("full_name", existing.full_name)
-                existing.updated_at = now
-            else:
-                local_user = LocalUser(
-                    id=user_id or f"local-{email}",
-                    email=email,
-                    username=username,
-                    password_hash=pwd_hash,
-                    full_name=user_data.get("full_name", "Utilisateur"),
-                    role=user_data.get("role", "EMPLOYEE"),
-                    is_active=True,
-                    created_at=now,
-                    updated_at=now,
-                )
-                session.add(local_user)
-            session.commit()
-        except Exception as e:
-            session.rollback()
-            logger.error("Failed to cache credentials locally: %s", e)
-        finally:
-            session.close()
 
     def _show_error(self, message: str):
         self._error_label.setText(message)

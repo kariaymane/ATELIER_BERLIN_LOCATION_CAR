@@ -27,7 +27,7 @@ async def test_check_availability_distinguishes_reasons(db_session: AsyncSession
     r = Reservation(
         id=uuid4(), vehicle_id=v_id, status="ACTIVE",
         start_datetime=now, end_datetime=now + timedelta(days=1),
-        customer_name="Test", customer_phone="123", customer_email="test@test.com",
+        customer_name="Test", customer_phone="123", customer_email="test@example.test",
         identity_card_image="", driving_license_image="", daily_price=10, num_days=1, total_price=10, deposit=0
     )
     db_session.add(r)
@@ -60,7 +60,7 @@ async def test_check_availability_distinguishes_reasons(db_session: AsyncSession
     r2 = Reservation(
         id=uuid4(), vehicle_id=v_id, status="RESERVED",
         start_datetime=now + timedelta(days=5), end_datetime=now + timedelta(days=6),
-        customer_name="Test", customer_phone="123", customer_email="test@test.com",
+        customer_name="Test", customer_phone="123", customer_email="test@example.test",
         identity_card_image="", driving_license_image="", daily_price=10, num_days=1, total_price=10, deposit=0
     )
     db_session.add(r2)

@@ -1,6 +1,5 @@
 """
-BoundaryClock — the ONE temporal mechanism that makes the desktop app
-time-reactive (Increment 3 of the 100%-live program).
+BoundaryClock schedules desktop state updates at time-derived boundaries.
 
 PROBLEM IT SOLVES
 -----------------

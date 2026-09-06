@@ -46,7 +46,6 @@
     "active_maintenances": "عمليات صيانة جارية",
     "available_fleet": "جاهزة للكراء",
     "rented_fleet": "سيارات في الإيجار",
-    "reserved_fleet": "سيارات محجوزة",
     "maintenance_fleet": "في الصيانة",
     "top_rented": "أكثر 5 سيارات طلباً للإيجار",
     "last_refresh": "آخر تحديث : {time}",

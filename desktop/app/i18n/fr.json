@@ -46,7 +46,6 @@
     "active_maintenances": "Maintenances en cours",
     "available_fleet": "Prêts à louer",
     "rented_fleet": "Véhicules en location",
-    "reserved_fleet": "Véhicules réservés",
     "maintenance_fleet": "En maintenance",
     "top_rented": "Top 5 Véhicules les plus loués",
     "last_refresh": "Dernière actualisation : {time}",

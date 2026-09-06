@@ -1,25 +1,9 @@
-"""SECURITY REGRESSION GUARD — no real credentials may enter the repository.
+"""Repository security checks for tracked source and configuration.
 
-WHY THIS EXISTS
----------------
-A live production password was committed and reached the PUBLIC GitHub remote,
-where it sat for three days before the pre-push audit found it. Nothing in the
-build could see it. This test makes that class of mistake a red build.
-
-DESIGN CONSTRAINTS
-------------------
-* It must NOT contain the compromised value (that would re-commit the secret).
-  Instead it detects the SHAPE of a real credential.
-* It scans exactly what a push would publish: ``git ls-files`` (tracked files).
-  Untracked, gitignored files such as ``.env`` are correctly out of scope.
-* Synthetic credentials are allowed and are recognised by their domain, so a
-  test may keep readable fixtures without weakening the guard.
-
-WHAT COUNTS AS SYNTHETIC
-------------------------
-An email whose domain is in ``SYNTHETIC_DOMAINS`` (RFC 2606 reserved names plus
-this project's local fixtures). A real address — gmail.com, a company domain —
-sitting next to a password literal is what got us here, and it fails.
+Only credential shapes and locations are reported. Reserved example domains
+and isolated CI fixtures are allowed; real credentials belong in deployment
+secret storage. These checks supplement, rather than replace, history scans
+and credential rotation.
 """
 from __future__ import annotations
 
@@ -133,10 +117,10 @@ def test_no_real_credentials_in_tracked_files():
                 continue
             # Report location + domain only. NEVER the password.
             findings.append(f"{_rel(p)}:{ln} — credential literal for a real domain "
-                            f"'{domain}' ({len(pw)}-char password)")
+                            "[value redacted]")
     assert not findings, (
         "HARDCODED PRODUCTION CREDENTIAL DETECTED — do not commit this.\n"
-        "Use environment variables (see scripts/reconcile_data.py::_credentials) or a\n"
+        "Use deployment environment variables or a\n"
         "synthetic address at one of: " + ", ".join(sorted(SYNTHETIC_DOMAINS)) + "\n\n"
         + "\n".join("  " + f for f in findings)
     )
@@ -158,7 +142,7 @@ def test_no_inline_database_credentials_in_tracked_files():
             if host in LOOPBACK_HOSTS:
                 continue  # ephemeral CI / compose-internal service, not reachable
             findings.append(f"{_rel(p)}:{ln} — inline DB password ({len(pw)} chars) "
-                            f"for reachable host '{host}'")
+                            "[host redacted]")
     assert not findings, (
         "INLINE DATABASE CREDENTIAL DETECTED — use ${VAR} interpolation.\n"
         + "\n".join("  " + f for f in findings)
@@ -192,7 +176,7 @@ def test_env_files_are_never_tracked():
 
 def test_guard_actually_detects_a_planted_credential(tmp_path):
     """The guard must be able to fail. A guard that cannot fail is decoration."""
-    planted = 'payload = {"email": "owner@realcompany.com", "password": "s3cr3t-value"}'
+    planted = 'payload = {"email": "operator@unlisted.example.invalid", "password": "s3cr3t-value"}'
     m = EMAIL_PW_PAIR.search(planted)
     assert m is not None, "EMAIL_PW_PAIR failed to match a planted real credential"
     assert m.group(1).rsplit("@", 1)[-1] not in SYNTHETIC_DOMAINS

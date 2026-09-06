@@ -117,8 +117,7 @@ class ApiClient:
                 return None
 
     def _do_refresh(self) -> bool:
-        """Refresh the access token via the ONE AuthClient (single refresh
-        path — see FORENSIC_ROOT_CAUSE_ANALYSIS.md §1.1)."""
+        """Refresh the access token through the shared authentication client."""
         from app.services.auth_client import AuthClient
 
         data = AuthClient(self._base_url).refresh(self._refresh_token)
