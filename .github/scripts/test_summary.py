@@ -21,8 +21,11 @@ def redact(text: str) -> str:
     return text[:1500]
 
 
-def annotate(message: str) -> None:
-    escaped = redact(message).replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+def annotate(message: str, identifier: str = "") -> None:
+    # Function/class names are source identifiers, not test parameter payloads.
+    identifier = identifier.split("[", 1)[0]
+    prefix = identifier + ": " if re.fullmatch(r"[A-Za-z0-9_.]+", identifier) else ""
+    escaped = (prefix + redact(message)).replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
     print(f"::error::{escaped}")
 
 
@@ -40,7 +43,7 @@ def report_xml(paths: list[Path]) -> int:
             if failures < 20:
                 identifier = f"{case.get('classname', '')}.{case.get('name', '')}"
                 message = problem.get("message", "") or (problem.text or "").split("\n")[0]
-                annotate(identifier + ": " + message)
+                annotate(message, identifier)
             failures += 1
     print(f"Test failures reported: {failures}")
     return failures
@@ -50,9 +53,13 @@ def report_build(path: Path) -> None:
     if not path.is_file():
         return
     lines = path.read_text(errors="replace").splitlines()
+    if not any("BUILD FAILED" in line or "FAILURE: Build failed" in line for line in lines):
+        return
     selected = []
     for index, line in enumerate(lines):
-        if line.startswith(("e: ", "Execution failed for task", "> ")):
+        if line.startswith(("e: ", "Execution failed for task")):
+            selected.append(line)
+        elif line.startswith("> ") and not line.startswith("> Task"):
             selected.append(line)
         elif line.startswith("* What went wrong:"):
             selected.extend(lines[index + 1:index + 5])

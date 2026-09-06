@@ -25,3 +25,6 @@
 **/*.pem
 **/*.key
 **/uploads/
+
+# Golden vectors are test inputs, not production application data.
+shared/*_cases.json

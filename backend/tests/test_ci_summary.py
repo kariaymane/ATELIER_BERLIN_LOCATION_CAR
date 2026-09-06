@@ -27,3 +27,18 @@ def test_summary_preserves_test_identifiers_without_printing_failure_payload(tmp
     assert "suite.case" in output
     assert "assert 1 == 2" in output
     assert "private failure payload" not in output
+
+
+def test_summary_preserves_long_source_identifiers_but_omits_parameters(capsys):
+    identifier = "suite.TestClass.test_a_descriptive_regression_name[private-parameter]"
+    summary.annotate("assert 1 == 2", identifier)
+    output = capsys.readouterr().out
+    assert "test_a_descriptive_regression_name" in output
+    assert "private-parameter" not in output
+
+
+def test_successful_build_output_is_not_reported_as_an_error(tmp_path, capsys):
+    log = tmp_path / "build.log"
+    log.write_text("> Task :app:compileDebugKotlin\nBUILD SUCCESSFUL\n")
+    summary.report_build(log)
+    assert not capsys.readouterr().out
