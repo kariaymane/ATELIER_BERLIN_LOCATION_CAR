@@ -8,7 +8,7 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw
 
-ROOT = Path("/home/ayman/car-rental-system")
+ROOT = Path(__file__).resolve().parents[1]
 LOGO = ROOT / "mobile/app/src/main/res/drawable/logo_transparent_officiel.png"
 MIPMAP = ROOT / "mobile/app/src/main/res"
 

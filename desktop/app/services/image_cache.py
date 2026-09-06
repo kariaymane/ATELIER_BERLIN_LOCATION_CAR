@@ -36,13 +36,20 @@ class ImageCache(QObject):
         # 1. Check local disk storage first (fast offline resolution)
         clean_rel = img_path.replace("/static/uploads/vehicles/", "").replace("/static/uploads/", "").lstrip("/")
         from app.config import DATA_DIR
+        # Local resolution only — the two entries that used to sit here were
+        # absolute paths into one developer's home directory. They matched
+        # nothing on any other machine, and shipped that username inside the
+        # distributed executable. An installation-relative override belongs in
+        # the environment, not in the source.
         candidate_paths = [
             DATA_DIR / clean_rel,
-            Path("/home/ayman/car-rental-system/backend/uploads/vehicles") / clean_rel,
-            Path("/home/ayman/car-rental-system/backend/uploads") / clean_rel,
             Path(img_path),
             Path(os.getcwd()) / "uploads" / "vehicles" / clean_rel,
         ]
+        local_uploads = os.environ.get("CAR_RENTAL_UPLOADS_DIR")
+        if local_uploads:
+            candidate_paths.insert(1, Path(local_uploads) / "vehicles" / clean_rel)
+            candidate_paths.insert(2, Path(local_uploads) / clean_rel)
         for p in candidate_paths:
             if p.is_file():
                 pix = QPixmap(str(p))
