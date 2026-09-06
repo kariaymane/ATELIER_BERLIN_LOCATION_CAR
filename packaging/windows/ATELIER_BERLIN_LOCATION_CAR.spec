@@ -10,9 +10,9 @@ app_analysis = Analysis(
     pathex=[str(DESKTOP), str(ROOT)],
     binaries=[],
     datas=[
-        (str(APP / "assets"), "app/assets"),
-        (str(APP / "i18n"), "app/i18n"),
-        (str(ROOT / "shared"), "shared"),
+        (str(APP / "assets/images/logo_transparent_officiel.png"), "app/assets/images"),
+        (str(APP / "i18n/*.json"), "app/i18n"),
+        (str(ROOT / "shared/*.py"), "shared"),
     ],
     hiddenimports=[
         "PySide6.QtWebSockets", "PySide6.QtNetwork", "PySide6.QtCore",

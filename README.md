@@ -45,7 +45,7 @@ docs/       Deployment guidance
 
 - Python 3.11 or newer (CI and the backend image use Python 3.12)
 - Docker Engine with Compose v2 for the local API/database stack
-- JDK 17 and the Android SDK required by `mobile/app/build.gradle.kts` for Android
+- JDK 21 and the Android SDK required by `mobile/app/build.gradle.kts` for Android
 - A graphical desktop and the platform libraries required by Qt for the desktop
   client; Windows builds must be produced on Windows
 
