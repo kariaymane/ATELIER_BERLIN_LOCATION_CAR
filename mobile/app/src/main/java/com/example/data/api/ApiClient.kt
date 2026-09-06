@@ -106,10 +106,8 @@ class ApiClient(private val tokenManager: TokenManager) {
         .addInterceptor(AuthInterceptor(tokenManager))
         .authenticator(TokenAuthenticator(tokenManager) { getService() })
         .addInterceptor(loggingInterceptor)
-        // Fly.io cold-start can take 3-15s. Use generous timeouts to avoid
-        // misinterpreting a cold-start delay as a connection failure (the same
-        // class of bug that previously caused desktop login timeouts — see
-        // FORENSIC_ROOT_CAUSE_ANALYSIS.md §2).
+        // Allow a slow server response without confusing it with a failed
+        // connection. Authentication errors are handled separately.
         .connectTimeout(20, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
         .writeTimeout(20, TimeUnit.SECONDS)

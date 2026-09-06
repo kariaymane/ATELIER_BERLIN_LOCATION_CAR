@@ -15,7 +15,7 @@ class UserCreate(BaseModel):
 
     model_config = {"json_schema_extra": {
         "example": {
-            "email": "user@carrental.local",
+            "email": "user@example.test",
             "username": "jdoe",
             "password": "SecureP@ssw0rd!",
             "full_name": "Jean Dupont",

@@ -261,7 +261,7 @@ class FleetRepository(
     val syncStatusFlow: StateFlow<SyncStatus> = _syncStatus.asStateFlow()
 
     /**
-     * TEMPORAL-CACHE COMPLETENESS INVARIANT (Increment 5).
+     * Temporal-cache completeness invariant.
      *
      * `true` once an authoritative full snapshot has been applied atomically
      * (`bootstrapAndReset` / `fullSync`) — Room then holds EVERY reservation
@@ -996,7 +996,7 @@ class FleetRepository(
     /**
      * Refreshes all entities.
      *
-     * Increment 5: a partial cache is NEVER continued as if complete.
+     * A partial cache is never treated as a complete snapshot.
      *  - never bootstrapped, OR the completeness flag is not set (fresh install
      *    / cache from a pre-Increment-5 page-capped build) ⇒ full bootstrap.
      *  - otherwise ⇒ versioned full-sync (`fullSync`): a complete atomic

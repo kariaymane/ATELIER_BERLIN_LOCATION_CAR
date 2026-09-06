@@ -129,7 +129,7 @@ class FleetDataTest {
 
     @Test
     fun testStructuralAndUnknownStatusesNeverCollapseToAvailable() {
-        // FORENSIC P2: SOLD / INACTIVE previously collapsed to DISPONIBLE, so a
+        // regression P2: SOLD / INACTIVE previously collapsed to DISPONIBLE, so a
         // sold or retired vehicle read as bookable on the phone.
         assertEquals(VehicleStatus.VENDU, VehicleStatus.fromApi("SOLD"))
         assertEquals(VehicleStatus.INACTIF, VehicleStatus.fromApi("INACTIVE"))

@@ -32,8 +32,8 @@ async def _vehicle(db_session, status="AVAILABLE", reg="LNK-1-A-1"):
 
 
 async def _client(db_session, first="Nawal", last="Bennis"):
-    c = Client(first_name=first, last_name=last, phone="+212677778888",
-               email="nawal@test.local", cin_number="CC556677")
+    c = Client(first_name=first, last_name=last, phone="+12025550121",
+               email="nawal@example.test", cin_number="TEST-CIN-005")
     db_session.add(c)
     await db_session.commit()
     await db_session.refresh(c)
@@ -46,7 +46,7 @@ def _payload(v, c=None, start=None, days=3, total=750.0):
         "vehicle_id": str(v.id),
         **({"customer_id": str(c.id)} if c else {}),
         "customer_name": f"{c.first_name} {c.last_name}" if c else "Walk-in",
-        "customer_phone": (c.phone if c else "+212600000001"),
+        "customer_phone": (c.phone if c else "+12025550101"),
         "start_datetime": start.isoformat(),
         "end_datetime": (start + timedelta(days=days)).isoformat(),
         "daily_price": 250.0, "num_days": days, "total_price": total,
@@ -84,7 +84,7 @@ class TestReservationClientLinking:
         self, client: AsyncClient, admin_token, db_session
     ):
         v = await _vehicle(db_session, reg="LNK-3-C-3")
-        c = await _client(db_session, "Omar", "Chraibi")
+        c = await _client(db_session, "CustomerN", "ExampleC")
         resp = await client.post("/api/v1/rentals/", json=_payload(v, c),
                                  headers={"Authorization": f"Bearer {admin_token}"})
         assert resp.status_code == 201

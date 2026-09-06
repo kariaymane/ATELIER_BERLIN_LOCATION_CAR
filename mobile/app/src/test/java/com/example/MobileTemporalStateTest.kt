@@ -275,7 +275,7 @@ class MobileTemporalStateTest {
         }
 
         val newStatus = emissions.last()
-        println("=== MOBILE FORENSIC TEMPORAL TRANSITION ===")
+        println("=== MOBILE regression TEMPORAL TRANSITION ===")
         println("boundary timestamp : $endIso")
         println("old status         : $oldStatus")
         println("new status         : $newStatus")

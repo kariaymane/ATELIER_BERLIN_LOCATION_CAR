@@ -1,4 +1,4 @@
-"""Increment 3 — temporal DomainStore + the forensic proof.
+"""Increment 3 — temporal DomainStore + the regression proof.
 
 The decisive proof: THE STATE CHANGES BECAUSE TIME PASSED, with no user action,
 no refresh, no tab switch, no sync, and no database mutation.
@@ -233,8 +233,8 @@ def test_midnight_recompute_that_changes_nothing_is_silent():
     assert store.revision == rev
 
 
-# ── THE FORENSIC PROOF — controlled clock, manual scheduler, nothing touched ──
-def test_forensic_state_changes_because_time_passed(qapp, request):
+# ── THE regression PROOF — controlled clock, manual scheduler, nothing touched ──
+def test_regression_state_changes_because_time_passed(qapp, request):
     """Seed a reservation ending 4s after T0. Observe RENTED. Do NOTHING —
     no refresh, no tab switch, no sync, no mutation, no UI interaction. Advance
     the clock past the boundary and let the BoundaryClock's scheduled callback
@@ -272,8 +272,8 @@ def test_forensic_state_changes_because_time_passed(qapp, request):
     end = T0 + timedelta(seconds=4)
 
     s = get_local_session()
-    _v(s, "veh-forensic")
-    _r(s, "res-forensic", "veh-forensic", T0 - timedelta(hours=1), end)  # status ACTIVE
+    _v(s, "veh-regression")
+    _r(s, "res-regression", "veh-regression", T0 - timedelta(hours=1), end)  # status ACTIVE
     s.commit(); s.close()
 
     reset_domain_store(now_fn=now_fn)  # the singleton store runs on the fake clock
@@ -310,8 +310,8 @@ def test_forensic_state_changes_because_time_passed(qapp, request):
 
     # ── T-before (clock == T0 — deterministic) ────────────────────────
     old_revision = store.revision
-    assert store.snapshot.effective_status("veh-forensic") == "RENTED"
-    assert {v["id"]: v["status"] for v in w._vehicle_list._vehicles_data}["veh-forensic"] == "RENTED"
+    assert store.snapshot.effective_status("veh-regression") == "RENTED"
+    assert {v["id"]: v["status"] for v in w._vehicle_list._vehicles_data}["veh-regression"] == "RENTED"
     assert w._dashboard._overview_data["rented"] == 1
     boundary = store.snapshot.next_boundary
     assert boundary == end
@@ -330,9 +330,9 @@ def test_forensic_state_changes_because_time_passed(qapp, request):
 
     # ── T-after ───────────────────────────────────────────────────────
     new_revision = store.revision
-    new_status = store.snapshot.effective_status("veh-forensic")
+    new_status = store.snapshot.effective_status("veh-regression")
 
-    print("\n=== FORENSIC TEMPORAL TRANSITION ===")
+    print("\n=== regression TEMPORAL TRANSITION ===")
     print(f"old revision       : {old_revision}")
     print(f"boundary timestamp : {boundary.isoformat()}")
     print(f"new revision       : {new_revision}")
@@ -346,7 +346,7 @@ def test_forensic_state_changes_because_time_passed(qapp, request):
     assert notifications == [new_revision], "exactly one notification"
 
     # every subscribed view converged on the SAME truth, with no user action
-    assert {v["id"]: v["status"] for v in w._vehicle_list._vehicles_data}["veh-forensic"] == "AVAILABLE"
+    assert {v["id"]: v["status"] for v in w._vehicle_list._vehicles_data}["veh-regression"] == "AVAILABLE"
     assert w._dashboard._overview_data["rented"] == 0
     assert w._dashboard._overview_data["available"] == 1
     assert w._dashboard._overview_data == dict(w._dashboard._overview_data) | {
@@ -355,6 +355,6 @@ def test_forensic_state_changes_because_time_passed(qapp, request):
     # the DB row was never touched
     s = get_local_session()
     try:
-        assert s.query(LocalReservation).filter_by(id="res-forensic").one().status == "ACTIVE"
+        assert s.query(LocalReservation).filter_by(id="res-regression").one().status == "ACTIVE"
     finally:
         s.close()

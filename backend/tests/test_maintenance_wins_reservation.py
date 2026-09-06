@@ -35,7 +35,7 @@ async def _mk_reservation(db, v_id, status, start, end):
     r = Reservation(
         id=uuid4(), vehicle_id=v_id, status=status,
         start_datetime=start, end_datetime=end,
-        customer_name="Test", customer_phone="12345", customer_email="t@t.com",
+        customer_name="Test", customer_phone="12345", customer_email="t@example.test",
         daily_price=10, num_days=1, total_price=10, deposit=0,
     )
     db.add(r)
@@ -174,7 +174,7 @@ async def test_create_maintenance_api_no_longer_409_and_cancels(client, db_sessi
     assert row.status == "CANCELLED"
     assert row.cancellation_reason == "MAINTENANCE"
 
-    # FORENSIC P0-B: a FUTURE-dated maintenance (start = NOW + 2 days) must NOT
+    # regression P0-B: a FUTURE-dated maintenance (start = NOW + 2 days) must NOT
     # stick the raw vehicle.status to MAINTENANCE. "Maintenance wins" still
     # cancels the overlapping reservation above (interval rule), but the raw
     # column stays AVAILABLE so it cannot contradict the canonical effective

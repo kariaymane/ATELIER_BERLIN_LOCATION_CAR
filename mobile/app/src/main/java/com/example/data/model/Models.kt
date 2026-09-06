@@ -12,7 +12,7 @@ enum class VehicleStatus(val label: String, val apiValue: String) {
         /**
          * Canonical backend/shared status token -> UI enum. STRUCTURAL states
          * (SOLD / INACTIVE) must NOT collapse to DISPONIBLE — that let a sold
-         * or retired vehicle read as bookable (forensic P2). An absent value
+         * or retired vehicle read as bookable (regression P2). An absent value
          * follows the backend default (AVAILABLE); an unrecognised token is
          * treated as INACTIF so it can never silently present as available.
          */

@@ -15,20 +15,9 @@ class Settings(BaseSettings):
         default="", description="Sync PostgreSQL connection string (for Alembic)"
     )
 
-    # ── Database connection pool ───────────────────────────────────────────
-    # Sized for the PRODUCTION database VM, not for raw throughput. The hard
-    # upper bound on server-side PostgreSQL connections opened by this API is:
-    #
-    #     (DB_POOL_SIZE + DB_MAX_OVERFLOW) * <number of uvicorn worker processes>
-    #
-    # The container runs a SINGLE uvicorn worker (docker/Dockerfile.backend has
-    # no --workers flag), so the real ceiling is DB_POOL_SIZE + DB_MAX_OVERFLOW.
-    # That ceiling must stay well below the database's own `max_connections`
-    # minus the slots reserved for repmgr / the monitor / `alembic upgrade` /
-    # a manual psql session. The defaults below (10 max) are safe for a small
-    # Fly `postgres-flex` node (256 MB–1 GB). An over-large pool on a small DB
-    # is an OOM / "too many connections" hazard, which is exactly how the
-    # production database fell over. Override per-environment via env vars.
+    # Each API worker owns a pool. Budget (size + overflow) * worker_count
+    # below the database connection limit, leaving headroom for migrations
+    # and administrative connections. Override these defaults per deployment.
     DB_POOL_SIZE: int = Field(default=5, ge=1, le=50,
                               description="Persistent connections kept open per worker")
     DB_MAX_OVERFLOW: int = Field(default=5, ge=0, le=50,

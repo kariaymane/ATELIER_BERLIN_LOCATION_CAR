@@ -2,8 +2,7 @@
 
 `DomainStore` is the single reactive in-memory projection of the offline
 SQLite database. Views subscribe to it; they never derive a competing global
-state. `BoundaryClock` makes it time-reactive. See
-`MASTER_100_PERCENT_LIVE_ARCHITECTURE_REPORT.md` (Increments 2 & 3).
+state. `BoundaryClock` schedules updates at time-derived boundaries.
 """
 from app.state.domain_store import (
     DomainStore,

@@ -43,8 +43,8 @@ def env(qapp):
         daily_rental_price=250.0, status="AVAILABLE",
         created_at=now, updated_at=now, version=1))
     session.merge(LocalClient(
-        id="e2e-cli", first_name="Salma", last_name="Alaoui",
-        phone="+212655000111", email="salma@test.local", cin_number="EE112233",
+        id="e2e-cli", first_name="CustomerO", last_name="ExampleA",
+        phone="+12025550119", email="customero@example.test", cin_number="TEST-CIN-006",
         status="ACTIVE", created_at=now, updated_at=now, version=1))
     session.commit()
     session.close()
@@ -84,7 +84,7 @@ def test_existing_client_selection_links_reservation(qapp, env):
     assert dlg._client_combo.count() >= 2, "client selector must list existing clients"
     dlg._client_combo.setCurrentIndex(1)
     assert dlg._selected_client_id == "e2e-cli"
-    assert "Salma" in dlg._customer_name.text(), "existing client info must prefill"
+    assert "CustomerO" in dlg._customer_name.text(), "existing client info must prefill"
 
     dlg._start_dt.setDateTime(_qdt(_future(5)))
     dlg._end_dt.setDateTime(_qdt(_future(8)))
@@ -101,7 +101,7 @@ def test_existing_client_selection_links_reservation(qapp, env):
     res = session.query(LocalReservation).filter_by(customer_id="e2e-cli").first()
     assert res is not None
     assert res.customer_id == "e2e-cli"
-    assert res.customer_name.startswith("Salma")
+    assert res.customer_name.startswith("CustomerO")
     v = session.query(LocalVehicle).filter_by(id="e2e-veh").first()
     assert v.status == "AVAILABLE", "vehicle.status must NOT flip to RESERVED"
     session.close()
@@ -118,7 +118,7 @@ def test_new_client_created_from_typed_info(qapp, env):
     dlg._client_combo.setCurrentIndex(0)  # "— Nouveau client —"
     assert dlg._selected_client_id is None
     dlg._customer_name.setText("Youssef El Amrani")
-    dlg._customer_phone.setText("+212611999888")
+    dlg._customer_phone.setText("+12025550117")
     dlg._start_dt.setDateTime(_qdt(_future(20)))
     dlg._end_dt.setDateTime(_qdt(_future(22)))
     from app.ui.reservations.reservation_list import ReservationWidget
@@ -135,7 +135,7 @@ def test_new_client_created_from_typed_info(qapp, env):
     assert cli is not None
     assert "Youssef" in cli.first_name or "Youssef" in cli.last_name or \
            cli.first_name + " " + cli.last_name == "Youssef El Amrani"
-    assert cli.phone == "+212611999888"
+    assert cli.phone == "+12025550117"
     session.close()
     dlg.close()
 
@@ -159,7 +159,7 @@ def test_real_overlap_rejected_adjacent_allowed(qapp, env, monkeypatch):
     # Existing: day+5 -> day+8
     session.merge(LocalReservation(
         id="ovr-exist", vehicle_id="e2e-veh", customer_id="e2e-cli",
-        customer_name="Salma Alaoui", customer_phone="+212655000111",
+        customer_name="CustomerO ExampleA", customer_phone="+12025550119",
         start_datetime=_future(5), end_datetime=_future(8),
         daily_price=250.0, num_days=3, total_price=750.0,
         deposit=0, status="RESERVED", payment_status="PENDING",
@@ -167,7 +167,7 @@ def test_real_overlap_rejected_adjacent_allowed(qapp, env, monkeypatch):
     # Cancelled overlapping block — must be ignored
     session.merge(LocalReservation(
         id="ovr-cancelled", vehicle_id="e2e-veh", customer_id="e2e-cli",
-        customer_name="Salma Alaoui",
+        customer_name="CustomerO ExampleA",
         start_datetime=_future(5), end_datetime=_future(8),
         daily_price=250.0, num_days=3, total_price=750.0,
         deposit=0, status="CANCELLED", payment_status="PENDING",
@@ -177,7 +177,7 @@ def test_real_overlap_rejected_adjacent_allowed(qapp, env, monkeypatch):
 
     # 1. REAL overlap (day+6 -> day+9) must be rejected
     data = {"vehicle_id": "e2e-veh", "customer_id": "e2e-cli",
-            "customer_name": "Salma Alaoui",
+            "customer_name": "CustomerO ExampleA",
             "start_datetime": _future(6), "end_datetime": _future(9)}
     widget._create_reservation_record(data)
     assert len(warnings) == 1, "real overlap must show the rejection warning"
@@ -188,7 +188,7 @@ def test_real_overlap_rejected_adjacent_allowed(qapp, env, monkeypatch):
 
     # 2. ADJACENT (day+8 -> day+10, starts exactly at existing end) allowed
     data2 = {"vehicle_id": "e2e-veh", "customer_id": "e2e-cli",
-             "customer_name": "Salma Alaoui",
+             "customer_name": "CustomerO ExampleA",
              "start_datetime": _future(8), "end_datetime": _future(10)}
     widget._create_reservation_record(data2)
     session = get_local_session()
@@ -208,7 +208,7 @@ def test_cancelled_reservation_does_not_block(qapp, env):
     now = datetime.now(timezone.utc).isoformat()
     session.merge(LocalReservation(
         id="cxl-1", vehicle_id="e2e-veh", customer_id="e2e-cli",
-        customer_name="Salma Alaoui",
+        customer_name="CustomerO ExampleA",
         start_datetime=_future(40), end_datetime=_future(43),
         daily_price=250.0, num_days=3, total_price=750.0,
         deposit=0, status="CANCELLED", payment_status="PENDING",
@@ -216,7 +216,7 @@ def test_cancelled_reservation_does_not_block(qapp, env):
     session.commit(); session.close()
 
     data = {"vehicle_id": "e2e-veh", "customer_id": "e2e-cli",
-            "customer_name": "Salma Alaoui",
+            "customer_name": "CustomerO ExampleA",
             "start_datetime": _future(41), "end_datetime": _future(42)}
     widget._create_reservation_record(data)
     session = get_local_session()

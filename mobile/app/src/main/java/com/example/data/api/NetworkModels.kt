@@ -31,7 +31,7 @@ data class UserDto(
 @JsonClass(generateAdapter = true)
 data class LoginResponseDto(
     // Canonical backend contract (backend/app/schemas/auth.py::LoginResponse):
-    // flat fields only, NO nested `user` object. FORENSIC_ROOT_CAUSE_ANALYSIS.md §3.
+    // Flat fields only; the response does not contain a nested user object.
     @Json(name = "access_token") val accessToken: String,
     @Json(name = "refresh_token") val refreshToken: String? = null,
     @Json(name = "token_type") val tokenType: String = "bearer",

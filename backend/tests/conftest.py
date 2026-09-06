@@ -28,7 +28,7 @@ if env_url and ("production" in env_url.lower() or "prod" in env_url.lower() or 
 # so the prod code path — TIMESTAMP(timezone=True) aware round-trips, tstzrange
 # GIST exclusion constraints, NUMERIC summation — is actually exercised. Locally
 # and by default, the fast in-memory SQLite path is used.
-# (FORENSIC_ROOT_CAUSE_ANALYSIS.md §1.2)
+# (PostgreSQL integration coverage)
 _test_db = os.environ.get("TEST_DATABASE_URL", "").strip()
 if _test_db and ("production" in _test_db.lower() or "fly" in _test_db.lower() or "supabase" in _test_db.lower()):
     raise RuntimeError("DANGER: TEST_DATABASE_URL points at production. Aborted.")
@@ -194,7 +194,7 @@ async def admin_user(db_session: AsyncSession) -> User:
     """Create an admin user for testing."""
     user = User(
         id=uuid4(),
-        email="testadmin@test.com",
+        email="testadmin@example.test",
         username="testadmin",
         password_hash=hash_password("TestAdmin123!"),
         full_name="Test Admin",
@@ -212,7 +212,7 @@ async def employee_user(db_session: AsyncSession) -> User:
     """Create an employee user for testing."""
     user = User(
         id=uuid4(),
-        email="testemp@test.com",
+        email="testemp@example.test",
         username="testemp",
         password_hash=hash_password("TestEmp123!"),
         full_name="Test Employee",

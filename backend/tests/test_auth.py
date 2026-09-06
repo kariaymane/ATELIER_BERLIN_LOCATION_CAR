@@ -13,7 +13,7 @@ class TestLogin:
         """Test successful login returns tokens."""
         response = await client.post(
             "/api/v1/auth/login",
-            json={"email": "testadmin@test.com", "password": "TestAdmin123!"},
+            json={"email": "testadmin@example.test", "password": "TestAdmin123!"},
         )
         assert response.status_code == 200
         data = response.json()
@@ -26,7 +26,7 @@ class TestLogin:
         """Test login with wrong password returns 401."""
         response = await client.post(
             "/api/v1/auth/login",
-            json={"email": "testadmin@test.com", "password": "WrongPassword!"},
+            json={"email": "testadmin@example.test", "password": "WrongPassword!"},
         )
         assert response.status_code == 401
 
@@ -34,7 +34,7 @@ class TestLogin:
         """Test login with nonexistent email returns 401."""
         response = await client.post(
             "/api/v1/auth/login",
-            json={"email": "nobody@test.com", "password": "SomePassword!"},
+            json={"email": "nobody@example.test", "password": "SomePassword!"},
         )
         assert response.status_code == 401
 
@@ -42,7 +42,7 @@ class TestLogin:
         """Test login with short password fails validation."""
         response = await client.post(
             "/api/v1/auth/login",
-            json={"email": "test@test.com", "password": "short"},
+            json={"email": "test@example.test", "password": "short"},
         )
         assert response.status_code == 422  # Pydantic validation
 
@@ -69,7 +69,7 @@ class TestTokenRefresh:
         # Login first
         login_resp = await client.post(
             "/api/v1/auth/login",
-            json={"email": "testadmin@test.com", "password": "TestAdmin123!"},
+            json={"email": "testadmin@example.test", "password": "TestAdmin123!"},
         )
         assert login_resp.status_code == 200
         refresh_token = login_resp.json()["refresh_token"]
@@ -94,7 +94,7 @@ class TestLogout:
         # Login
         login_resp = await client.post(
             "/api/v1/auth/login",
-            json={"email": "testadmin@test.com", "password": "TestAdmin123!"},
+            json={"email": "testadmin@example.test", "password": "TestAdmin123!"},
         )
         data = login_resp.json()
         access_token = data["access_token"]

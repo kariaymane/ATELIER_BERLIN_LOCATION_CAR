@@ -33,8 +33,8 @@ def seeded_db():
     now = datetime.now(timezone.utc).isoformat()
 
     session.merge(LocalClient(
-        id="cli-ui-1", first_name="Karim", last_name="Idrissi",
-        phone="+212611223344", email="karim@test.local", cin_number="EE777888",
+        id="cli-ui-1", first_name="CustomerK", last_name="ExampleE",
+        phone="+12025550116", email="customerk@example.test", cin_number="TEST-CIN-007",
         status="ACTIVE", created_at=now, updated_at=now, version=1,
     ))
     session.merge(LocalVehicle(
@@ -56,7 +56,7 @@ def seeded_db():
         start_dt = datetime.fromisoformat(start)
         session.merge(LocalReservation(
             id=f"res-ui-{i}", vehicle_id="veh-a",
-            customer_name="Karim Idrissi", customer_phone="+212611223344",
+            customer_name="CustomerK ExampleE", customer_phone="+12025550116",
             start_datetime=start,
             end_datetime=(start_dt + timedelta(days=days)).isoformat(),
             daily_price=100.0, num_days=days, total_price=total,
@@ -70,9 +70,9 @@ def seeded_db():
 
 def _client_row():
     return {
-        "id": "cli-ui-1", "first_name": "Karim", "last_name": "Idrissi",
-        "phone": "+212611223344", "email": "karim@test.local",
-        "cin_number": "EE777888", "status": "ACTIVE",
+        "id": "cli-ui-1", "first_name": "CustomerK", "last_name": "ExampleE",
+        "phone": "+12025550116", "email": "customerk@example.test",
+        "cin_number": "TEST-CIN-007", "status": "ACTIVE",
     }
 
 
@@ -82,10 +82,10 @@ def test_clients_list_renders_and_filters(qapp, seeded_db):
     w.refresh_data()
     assert w._table.rowCount() >= 1
     # Search by CIN narrows to matching client
-    w._search.setText("EE777888")
+    w._search.setText("TEST-CIN-007")
     assert w._table.rowCount() == 1
     found_item = w._table.item(0, 0)
-    assert "Karim" in found_item.text()
+    assert "CustomerK" in found_item.text()
 
 
 def test_client_details_offline_matches_canonical_rule(qapp, seeded_db):

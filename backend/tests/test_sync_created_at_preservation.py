@@ -46,11 +46,11 @@ async def test_process_pull_includes_created_at(db_session, admin_user):
     cid = uuid4()
     c = Client(
         id=cid,
-        first_name="John",
-        last_name="Doe",
-        phone="+212600000000",
+        first_name="CustomerJ",
+        last_name="ExampleD",
+        phone="+12025550100",
         email=f"client-{uuid4().hex[:6]}@example.com",
-        cin_number="AB123456",
+        cin_number="TEST-CIN-002",
         created_at=now,
     )
     db_session.add(c)
@@ -59,8 +59,8 @@ async def test_process_pull_includes_created_at(db_session, admin_user):
     r = Reservation(
         id=rid,
         vehicle_id=vid,
-        customer_name="John Doe",
-        customer_phone="+212600000000",
+        customer_name="CustomerJ ExampleD",
+        customer_phone="+12025550100",
         start_datetime=now,
         end_datetime=now + timedelta(days=3),
         daily_price=500.0,

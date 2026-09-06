@@ -28,8 +28,8 @@ def seeded_client():
     s = get_local_session()
     now = datetime.now(timezone.utc).isoformat()
     s.merge(LocalClient(
-        id="cli-doc-1", first_name="Nadia", last_name="Alaoui",
-        phone="+212600000000", cin_number="AB123456", status="ACTIVE",
+        id="cli-doc-1", first_name="CustomerM", last_name="ExampleA",
+        phone="+12025550100", cin_number="TEST-CIN-002", status="ACTIVE",
         identity_card_image="/static/uploads/clients/cin_front.jpg",
         identity_card_image_back="/static/uploads/clients/cin_back.jpg",
         driving_license_image="/static/uploads/clients/lic_front.jpg",
@@ -37,7 +37,7 @@ def seeded_client():
     ))
     s.commit()
     s.close()
-    return {"id": "cli-doc-1", "first_name": "Nadia", "last_name": "Alaoui"}
+    return {"id": "cli-doc-1", "first_name": "CustomerM", "last_name": "ExampleA"}
 
 
 def _pixmap(w, h, color="#336699"):

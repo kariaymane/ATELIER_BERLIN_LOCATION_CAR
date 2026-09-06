@@ -1,5 +1,5 @@
 """
-Regression & Forensic tests for Refresh Pipeline and Data Integrity.
+Regression & regression tests for Refresh Pipeline and Data Integrity.
 Verifies that:
 - Refresh NEVER corrupts data, changes truth, or causes flicker to empty/stale states.
 - Rapid repeated clicks coalesce without dropping requests or racing.
@@ -41,10 +41,10 @@ def _make_vehicle(vid, status="AVAILABLE", registration=None):
         created_at=now_iso, updated_at=now_iso, version=1)
 
 
-def _make_client(cid, first="Ali", last="Bennani"):
+def _make_client(cid, first="CustomerA", last="ExampleB"):
     now_iso = datetime.now(timezone.utc).isoformat()
     return LocalClient(
-        id=cid, first_name=first, last_name=last, phone="0611223344",
+        id=cid, first_name=first, last_name=last, phone="+12025550126",
         status="ACTIVE", created_at=now_iso, updated_at=now_iso, version=1)
 
 

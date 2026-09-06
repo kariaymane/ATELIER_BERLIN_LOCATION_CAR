@@ -1,18 +1,8 @@
-"""
-Database connection-pool sizing.
+"""Connection-pool limits and environment overrides.
 
-Root cause this guards: the async engine was hard-coded to
-`pool_size=20, max_overflow=10` — up to 30 server-side PostgreSQL connections
-from a single worker. On the small production `postgres-flex` VM that is an
-OOM / "too many connections" hazard and is the most likely trigger for the
-production database crash.
-
-Contract:
-  * pool values are explicit + env-configurable (Settings.DB_POOL_*)
-  * the default ceiling (pool_size + max_overflow) is small and <= the hard cap
-  * init_engine REFUSES to start if the configured pool exceeds the hard cap
-    (loud failure beats a silently exhausted database)
-  * the ceiling is per-worker; the container runs one worker
+Each API worker must stay within its configured connection budget. These tests
+exercise pool sizing and reject configurations that exceed the hard cap without
+opening a network connection.
 """
 import pytest
 
@@ -90,3 +80,16 @@ def _restore_engine():
     yield
     dbm._engine = saved_engine
     dbm._async_session_factory = saved_factory
+
+
+def test_engine_does_not_override_driver_tls_settings(monkeypatch):
+    from unittest.mock import MagicMock
+    import app.database as database
+
+    engine = MagicMock()
+    factory = MagicMock(return_value=engine)
+    monkeypatch.setattr(database, "create_async_engine", factory)
+    monkeypatch.setattr(database, "async_sessionmaker", MagicMock())
+    settings = _settings()
+    database.init_engine(settings.DATABASE_URL, settings=settings)
+    assert "ssl" not in factory.call_args.kwargs.get("connect_args", {})

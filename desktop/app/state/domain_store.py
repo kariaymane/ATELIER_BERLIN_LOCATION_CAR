@@ -2,18 +2,9 @@
 DomainStore — the ONE canonical in-memory projection of the desktop's offline
 domain state (vehicles, reservations, maintenance) above local SQLite.
 
-WHY THIS EXISTS (Increment 2 of the 100%-live program)
-------------------------------------------------------
-Before: every view opened its own SQLite session, ran its own query, derived
-its own idea of "fleet status", and was refreshed by an argument-less
-``data_refreshed`` pulse that MainWindow fanned out by hand. A missed or
-throwing callback left a tab silently stale; two views could disagree.
-
-Now: exactly one component (this one) holds the authoritative in-memory
-snapshot. It is rebuilt atomically from a single SQLite read, carries a
-monotonic ``revision``, and is published to every subscriber with per-subscriber
-exception isolation. Views render *from the snapshot*; they do not invent a
-competing global state.
+The snapshot is rebuilt atomically from one SQLite read, carries a monotonic
+revision, and notifies subscribers with per-subscriber exception isolation.
+Views render from the snapshot rather than deriving competing global state.
 
 CONTRACT
 --------
@@ -39,10 +30,10 @@ CONTRACT
                                       canonical state actually changed;
                                       otherwise a no-op. Returns True/False.
                                       This is the temporal-transition path
-                                      driven by ``BoundaryClock`` (Increment 3).
+                                      driven by ``BoundaryClock``.
 
 The effective-status derivation is delegated to ``app.utils.fleet_status``
-(the Increment-1 canonical spec) — this module never re-implements it. The
+— this module never re-implements it. The
 session build and the in-memory temporal recompute call the SAME pure core
 (`compute_fleet_sets_rows` / `effective_statuses_rows`).
 """

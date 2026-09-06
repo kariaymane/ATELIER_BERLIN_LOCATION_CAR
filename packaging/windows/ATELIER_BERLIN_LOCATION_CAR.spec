@@ -1,45 +1,48 @@
 # -*- mode: python ; coding: utf-8 -*-
+from pathlib import Path
 
+ROOT = Path(SPECPATH).resolve().parents[1]
+DESKTOP = ROOT / "desktop"
+APP = DESKTOP / "app"
 
-a = Analysis(
-    ['../../desktop/app/main.py'],
-    pathex=[],
+app_analysis = Analysis(
+    [str(APP / "main.py")],
+    pathex=[str(DESKTOP), str(ROOT)],
     binaries=[],
-    datas=[('../../desktop/app/assets', 'app/assets'), ('../../desktop/app/i18n', 'app/i18n'), ('../../shared', 'shared')],
-    hiddenimports=['PySide6.QtWebSockets', 'PySide6.QtNetwork', 'PySide6.QtCore', 'PySide6.QtGui', 'PySide6.QtWidgets', 'tzdata'],
+    datas=[
+        (str(APP / "assets"), "app/assets"),
+        (str(APP / "i18n"), "app/i18n"),
+        (str(ROOT / "shared"), "shared"),
+    ],
+    hiddenimports=[
+        "PySide6.QtWebSockets", "PySide6.QtNetwork", "PySide6.QtCore",
+        "PySide6.QtGui", "PySide6.QtWidgets", "sqlalchemy.dialects.sqlite", "tzdata",
+    ],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    excludes=["pytest", "tkinter"],
     noarchive=False,
     optimize=0,
 )
-pyz = PYZ(a.pure)
-
+pyz = PYZ(app_analysis.pure)
 exe = EXE(
     pyz,
-    a.scripts,
+    app_analysis.scripts,
     [],
     exclude_binaries=True,
-    name='ATELIER_BERLIN_LOCATION_CAR',
+    name="ATELIER_BERLIN_LOCATION_CAR",
     debug=False,
-    bootloader_ignore_signals=False,
     strip=False,
-    upx=True,
+    upx=False,
     console=False,
-    disable_windowed_traceback=False,
-    argv_emulation=False,
-    target_arch=None,
-    codesign_identity=None,
-    entitlements_file=None,
-    icon=['../../desktop/app/assets/images/logo_transparent_officiel.png'],
+    icon=[str(APP / "assets/images/logo_transparent_officiel.png")],
 )
 coll = COLLECT(
     exe,
-    a.binaries,
-    a.datas,
+    app_analysis.binaries,
+    app_analysis.datas,
     strip=False,
-    upx=True,
-    upx_exclude=[],
-    name='ATELIER_BERLIN_LOCATION_CAR',
+    upx=False,
+    name="ATELIER_BERLIN_LOCATION_CAR",
 )

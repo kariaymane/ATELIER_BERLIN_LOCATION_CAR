@@ -73,9 +73,8 @@ class DashboardFetcher(QThread):
             )
             if resp_stats.status_code == 200:
                 data = resp_stats.json()
-                # Pass the WHOLE canonical payload through (no key cherry-pick
-                # that silently drops year_* — FORENSIC_ROOT_CAUSE_ANALYSIS.md
-                # §4 C1). Add the aliases the widget also accepts.
+                # Preserve all canonical fields, including annual metrics,
+                # and supply the aliases accepted by the dashboard widget.
                 overview = dict(data)
                 overview.setdefault("active_maintenances", data.get("active_maintenance_tickets", 0))
                 overview.setdefault("active_maintenance_tickets", data.get("active_maintenances", 0))
@@ -167,12 +166,12 @@ class MainWindow(QMainWindow):
         self._api.set_tokens(self._access_token, self._refresh_token)
 
         # Canonical local domain-state layer. Every main view renders FROM this
-        # snapshot; none derives a competing global state. (Increment 2)
+        # snapshot; none derives a competing global state.
         self._store = get_domain_store()
         self._store_unsub = self._store.subscribe(self._on_domain_changed)
 
         # ONE temporal mechanism: recompute + republish at each reservation /
-        # maintenance interval boundary, with no user action. (Increment 3)
+        # maintenance interval boundary, with no user action.
         self._boundary_clock = BoundaryClock(self._store)
 
         self._setup_ui()

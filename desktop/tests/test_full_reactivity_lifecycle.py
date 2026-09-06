@@ -56,7 +56,7 @@ def _effective_status(window, monkeypatch):
 def _res_payload(start, end):
     return {
         "vehicle_id": VID, "customer_id": None, "customer_name": "Client Cycle",
-        "customer_phone": "0600000000", "customer_email": "", "customer_cin": "",
+        "customer_phone": "+12025550124", "customer_email": "", "customer_cin": "",
         "identity_card_image": "", "driving_license_image": "",
         "start_datetime": start.isoformat(), "end_datetime": end.isoformat(),
         "daily_price": 200.0, "num_days": 4, "total_price": 800.0, "deposit": 0.0,

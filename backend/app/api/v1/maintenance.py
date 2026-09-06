@@ -216,7 +216,7 @@ async def create_maintenance(
     # Canonical effective status is always derived from the maintenance
     # SCHEDULE (app.services.fleet_status, half-open [start, end)). A
     # future-dated ticket must NOT flip the raw column — doing so created a
-    # second, contradictory status authority (forensic P0-B): the Vehicles
+    # second, contradictory status authority (regression P0-B): the Vehicles
     # list / Dashboard showed AVAILABLE (derived) while the detail view showed
     # MAINTENANCE (raw). When the window opens the interval rule flips every
     # effective-status observer automatically; nothing needs the raw flag.

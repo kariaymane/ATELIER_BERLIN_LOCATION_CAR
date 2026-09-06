@@ -32,8 +32,8 @@ class AuthRepositoryTest {
         tokenManager.saveToken("test_token_12345")
         assertEquals("test_token_12345", tokenManager.getToken())
 
-        tokenManager.saveUser("u1", "admin@carrental.com", "Admin Test", "ADMIN")
-        assertEquals("admin@carrental.com", tokenManager.getUserEmail())
+        tokenManager.saveUser("u1", "admin@example.test", "Admin Test", "ADMIN")
+        assertEquals("admin@example.test", tokenManager.getUserEmail())
         assertEquals("Admin Test", tokenManager.getUserName())
         assertEquals("ADMIN", tokenManager.getUserRole())
 
@@ -45,25 +45,25 @@ class AuthRepositoryTest {
     fun testBaseUrlConfiguration() {
         assertEquals(TokenManager.DEFAULT_BASE_URL, tokenManager.getBaseUrl())
 
-        tokenManager.saveBaseUrl("http://192.168.1.50:8000/api/v1")
-        assertEquals("http://192.168.1.50:8000/api/v1/", tokenManager.getBaseUrl())
-        assertEquals("http://192.168.1.50:8000", tokenManager.getRootUrl())
+        tokenManager.saveBaseUrl("https://api.example.test/api/v1")
+        assertEquals("https://api.example.test/api/v1/", tokenManager.getBaseUrl())
+        assertEquals("https://api.example.test", tokenManager.getRootUrl())
     }
 
     @Test
     fun testUserSessionModel() {
         val session = UserSession(
             id = "user_123",
-            email = "jean.dupont@softexecutive.com",
-            name = "Jean Dupont",
+            email = "customeri.examplej@example.test",
+            name = "CustomerI ExampleJ",
             role = "MANAGER",
             token = "jwt_token_xyz",
-            initials = "JD"
+            initials = "CE"
         )
 
         assertEquals("user_123", session.id)
-        assertEquals("Jean Dupont", session.name)
-        assertEquals("JD", session.initials)
+        assertEquals("CustomerI ExampleJ", session.name)
+        assertEquals("CE", session.initials)
         assertEquals("MANAGER", session.role)
     }
 }

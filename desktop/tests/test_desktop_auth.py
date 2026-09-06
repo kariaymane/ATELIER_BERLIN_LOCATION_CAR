@@ -3,7 +3,7 @@ from app.services.api_client import ApiClient
 
 
 def test_api_client_token_management():
-    client = ApiClient(base_url="https://car-rental-system.fly.dev")
+    client = ApiClient(base_url="https://api.example.test")
     assert client.is_online is False
     assert client._access_token == ""
 

@@ -191,7 +191,7 @@ fun DashboardScreen(
 
             Spacer(modifier = Modifier.height(14.dp))
 
-            // 2x2 Grid of Fleet Count Cards matching screenshot 1
+            // Supported fleet indicators; reservation availability remains in the vehicle list.
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -217,25 +217,13 @@ fun DashboardScreen(
                         modifier = Modifier.weight(1f)
                     )
                 }
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(14.dp)
-                ) {
-                    FleetCountCard(
-                        title = "Réservés",
-                        count = metrics?.reservedVehicles ?: 0,
-                        icon = Icons.Default.CalendarMonth,
-                        iconColor = StatusGoldDot,
-                        modifier = Modifier.weight(1f)
-                    )
-                    FleetCountCard(
-                        title = "En maintenance",
-                        count = metrics?.maintenanceVehicles ?: 0,
-                        icon = Icons.Default.Build,
-                        iconColor = StatusRedDot,
-                        modifier = Modifier.weight(1f)
-                    )
-                }
+                FleetCountCard(
+                    title = "En maintenance",
+                    count = metrics?.maintenanceVehicles ?: 0,
+                    icon = Icons.Default.Build,
+                    iconColor = StatusRedDot,
+                    modifier = Modifier.fillMaxWidth()
+                )
             }
 
             Spacer(modifier = Modifier.height(28.dp))

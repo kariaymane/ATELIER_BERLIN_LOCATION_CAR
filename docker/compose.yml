@@ -1,0 +1,53 @@
+name: atelier-berlin
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-car_rental}
+      POSTGRES_USER: ${POSTGRES_USER:-rental_app}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in docker/.env}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    # No host port: only the application can reach the database network.
+    networks: [database]
+
+  backend:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.backend
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-rental_app}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-car_rental}
+      DATABASE_URL_SYNC: postgresql+psycopg2://${POSTGRES_USER:-rental_app}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-car_rental}
+      JWT_SECRET: ${JWT_SECRET:?Set a unique JWT_SECRET}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?Set a separate JWT_REFRESH_SECRET}
+      CORS_ORIGINS: ${CORS_ORIGINS:-}
+      DEBUG: "false"
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      ADMIN_FULLNAME: ${ADMIN_FULLNAME:-Administrator}
+    ports:
+      - "${API_BIND_ADDRESS:-127.0.0.1}:${API_PORT:-8000}:8000"
+    volumes:
+      - uploads:/app/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [database, application]
+
+volumes:
+  pgdata:
+  uploads:
+
+networks:
+  database:
+    internal: true
+  application:
