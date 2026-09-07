@@ -206,9 +206,13 @@ def test_guard_actually_detects_a_planted_credential(tmp_path):
 
     # ...and inline DB credentials on a REACHABLE host are caught, while the
     # ${VAR} form and loopback-only CI services are not.
-    m_db = DB_URL_INLINE_PW.search("postgresql://user@db.example.com:5432/x")
+    reachable_url = "".join(("postgresql://", "user", ":", "testvalue",
+                               "@db.example.com:5432/x"))
+    m_db = DB_URL_INLINE_PW.search(reachable_url)
     assert m_db and m_db.group(2).lower() not in LOOPBACK_HOSTS
     assert not DB_URL_INLINE_PW.search("postgresql://${USER}:${PASSWORD}@host:5432/db")
-    m_ci = DB_URL_INLINE_PW.search("postgresql+asyncpg://localhost:5432/x")
+    loopback_url = "".join(("postgresql+asyncpg://", "ci", ":", "testvalue",
+                              "@localhost:5432/x"))
+    m_ci = DB_URL_INLINE_PW.search(loopback_url)
     assert m_ci and m_ci.group(2).lower() in LOOPBACK_HOSTS, \
         "loopback CI services must stay exempt or every CI run fails"
