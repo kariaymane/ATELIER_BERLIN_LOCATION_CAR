@@ -51,7 +51,6 @@ fun StatusBadge(
         )
     }
 }
-
 @Composable
 fun VehicleStatusBadge(status: VehicleStatus, modifier: Modifier = Modifier) {
     when (status) {
@@ -126,4 +125,3 @@ fun ReservationStatusBadge(status: ReservationStatus, modifier: Modifier = Modif
         )
     }
 }
-

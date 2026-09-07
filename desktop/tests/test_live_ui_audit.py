@@ -37,7 +37,7 @@ def test_client_details_reloads_on_data_refreshed(qapp):
 
     dlg = ClientDetailsDialog({"id": "live-client-1"})
     assert dlg._name_lbl.text() == "TEST_LIVE_CLIENT"
-    
+
     # Check that pending_uploads was NOT stripped!
     assert "pending_uploads/front.jpg" in dlg._doc_thumbs["identity_card_image"].property("cache_key")
 
@@ -70,7 +70,7 @@ def test_vehicle_details_fetches_fresh_data_on_open(qapp):
     session.close()
 
     row = VehicleRow({"id": "live-veh-1", "brand": "STALE_BRAND", "model": "STALE_MODEL", "status": "AVAILABLE", "daily_rental_price": 10.0})
-    
+
     with patch("app.ui.vehicles.vehicle_list.VehicleDetailModal") as mock_modal:
         mock_modal_instance = MagicMock()
         mock_modal.return_value = mock_modal_instance
